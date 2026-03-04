@@ -34,8 +34,6 @@ if command -v realpath &>/dev/null; then
 fi
 REFERENCE_REPO="${LOCAL_REFERENCE_DIR}/${REPO_NAME}"
 
-clone_ref_args() { if [[ -d "$REFERENCE_REPO/.git" ]]; then echo --reference "$REFERENCE_REPO"; fi; }
-
 if [[ -d "$WORKSPACE_DIR/.git" ]]; then
   # Reuse existing clone: fetch and force to desired ref
   cd "$WORKSPACE_DIR"
@@ -44,7 +42,11 @@ if [[ -d "$WORKSPACE_DIR/.git" ]]; then
 else
   # Fresh clone (optionally with --reference)
   rm -rf "$WORKSPACE_DIR"
-  git clone $(clone_ref_args) "$REPO_URL" "$WORKSPACE_DIR"
+  if [[ -d "$REFERENCE_REPO/.git" ]]; then
+    git clone --reference "$REFERENCE_REPO" "$REPO_URL" "$WORKSPACE_DIR"
+  else
+    git clone "$REPO_URL" "$WORKSPACE_DIR"
+  fi
   cd "$WORKSPACE_DIR"
 fi
 
