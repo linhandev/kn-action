@@ -11,7 +11,7 @@ on:
 
 env:
   KOTLIN_REPO: git@gitcode.com:CPF-KMP-CMP/kotlin.git
-  KOTLIN_BRANCH: main-2.2.21-OH  # branch that has scripts/build-ohos.sh
+  KOTLIN_BRANCH: next/2.2.21-OH.0.1.0-01
   KOTLIN_DIR: kotlin
 
 jobs:
