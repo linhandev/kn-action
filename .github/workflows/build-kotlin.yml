@@ -1,19 +1,41 @@
 # Build Kotlin for OpenHarmony: clone CPF-KMP-CMP/kotlin from GitCode and run scripts/build-ohos.sh
 # Target: Mac ARM64 self-hosted runner. Build steps per: linhandev.github.io/_posts/KMP/2026-02-11-Building-Kotlin (mac arm)
 # Requires: runner env has GitCode SSH access configured (no secrets used).
+# Incremental cache: RUNNER_TEMP is removed on job end; use cache_root (or default $HOME/kn-action-ci) for persistent cache across jobs.
 
 name: Build Kotlin
 
 on:
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build'
+        required: false
+      pr_number:
+        description: 'PR number to merge into branch (use with branch)'
+        required: false
+      commit:
+        description: 'Commit SHA to build (if set, overrides branch/pr)'
+        required: false
+      artifact_destination:
+        description: 'Where to save artifact, github or ~/runner/artifact'
+        required: false
+        default: 'local'
+        type: choice
+        options:
+          - local
+          - github
   push:
-    branches: [develop, main]
-
+    paths:
+      - '.github/workflows/build-kotlin.yml'
+      - '.github/actions/prepare-repo/**'
+    
 env:
-  KOTLIN_REPO: git@gitcode.com:CPF-KMP-CMP/kotlin.git
-  KOTLIN_BRANCH: next/2.2.21-OH.0.1.0-01
-  KOTLIN_DIR: kotlin
-
+  REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
+  KOTLIN_BRANCH: next/2.2.21-OH.0.1.0-01  # default branch for push trigger only
+  WORKSPACE_DIR: ci-workspace
+  LOCAL_REFERENCE_DIR: ~/git/ci/
+  ARTIFACT_LOCAL_PATH: $HOME/runner/artifact
 jobs:
   build:
     runs-on: [self-hosted, macOS, ARM64, kotlin]
@@ -34,13 +56,79 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Clone Kotlin repo
+      - name: Set cache paths and inputs
+        id: vars
         run: |
-          git clone --depth 1 --branch "${{ env.KOTLIN_BRANCH }}" "${{ env.KOTLIN_REPO }}" "${{ env.KOTLIN_DIR }}"
-          cd "${{ env.KOTLIN_DIR }}" && git rev-parse HEAD
+          BRANCH="${{ github.event.inputs.branch || env.KOTLIN_BRANCH }}"
+          COMMIT="${{ github.event.inputs.commit }}"
+          PR_NUMBER="${{ github.event.inputs.pr_number }}"
+          INCREMENTAL="${{ github.event.inputs.incremental || 'true' }}"
+          ARTIFACT_DEST="${{ github.event.inputs.artifact_destination || 'local' }}"
+
+          if [ "$INCREMENTAL" = "true" ]; then
+            CI_CACHE_ROOT="$HOME/runner/cache/"
+          else
+            CI_CACHE_ROOT="$RUNNER_TEMP/cache/"
+          fi
+
+          mkdir -p "$CI_CACHE_ROOT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "cache_root=$CI_CACHE_ROOT" >> "$GITHUB_OUTPUT"
+          echo "artifact_destination=$ARTIFACT_DEST" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Kotlin repo
+        id: kotlin
+        uses: ./.github/actions/prepare-repo
+        with:
+          repo_url: ${{ env.REPO_URL }}
+          branch: ${{ steps.vars.outputs.branch }}
+          commit: ${{ steps.vars.outputs.commit }}
+          pr_number: ${{ steps.vars.outputs.pr_number }}
+          workspace_dir: ${{ env.WORKSPACE_DIR }}
+          local_reference_dir: ${{ env.LOCAL_REFERENCE_DIR }}
 
       - name: Build Kotlin
+        env:
+          GRADLE_USER_HOME: ${{ steps.vars.outputs.cache_root }}/gradle_user_home
+          KONAN_DATA_DIR: ${{ steps.vars.outputs.cache_root }}/konan_data
         run: |
-          cd "${{ env.KOTLIN_DIR }}"
+          cd "${{ env.WORKSPACE_DIR }}"
           export JDK_18="${{ steps.java8.outputs.path }}"
+          export GRADLE_USER_HOME="${{ steps.vars.outputs.cache_root }}/gradle_user_home"
+          export KONAN_DATA_DIR="${{ steps.vars.outputs.cache_root }}/konan_data"
+          mkdir -p "$GRADLE_USER_HOME" "$KONAN_DATA_DIR"
           bash scripts/build-ohos.sh
+
+      - name: Archive build output
+        id: archive
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          RUNNER_ARCH: ${{ runner.arch }}
+          ARTIFACT_LOCAL_PATH: ${{ env.ARTIFACT_LOCAL_PATH }}
+        run: |
+          ARTIFACT_LOCAL_PATH="${ARTIFACT_LOCAL_PATH//\$HOME/$HOME}"
+          WORKSPACE_DIR="${{ env.WORKSPACE_DIR }}"
+          KOTLIN_SHA="${{ steps.kotlin.outputs.sha }}"
+          GITHUB_SHA="${{ github.sha }}"
+          # Short SHAs for filename; append runner os and arch
+          KOTLIN_SHA_SHORT="${KOTLIN_SHA:0:7}"
+          GITHUB_SHA_SHORT="${GITHUB_SHA:0:7}"
+          ARCHIVE_NAME="kotlin-${KOTLIN_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
+
+          mkdir -p "$ARTIFACT_LOCAL_PATH"
+          OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
+
+          # Archive build/repo with max compression
+          tar -cf - -C "$WORKSPACE_DIR" build/repo | gzip -9 > "$OUT_PATH"
+          echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
+          echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact to GitHub
+        if: steps.vars.outputs.artifact_destination == 'github'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-ohos-build
+          path: ${{ steps.archive.outputs.path }}
+          retention-days: 14
