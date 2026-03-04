@@ -27,39 +27,39 @@ MR_REF_TEMPLATE="${MR_REF_TEMPLATE:-refs/merge-requests/%s/head}"
 REPO_NAME="${REPO_URL##*/}"
 REPO_NAME="${REPO_NAME%.git}"
 
-# optional --reference for clone/fetch when local repo exists to speed up clone/fetch
+# optional --reference for speeding up cloning when local repo exists
 [[ -n "$LOCAL_REFERENCE_DIR" ]] && LOCAL_REFERENCE_DIR="${LOCAL_REFERENCE_DIR/#\~/$HOME}"
 if command -v realpath &>/dev/null; then
   LOCAL_REFERENCE_DIR="$(realpath "$LOCAL_REFERENCE_DIR")"
 fi
 REFERENCE_REPO="${LOCAL_REFERENCE_DIR}/${REPO_NAME}"
-REF_ARGS=()
-[[ -d "$REFERENCE_REPO/.git" ]] && REF_ARGS=(--reference "$REFERENCE_REPO")
+
+clone_ref_args() { if [[ -d "$REFERENCE_REPO/.git" ]]; then echo --reference "$REFERENCE_REPO"; fi; }
 
 if [[ -d "$WORKSPACE_DIR/.git" ]]; then
   # Reuse existing clone: fetch and force to desired ref
   cd "$WORKSPACE_DIR"
   git remote set-url origin "$REPO_URL"
-  git fetch "${REF_ARGS[@]}" origin
+  git fetch origin
 else
-  # Fresh clone
+  # Fresh clone (optionally with --reference)
   rm -rf "$WORKSPACE_DIR"
-  git clone "${REF_ARGS[@]}" "$REPO_URL" "$WORKSPACE_DIR"
+  git clone $(clone_ref_args) "$REPO_URL" "$WORKSPACE_DIR"
   cd "$WORKSPACE_DIR"
 fi
 
 if [[ -n "$COMMIT" ]]; then
-  git fetch "${REF_ARGS[@]}" origin "$COMMIT"
+  git fetch origin "$COMMIT"
   git checkout "$COMMIT"
 elif [[ -n "$PR_NUMBER" && -n "$BRANCH" ]]; then
   MR_REF=$(printf "$MR_REF_TEMPLATE" "$PR_NUMBER")
-  git fetch "${REF_ARGS[@]}" origin "$BRANCH"
+  git fetch origin "$BRANCH"
   git checkout -B _ci_branch "origin/$BRANCH"
-  git fetch "${REF_ARGS[@]}" origin "+${MR_REF}:pr_${PR_NUMBER}"
+  git fetch origin "+${MR_REF}:pr_${PR_NUMBER}"
   git merge "pr_${PR_NUMBER}" --no-edit
 else
   [[ -z "$BRANCH" ]] && { echo "BRANCH required for branch build" >&2; exit 1; }
-  git fetch "${REF_ARGS[@]}" origin "$BRANCH"
+  git fetch origin "$BRANCH"
   git checkout -B _ci_branch "origin/$BRANCH"
 fi
 
