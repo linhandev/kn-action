@@ -1,0 +1,50 @@
+# Run prepare-repo test script on Linux, macOS, and Windows when prepare-repo folder changes.
+# For full tests (SSH + HTTPS), add repository secret GITCODE_SSH_PRIVATE_KEY (deploy key for linhandev/test-prepare-repo).
+
+name: Test prepare-repo
+
+on:
+  push:
+    paths:
+      - '.github/actions/prepare-repo/**'
+      - '.github/workflows/test-prepare-repo.yml'
+  pull_request:
+    paths:
+      - '.github/actions/prepare-repo/**'
+      - '.github/workflows/test-prepare-repo.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up SSH for GitCode
+        env:
+          GITCODE_SSH_PRIVATE_KEY: ${{ secrets.GITCODE_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >> ~/.ssh/known_hosts 2>/dev/null || true
+          if [[ -n "$GITCODE_SSH_PRIVATE_KEY" ]]; then
+            printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+            chmod 600 ~/.ssh/id_ed25519
+            eval "$(ssh-agent -s)"
+            ssh-add ~/.ssh/id_ed25519
+          fi
+        # For full tests (SSH + HTTPS), set repo secret GITCODE_SSH_PRIVATE_KEY to a deploy key for linhandev/test-prepare-repo
+
+      - name: Run prepare-repo tests
+        shell: bash
+        env:
+          WORKSPACE_DIR: ${{ runner.temp }}/test-script-workspace
+          LOCAL_REFERENCE_DIR: ${{ runner.temp }}/git/ci
+        run: bash .github/actions/prepare-repo/test.sh
