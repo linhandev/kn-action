@@ -11,6 +11,7 @@ on:
 
 env:
   KOTLIN_REPO: git@gitcode.com:CPF-KMP-CMP/kotlin.git
+  KOTLIN_BRANCH: main-2.2.21-OH  # branch that has scripts/build-ohos.sh
   KOTLIN_DIR: kotlin
 
 jobs:
@@ -26,7 +27,7 @@ jobs:
 
       - name: Clone Kotlin repo
         run: |
-          git clone --depth 1 "${{ env.KOTLIN_REPO }}" "${{ env.KOTLIN_DIR }}"
+          git clone --depth 1 --branch "${{ env.KOTLIN_BRANCH }}" "${{ env.KOTLIN_REPO }}" "${{ env.KOTLIN_DIR }}"
           cd "${{ env.KOTLIN_DIR }}" && git rev-parse HEAD
 
       - name: Build Kotlin (OpenHarmony)
