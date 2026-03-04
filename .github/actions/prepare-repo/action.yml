@@ -50,6 +50,6 @@ runs:
         LOCAL_REFERENCE_DIR: ${{ inputs.local_reference_dir }}
         MR_REF_TEMPLATE: ${{ inputs.mr_ref_template }}
       run: |
-        sha=$(bash "$GITHUB_ACTION_PATH/prepare-repo.sh")
-        echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        bash "$GITHUB_ACTION_PATH/prepare-repo.sh"
+        echo "sha=$(cd ${{ inputs.workspace_dir }} && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
         echo "workspace_dir=${{ inputs.workspace_dir }}" >> "$GITHUB_OUTPUT"
