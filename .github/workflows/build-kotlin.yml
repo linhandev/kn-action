@@ -28,8 +28,8 @@ on:
   push:
     paths:
       - '.github/workflows/build-kotlin.yml'
-      - '.github/actions/prepare-repo/**'
-    
+      - '.github/actions/prepare-repo/*'
+
 env:
   REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
   KOTLIN_BRANCH: next/2.2.21-OH.0.1.0-01  # default branch for push trigger only
