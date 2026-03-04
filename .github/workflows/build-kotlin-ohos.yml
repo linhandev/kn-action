@@ -1,0 +1,37 @@
+# Build Kotlin for OpenHarmony: clone CPF-KMP-CMP/kotlin from GitCode and run scripts/build-ohos.sh
+# Target: Mac ARM64 self-hosted runner. Build steps per: linhandev.github.io/_posts/KMP/2026-02-11-Building-Kotlin (mac arm)
+# Requires: runner env has GitCode SSH access configured (no secrets used).
+
+name: Build Kotlin (OpenHarmony)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop, main]
+
+env:
+  KOTLIN_REPO: git@gitcode.com:CPF-KMP-CMP/kotlin.git
+  KOTLIN_DIR: kotlin
+
+jobs:
+  build:
+    runs-on: [self-hosted, macOS, ARM64, kotlin]
+    steps:
+      - name: Checkout kn-action
+        uses: actions/checkout@v4
+
+      - name: Set up Java 8 and 21
+        run: |
+          brew install --cask temurin@21 zulu@8
+
+      - name: Clone Kotlin repo
+        run: |
+          git clone --depth 1 "${{ env.KOTLIN_REPO }}" "${{ env.KOTLIN_DIR }}"
+          cd "${{ env.KOTLIN_DIR }}" && git rev-parse HEAD
+
+      - name: Build Kotlin (OpenHarmony)
+        run: |
+          cd "${{ env.KOTLIN_DIR }}"
+          # JDK_18 (Java 8 home) required by build-ohos.sh; per Building-Kotlin doc
+          export JDK_18=$(/usr/libexec/java_home -v 1.8)
+          bash scripts/build-ohos.sh
