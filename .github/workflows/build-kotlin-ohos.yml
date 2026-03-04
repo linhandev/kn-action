@@ -19,7 +19,7 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, kotlin]
     steps:
       - name: Checkout kn-action
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Java 8
         id: java8
