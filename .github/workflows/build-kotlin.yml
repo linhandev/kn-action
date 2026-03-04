@@ -2,7 +2,7 @@
 # Target: Mac ARM64 self-hosted runner. Build steps per: linhandev.github.io/_posts/KMP/2026-02-11-Building-Kotlin (mac arm)
 # Requires: runner env has GitCode SSH access configured (no secrets used).
 
-name: Build Kotlin (OpenHarmony)
+name: Build Kotlin
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
           git clone --depth 1 --branch "${{ env.KOTLIN_BRANCH }}" "${{ env.KOTLIN_REPO }}" "${{ env.KOTLIN_DIR }}"
           cd "${{ env.KOTLIN_DIR }}" && git rev-parse HEAD
 
-      - name: Build Kotlin (OpenHarmony)
+      - name: Build Kotlin
         run: |
           cd "${{ env.KOTLIN_DIR }}"
           export JDK_18="${{ steps.java8.outputs.path }}"
