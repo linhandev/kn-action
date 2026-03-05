@@ -59,6 +59,8 @@ elif [[ -n "$PR_NUMBER" && -n "$BRANCH" ]]; then
   git fetch origin "$BRANCH"
   git checkout -B _ci_branch "origin/$BRANCH"
   git fetch origin "+${MR_REF}:pr_${PR_NUMBER}"
+  git config user.email "ci@localhost"
+  git config user.name "CI"
   git merge "pr_${PR_NUMBER}" --no-edit
 else
   [[ -z "$BRANCH" ]] && { echo "BRANCH required for branch build" >&2; exit 1; }
