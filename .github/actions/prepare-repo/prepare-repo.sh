@@ -29,7 +29,8 @@ REPO_NAME="${REPO_NAME%.git}"
 
 # optional --reference for speeding up cloning when local repo exists
 [[ -n "$LOCAL_REFERENCE_DIR" ]] && LOCAL_REFERENCE_DIR="${LOCAL_REFERENCE_DIR/#\~/$HOME}"
-if command -v realpath &>/dev/null; then
+# Only resolve realpath when the directory exists (e.g. CI may pass a path that is created later)
+if [[ -d "$LOCAL_REFERENCE_DIR" ]] && command -v realpath &>/dev/null; then
   LOCAL_REFERENCE_DIR="$(realpath "$LOCAL_REFERENCE_DIR")"
 fi
 REFERENCE_REPO="${LOCAL_REFERENCE_DIR}/${REPO_NAME}"
