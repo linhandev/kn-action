@@ -10,10 +10,6 @@ on:
     paths:
       - '.github/actions/prepare-repo/**'
       - '.github/workflows/test-prepare-repo.yml'
-  pull_request:
-    paths:
-      - '.github/actions/prepare-repo/**'
-      - '.github/workflows/test-prepare-repo.yml'
   workflow_dispatch:
 
 jobs:
