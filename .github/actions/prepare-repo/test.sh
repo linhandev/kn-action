@@ -4,7 +4,7 @@
 # Requires: git; SSH or HTTPS access to GitCode (linhandev/test-prepare-repo).
 # Phases: wo_reference (clean clone, no ref), with_reference (clean clone with ref), action_sequence (reuse workspace).
 
-set -euo pipefail
+set -xeuo pipefail
 
 REPO_URL_SSH="git@gitcode.com:linhandev/test-prepare-repo.git"
 REPO_URL_HTTPS="https://gitcode.com/linhandev/test-prepare-repo.git"
