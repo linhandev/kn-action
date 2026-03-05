@@ -34,9 +34,7 @@ Project-scoped guidance for the AI agent working in kn-action.
 
 - This repo is primarily GitHub Action workflows.
 - After changing workflow or related code: **commit**, **push**, then **wait for the workflow run to finish** and **check the result** (e.g. via GitHub Actions MCP: `actions_list` / `actions_get` / `get_job_logs`).
+- **How to wait for a run to finish:** Use the poll script so the agent doesn’t have to guess when the run is done.
+  - **If you have the run ID** (e.g. from `gh workflow run …` output URL, or from `gh run list --workflow=… --limit 1 -q '.[0].databaseId'` after a push, make sure you are polling for the workflow run triggered by ur edit): run `./scripts/poll-workflow-run.sh RUN_ID`. It polls every 10s, exits 0 on success or 1 on failure, and on failure prints the last 64 lines of each failed step’s log.
+  - Requires `gh` CLI to be authenticated.
 - Fix and iterate if the run fails.
-
-**Per-step time estimates:** For each workflow, document estimated duration for **first run** (cold cache) and **incremental run** (warm cache / same runner) so you can decide how long to sleep before polling for the result. Sleep maximum **20 minutes** when waiting, interpret in_progress as “still running.”
-
-#### build-kotlin.yml
-
