@@ -1,15 +1,10 @@
 # Cancel workflow runs except: currently running (in_progress) and the single most recent pending (queued) run.
-# Use from Actions tab → "Cancel pending runs" → Run workflow, optionally for another workflow.
+# When triggered, applies to all workflows in the repo.
 
 name: Cancel pending runs
 
 on:
   workflow_dispatch:
-    inputs:
-      workflow_file:
-        description: 'Workflow file to clean (e.g. build-kotlin.yml). Leave empty for this workflow.'
-        required: false
-        default: ''
 
 jobs:
   cancel:
@@ -18,61 +13,42 @@ jobs:
     permissions:
       actions: write
     steps:
-      - name: Cancel runs except current and last pending
+      - name: Cancel runs except current and last pending (all workflows)
         uses: actions/github-script@v7
         with:
           script: |
-            const workflowFileInput = '${{ github.event.inputs.workflow_file }}'.trim();
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-
-            let workflowId;
-            if (workflowFileInput) {
-              const { data: workflows } = await github.rest.actions.listRepoWorkflows({ owner, repo });
-              const workflow = workflows.workflows.find(w =>
-                w.path === `.github/workflows/${workflowFileInput}` || w.name === workflowFileInput || w.path.endsWith(workflowFileInput)
-              );
-              if (!workflow) {
-                core.setFailed(`Workflow not found: ${workflowFileInput}`);
-                return;
-              }
-              workflowId = workflow.id;
-            } else {
-              // Use current run's workflow so we clean this workflow's runs
-              const { data: currentRun } = await github.rest.actions.getWorkflowRun({
-                owner, repo, run_id: context.runId,
-              });
-              workflowId = currentRun.workflow_id;
-            }
-
-            // List recent runs (in_progress + queued) for this workflow
             const statuses = ['in_progress', 'queued', 'waiting'];
-            const { data: runsData } = await github.rest.actions.listWorkflowRuns({
-              owner,
-              repo,
-              workflow_id: workflowId,
-              per_page: 100,
-            });
-            const runs = (runsData.workflow_runs || []).filter(r => statuses.includes(r.status));
 
-            const toKeep = new Set();
-            toKeep.add(context.runId); // never cancel the current run
-            // Keep all in_progress
-            runs.filter(r => r.status === 'in_progress').forEach(r => toKeep.add(r.id));
-            // Keep the single most recent pending (highest run_number among queued/waiting)
-            const pending = runs.filter(r => r.status === 'queued' || r.status === 'waiting');
-            if (pending.length > 0) {
-              const lastPending = pending.sort((a, b) => (b.run_number || 0) - (a.run_number || 0))[0];
-              toKeep.add(lastPending.id);
-            }
+            const { data: workflowsData } = await github.rest.actions.listRepoWorkflows({ owner, repo, per_page: 100 });
+            const workflows = workflowsData.workflows || [];
+            let totalCancelled = 0;
 
-            const toCancel = runs.filter(r => !toKeep.has(r.id));
-            if (toCancel.length === 0) {
-              console.log('No runs to cancel.');
-              return;
+            for (const workflow of workflows) {
+              const { data: runsData } = await github.rest.actions.listWorkflowRuns({
+                owner,
+                repo,
+                workflow_id: workflow.id,
+                per_page: 100,
+              });
+              const runs = (runsData.workflow_runs || []).filter(r => statuses.includes(r.status));
+              if (runs.length === 0) continue;
+
+              const toKeep = new Set();
+              toKeep.add(context.runId);
+              runs.filter(r => r.status === 'in_progress').forEach(r => toKeep.add(r.id));
+              const pending = runs.filter(r => r.status === 'queued' || r.status === 'waiting');
+              if (pending.length > 0) {
+                const lastPending = pending.sort((a, b) => (b.run_number || 0) - (a.run_number || 0))[0];
+                toKeep.add(lastPending.id);
+              }
+
+              const toCancel = runs.filter(r => !toKeep.has(r.id));
+              for (const run of toCancel) {
+                await github.rest.actions.cancelWorkflowRun({ owner, repo, run_id: run.id });
+                console.log(`[${workflow.name}] Cancelled run #${run.run_number} (id: ${run.id})`);
+                totalCancelled++;
+              }
             }
-            for (const run of toCancel) {
-              await github.rest.actions.cancelWorkflowRun({ owner, repo, run_id: run.id });
-              console.log(`Cancelled run #${run.run_number} (id: ${run.id})`);
-            }
-            console.log(`Cancelled ${toCancel.length} run(s). Kept in_progress and last pending.`);
+            console.log(`Done. Cancelled ${totalCancelled} run(s) across all workflows.`);
