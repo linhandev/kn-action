@@ -2,6 +2,16 @@
 
 Project-scoped guidance for the AI agent working in kn-action.
 
+**Keep it simple.** Don’t overdesign. Keep everything clean and readable.
+
+## Commit messages
+
+**Use this format:** `type(scope): what's done`, keep description short and concise
+
+- **Type:** `feat`, `fix`, `chore`, etc.
+- **Scope:** workflow or action name (e.g. `build-kotlin`, `prepare-repo`).
+- **Example:** `fix(prepare-repo): use GITHUB_ACTION_PATH for script`
+
 ## GitHub Actions
 
 ### Prefer actions over bash
