@@ -6,6 +6,8 @@
 name: Build Kotlin
 
 on:
+  schedule:
+    - cron: "0 4 * * *'
   workflow_dispatch:
     inputs:
       branch:

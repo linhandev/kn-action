@@ -1,9 +1,11 @@
-# Run prepare-repo test script on Linux, macOS, and Windows when prepare-repo folder changes. Triggers on path changes below.
+# Run prepare-repo test script on Linux, macOS, and Windows when prepare-repo folder changes
 # For full tests (SSH + HTTPS), add GITCODE_SSH_PRIVATE_KEY to the "env" environment (Settings → Environments → env).
 
 name: Test prepare-repo
 
 on:
+  schedule:
+    - cron: '0 3 * * *'
   push:
     paths:
       - '.github/actions/prepare-repo/**'

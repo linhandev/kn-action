@@ -12,7 +12,6 @@
 #         For GitHub use MR_REF_TEMPLATE='refs/pull/%s/head'.
 
 set -euo pipefail
-set -x
 
 REPO_URL="${REPO_URL:?}"
 BRANCH="${BRANCH:-}"
