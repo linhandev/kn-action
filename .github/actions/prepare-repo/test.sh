@@ -9,9 +9,12 @@ set -xeuo pipefail
 REPO_URL_SSH="git@gitcode.com:linhandev/test-prepare-repo.git"
 REPO_URL_HTTPS="https://gitcode.com/linhandev/test-prepare-repo.git"
 REPO_URL=""   # set in loop
-WORKSPACE_DIR="/tmp/test-script-workspace"
+WORKSPACE_DIR="${WORKSPACE_DIR:-/tmp/test-script-workspace}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOCAL_REFERENCE_DIR="${HOME}/git/ci"
+LOCAL_REFERENCE_DIR="${LOCAL_REFERENCE_DIR:-$HOME/git/ci}"
+# Normalize paths for Windows (Git Bash): backslashes to forward slashes
+WORKSPACE_DIR="${WORKSPACE_DIR//\\//}"
+LOCAL_REFERENCE_DIR="${LOCAL_REFERENCE_DIR//\\//}"
 COMMIT_REF="41f89c0a66ecb5fb375f15076aba557ddcf2f702"
 README_FILE="README.md"
 

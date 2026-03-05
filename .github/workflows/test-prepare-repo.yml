@@ -42,7 +42,6 @@ jobs:
             eval "$(ssh-agent -s)"
             ssh-add ~/.ssh/id_ed25519
           fi
-        # For full tests (SSH + HTTPS), set repo secret GITCODE_SSH_PRIVATE_KEY to a deploy key for linhandev/test-prepare-repo
 
       - name: Run prepare-repo tests
         shell: bash
