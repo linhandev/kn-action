@@ -33,7 +33,8 @@ run_prepare_repo() {
   [[ -n "$commit" ]] && export COMMIT="$commit"
   [[ -n "$branch" ]] && export BRANCH="$branch"
   [[ -n "$pr_number" ]] && export PR_NUMBER="$pr_number"
-  bash "$SCRIPT_DIR/prepare-repo.sh" >/dev/null 2>&1
+  # Do not redirect so CI logs show git errors (e.g. exit 128)
+  bash "$SCRIPT_DIR/prepare-repo.sh"
 }
 
 assert_readme_lines() {
