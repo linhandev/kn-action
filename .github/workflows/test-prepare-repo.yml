@@ -28,6 +28,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up SSH for GitCode
+        shell: bash
         env:
           GITCODE_SSH_PRIVATE_KEY: ${{ secrets.GITCODE_SSH_PRIVATE_KEY }}
         run: |

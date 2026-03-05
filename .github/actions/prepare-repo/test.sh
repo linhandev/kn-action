@@ -163,6 +163,11 @@ action_sequence() {
 }
 
 for REPO_URL in "$REPO_URL_SSH" "$REPO_URL_HTTPS"; do
+  # Skip SSH tests when no key is configured (e.g. CI without GITCODE_SSH_PRIVATE_KEY)
+  if [[ "$REPO_URL" == git@* ]] && ! ssh-add -l &>/dev/null; then
+    echo "Skipping SSH (no key configured): $REPO_URL"
+    continue
+  fi
   echo "========== Remote: $REPO_URL =========="
   wo_reference
   with_reference
