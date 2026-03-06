@@ -52,6 +52,7 @@ env:
 jobs:
   build:
     runs-on: [self-hosted, macOS, ARM64, kotlin]
+    runs-on: [self-hosted, linux, X64, kotlin]
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
