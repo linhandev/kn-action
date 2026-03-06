@@ -64,10 +64,16 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
       
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode-26.2.app/Contents/Developer
+          echo "DEVELOPER_DIR=/Applications/Xcode-26.2.app/Contents/Developer" >> "$GITHUB_ENV"
+
       - name: Check env
         run: |
-          xcode-select -p > $GITHUB_OUTPUT
-          java -version > $GITHUB_OUTPUT
+          xcode-select -p
+          xcodebuild -version
+          java -version
 
       - name: Set cache paths and inputs
         id: vars
@@ -115,21 +121,10 @@ jobs:
           fi
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
-          # Gradle init script: covers pluginManagement and included build repos
+          # Gradle init script: covers pluginManagement, project repos, and included builds
           mkdir -p "$GRADLE_USER_HOME/init.d"
           cp "$GITHUB_WORKSPACE/.github/scripts/maven-proxy.init.gradle" "$GRADLE_USER_HOME/init.d/"
           echo "Gradle: init script installed to $GRADLE_USER_HOME/init.d/"
-
-          # Gradle property: covers allprojects repos via built-in mirror support
-          cd "${{ env.WORKSPACE_DIR }}"
-          if grep -q '^#maven.repository.mirror=' gradle.properties; then
-            sed -i '' "s|^#maven.repository.mirror=.*|maven.repository.mirror=$PROXY_URL|" gradle.properties
-          elif grep -q '^maven.repository.mirror=' gradle.properties; then
-            sed -i '' "s|^maven.repository.mirror=.*|maven.repository.mirror=$PROXY_URL|" gradle.properties
-          else
-            echo "maven.repository.mirror=$PROXY_URL" >> gradle.properties
-          fi
-          echo "Gradle: $(grep 'maven.repository.mirror' gradle.properties)"
 
           # Maven: backup existing settings.xml and write mirror config
           mkdir -p ~/.m2
