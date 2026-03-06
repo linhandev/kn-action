@@ -33,7 +33,7 @@ on:
         default: false
         type: boolean
       use_maven_proxy:
-        description: 'Use Maven proxy to speed up build'
+        description: 'Use local maven proxy to speed up build'
         required: true
         default: true
         type: boolean
