@@ -57,6 +57,11 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+      
+      - name: Check env
+        run: |
+          xcode-select -p > $GITHUB_OUTPUT
+          java -version > $GITHUB_OUTPUT
 
       - name: Set cache paths and inputs
         id: vars
