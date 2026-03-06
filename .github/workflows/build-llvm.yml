@@ -44,7 +44,7 @@ jobs:
         id: vars
         run: |
           CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
-          LLVM_WORKSPACE="$GITHUB_WORKSPACE/../cpf-llvm"
+          LLVM_WORKSPACE="$GITHUB_WORKSPACE/llvm"
 
           if [ "$CLEAN_BUILD" = "true" ]; then
             rm -rf "$LLVM_WORKSPACE"
@@ -59,6 +59,7 @@ jobs:
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
+          export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
 
@@ -85,14 +86,16 @@ jobs:
           repo --version
 
       - name: Init repo manifest
-        if: steps.vars.outputs.clean_build == 'true'
         run: |
-          cd "$LLVM_WORKSPACE"
-          REFERENCE_FLAG=""
-          if [ -d "${{ env.LOCAL_REFERENCE_DIR }}" ]; then
-            REFERENCE_FLAG="--reference=${{ env.LOCAL_REFERENCE_DIR }}"
+          # Init when .repo is missing (first run) or when doing a clean build
+          if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
+            cd "$LLVM_WORKSPACE"
+            REFERENCE_FLAG=""
+            if [ -d "${{ env.LOCAL_REFERENCE_DIR }}" ]; then
+              REFERENCE_FLAG="--reference=${{ env.LOCAL_REFERENCE_DIR }}"
+            fi
+            repo init -u "${{ env.MANIFEST_URL }}" -m "${{ env.MANIFEST_FILE }}" $REFERENCE_FLAG
           fi
-          repo init -u "${{ env.MANIFEST_URL }}" -m "${{ env.MANIFEST_FILE }}" $REFERENCE_FLAG
 
       - name: Sync source
         run: |
