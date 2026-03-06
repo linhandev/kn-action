@@ -37,3 +37,10 @@ GitHub Actions for KMP/Kotlin and related projects.
 **Reference clone:** The workflow uses the reusable composite action [`.github/actions/prepare-repo`](.github/actions/prepare-repo); see [its README](.github/actions/prepare-repo/README.md) for inputs, outputs, and behavior. Use the same action from other workflows: `uses: ./.github/actions/prepare-repo` or `uses: owner/repo/.github/actions/prepare-repo@ref`.
 
 **Requirement — GitCode SSH access:** The workflow clones `git@gitcode.com:CPF-KMP-CMP/kotlin.git`. The runner environment must already have SSH configured so that `git clone` to GitCode works without prompts (e.g. a self-hosted runner with an SSH key for GitCode in the agent’s `~/.ssh`, or an image/VM that has it preconfigured). The workflow does not inject or configure SSH keys; it assumes the environment is set up for GitCode access.
+
+
+maven proxy
+- maven-central: https://repo1.maven.org/maven2/
+- google: https://dl.google.com/dl/android/maven2/
+- jetbrains-intellij-deps: https://packages.jetbrains.team/maven/p/ij/intellij-dependencies
+- kotlin-dependencies: https://redirector.kotlinlang.org/maven/kotlin-dependencies

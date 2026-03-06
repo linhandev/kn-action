@@ -1,15 +1,13 @@
 [Unit]
 Description=LLVM build env
-After=docker.service
-Requires=docker.service
+# User scope: no dependency on system docker.service (ensure Docker is running before start)
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 Restart=on-failure
 RestartSec=10
-User=user
-ExecStart=/usr/local/bin/llvm-builder-run.sh /bin/bash /llvm/run.sh
+ExecStart=/home/user/git/kmp/kn-action/scripts/llvm-builder-linux/run.sh /bin/bash /llvm/run.sh
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

@@ -22,7 +22,7 @@ run_args=(
 [[ -n "${HOME:-}" && -d "$HOME/.ssh" ]] && run_args+=(-v "$HOME/.ssh:/llvm/.ssh:ro")
 
 INTERACTIVE=
-if [[ "${1:-}" == "-i" || "${1:-}" == "--interactive" ]]; then
+if [[ "${1:-}" == "-i" ]]; then
   INTERACTIVE=1
   shift
 fi
