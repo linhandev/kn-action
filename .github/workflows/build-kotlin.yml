@@ -27,6 +27,10 @@ on:
         options:
           - local
           - github
+      maven_proxy_url:
+        description: 'Maven proxy URL (empty to disable)'
+        required: false
+        default: 'http://localhost:8081/repository/kotlin-proxy-group/'
   push:
     paths:
       - '.github/workflows/build-kotlin.yml'
@@ -38,6 +42,7 @@ env:
   WORKSPACE_DIR: ci-workspace
   LOCAL_REFERENCE_DIR: ~/git/ci/
   ARTIFACT_LOCAL_PATH: $HOME/runner/artifact
+  MAVEN_PROXY_URL: http://localhost:8081/repository/kotlin-proxy-group/
 jobs:
   build:
     runs-on: [self-hosted, macOS, ARM64, kotlin]
@@ -96,6 +101,40 @@ jobs:
           workspace_dir: ${{ env.WORKSPACE_DIR }}
           local_reference_dir: ${{ env.LOCAL_REFERENCE_DIR }}
 
+      - name: Configure Maven proxy
+        id: maven_proxy
+        env:
+          PROXY_URL: ${{ github.event.inputs.maven_proxy_url || env.MAVEN_PROXY_URL }}
+        run: |
+          if [ -z "$PROXY_URL" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Maven proxy: disabled"
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+          # Gradle: sed maven.repository.mirror into gradle.properties
+          cd "${{ env.WORKSPACE_DIR }}"
+          if grep -q '^#maven.repository.mirror=' gradle.properties; then
+            sed -i '' "s|^#maven.repository.mirror=.*|maven.repository.mirror=$PROXY_URL|" gradle.properties
+          elif grep -q '^maven.repository.mirror=' gradle.properties; then
+            sed -i '' "s|^maven.repository.mirror=.*|maven.repository.mirror=$PROXY_URL|" gradle.properties
+          else
+            echo "maven.repository.mirror=$PROXY_URL" >> gradle.properties
+          fi
+          echo "Gradle: $(grep 'maven.repository.mirror' gradle.properties)"
+
+          # Maven: backup existing settings.xml and write mirror config
+          mkdir -p ~/.m2
+          [ -f ~/.m2/settings.xml ] && cp ~/.m2/settings.xml ~/.m2/settings.xml.proxy-bak
+          cat > ~/.m2/settings.xml <<EOF
+          <settings><mirrors><mirror>
+            <id>maven-proxy</id><mirrorOf>central</mirrorOf>
+            <url>$PROXY_URL</url>
+          </mirror></mirrors></settings>
+          EOF
+          echo "Maven: mirror set to $PROXY_URL"
+
       - name: Build Kotlin
         env:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.cache_root }}/gradle_user_home
@@ -107,6 +146,15 @@ jobs:
           export KONAN_DATA_DIR="${{ steps.vars.outputs.cache_root }}/konan_data"
           mkdir -p "$GRADLE_USER_HOME" "$KONAN_DATA_DIR"
           bash scripts/build-ohos.sh
+
+      - name: Restore Maven settings
+        if: always() && steps.maven_proxy.outputs.enabled == 'true'
+        run: |
+          if [ -f ~/.m2/settings.xml.proxy-bak ]; then
+            mv ~/.m2/settings.xml.proxy-bak ~/.m2/settings.xml
+          else
+            rm -f ~/.m2/settings.xml
+          fi
 
       - name: Archive build output
         id: archive
