@@ -23,7 +23,13 @@ env:
 
 jobs:
   build:
-    runs-on: [self-hosted, macOS, ARM64, llvm]
+    strategy:
+        fail-fast: false
+        matrix:
+          include:
+            - runner: [self-hosted, macOS, ARM64, llvm]
+            - runner: [self-hosted, linux, X64, llvm]
+      runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
