@@ -61,7 +61,7 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
-          apt-get install -y build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
+          apt-get install -y git build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
 
       - name: Setup git
         run: |
