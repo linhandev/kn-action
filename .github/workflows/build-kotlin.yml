@@ -32,10 +32,11 @@ on:
         required: false
         default: false
         type: boolean
-      maven_proxy_url:
-        description: 'Maven proxy URL (empty to disable)'
-        required: false
-        default: 'http://localhost:8081/repository/kotlin-proxy-group/'
+      use_maven_proxy:
+        description: 'Use Maven proxy to speed up build'
+        required: true
+        default: true
+        type: boolean
   push:
     paths:
       - '.github/workflows/build-kotlin.yml'
@@ -84,7 +85,7 @@ jobs:
           PR_NUMBER="${{ github.event.inputs.pr_number }}"
           CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
           ARTIFACT_DEST="${{ github.event.inputs.artifact_destination || 'local' }}"
-          PROXY_URL="${{ github.event.inputs.maven_proxy_url || env.DEFAULT_MAVEN_PROXY_URL }}"
+          PROXY_URL="${{ github.event.inputs.use_maven_proxy != 'false' && env.DEFAULT_MAVEN_PROXY_URL || '' }}"
 
           if [ "$CLEAN_BUILD" = "true" ]; then
             CI_CACHE_ROOT="$RUNNER_TEMP/clean-cache-$(date +%s)/"
