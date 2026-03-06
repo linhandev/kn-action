@@ -1,0 +1,28 @@
+// Adds a Maven proxy as the first repository for all resolution.
+// Activated only when MAVEN_PROXY_URL env var is set. No-op otherwise.
+
+def proxyUrl = System.getenv('MAVEN_PROXY_URL')
+if (!proxyUrl) return
+
+println("Maven proxy enabled: ${proxyUrl}")
+
+def proxyUri = uri(proxyUrl)
+def isInsecure = proxyUrl.startsWith('http://')
+
+beforeSettings { settings ->
+    settings.pluginManagement.repositories {
+        maven {
+            url = proxyUri
+            if (isInsecure) allowInsecureProtocol = true
+        }
+    }
+}
+
+allprojects {
+    repositories {
+        maven {
+            url = proxyUri
+            if (isInsecure) allowInsecureProtocol = true
+        }
+    }
+}
