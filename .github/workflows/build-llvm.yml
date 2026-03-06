@@ -32,7 +32,8 @@ jobs:
             container_image: ''
           # Linux: run inside OpenHarmony build env Docker image only
           - runner: [self-hosted, linux, X64, llvm]
-            container_image: swr.cn-north-4.myhuaweicloud.com/ci-service/openharmony-release-build-env-jnlp:1.0.3
+            # container_image: swr.cn-north-4.myhuaweicloud.com/ci-service/openharmony-release-build-env-jnlp:1.0.3
+            container_image: ubuntu:20.04
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container_image }}
     steps:
