@@ -144,9 +144,19 @@ jobs:
           echo "Maven: mirror set to $MAVEN_PROXY_URL"
 
       - name: Build Kotlin
+        shell: bash
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
-          bash scripts/build-ohos.sh
+          echo "## Build Steps" >> "$GITHUB_STEP_SUMMARY"
+          set -o pipefail
+          bash scripts/build-ohos.sh 2>&1 | while IFS= read -r line; do
+            echo "$line"
+            case "$line" in
+              ":::: Step"*|"✅ Step"*|"❌"*|"🎉"*)
+                echo "$line" >> "$GITHUB_STEP_SUMMARY"
+                ;;
+            esac
+          done
 
       - name: Restore Maven settings
         if: always() && steps.maven_proxy.outputs.enabled == 'true'
