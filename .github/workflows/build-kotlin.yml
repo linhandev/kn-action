@@ -48,11 +48,17 @@ env:
   WORKSPACE_DIR: ci-workspace
   LOCAL_REFERENCE_DIR: ~/git/ci/
   DEFAULT_MAVEN_PROXY_URL: http://localhost:8081/repository/kotlin-proxy-group/
+  DEVELOPER_DIR: /Applications/Xcode-26.2.app/Contents/Developer
 
 jobs:
   build:
-    runs-on: [self-hosted, macOS, ARM64, kotlin]
-    runs-on: [self-hosted, linux, X64, kotlin]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: [self-hosted, macOS, ARM64, kotlin]
+          - runner: [self-hosted, linux, X64, kotlin]
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
@@ -91,8 +97,11 @@ jobs:
           ARTIFACT_LOCAL_PATH="$HOME/runner/artifact"
           mkdir -p "$GRADLE_USER_HOME" "$KONAN_DATA_DIR" "$ARTIFACT_LOCAL_PATH"
 
-          DEVELOPER_DIR=/Applications/Xcode-26.2.app/Contents/Developer
           JDK_18="${{ steps.java8.outputs.path }}"
+
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            echo "DEVELOPER_DIR=${{ env.DEVELOPER_DIR }}" >> "$GITHUB_ENV"
+          fi
 
           echo "java version: $(java -version 2>&1 | head -1)" >> "$GITHUB_STEP_SUMMARY"
 
@@ -185,6 +194,6 @@ jobs:
         if: steps.vars.outputs.artifact_destination == 'github'
         uses: actions/upload-artifact@v4
         with:
-          name: kotlin-ohos-build
+          name: kotlin-ohos-build-${{ runner.os }}-${{ runner.arch }}
           path: ${{ steps.archive.outputs.path }}
           retention-days: 14
