@@ -68,9 +68,11 @@ if [[ -n "$details" ]]; then
   echo ""
 fi
 
+POLL_TZ="Asia/Shanghai"
 last_status=""
 last_conclusion=""
-echo "Polling run $RUN_ID every ${POLL_INTERVAL}s..."
+last_step=""
+echo "Polling run $RUN_ID every ${POLL_INTERVAL}s (time UTC+8)..."
 while true; do
   status=$(gh run view "$RUN_ID" "${REPO_ARG[@]}" --json status,conclusion -q '.status' 2>/dev/null) || true
   if [[ -z "$status" ]]; then
@@ -79,25 +81,36 @@ while true; do
   fi
   conclusion=$(gh run view "$RUN_ID" "${REPO_ARG[@]}" --json status,conclusion -q '.conclusion // "unknown"' 2>/dev/null) || true
   conclusion=${conclusion:-unknown}
+  current_step=$(gh run view "$RUN_ID" "${REPO_ARG[@]}" --json jobs -q '[.jobs[].steps[]? | select(.status == "in_progress") | .name][0] // empty' 2>/dev/null) || true
 
-  if [[ "$status" != "$last_status" || "$conclusion" != "$last_conclusion" ]]; then
-    echo "$(date -u +%H:%M:%S)  status=$status  conclusion=$conclusion"
+  if [[ "$status" != "$last_status" || "$conclusion" != "$last_conclusion" || "$current_step" != "$last_step" ]]; then
+    line="$(TZ="$POLL_TZ" date +%H:%M:%S)  status=$status  conclusion=$conclusion"
+    [[ -n "$current_step" ]] && line="$line  step=$current_step"
+    echo "$line"
     last_status="$status"
     last_conclusion="$conclusion"
+    last_step="$current_step"
   fi
 
   if [[ "$status" == "completed" ]]; then
     case "$conclusion" in
       success) exit 0 ;;
       failure|cancelled|skipped|timed_out)
+        run_url=$(gh run view "$RUN_ID" "${REPO_ARG[@]}" --json url -q '.url' 2>/dev/null) || true
         # Output last N lines of log for failed step(s) only (no Post/Complete job steps)
         while read -r job_id; do
           [[ -z "$job_id" ]] && continue
           job_name=$(gh run view "$RUN_ID" "${REPO_ARG[@]}" --json jobs -q ".jobs[] | select(.databaseId == $job_id) | .name" 2>/dev/null) || true
+          step_names=$(gh run view "$RUN_ID" "${REPO_ARG[@]}" --json jobs -q ".jobs[] | select(.databaseId == $job_id) | [.steps[] | select(.conclusion == \"failure\") | .name] | join(\", \")" 2>/dev/null) || true
           echo "" >&2
-          echo "--- Last ${FAILED_JOB_LOG_LINES} lines of failed step log for job: $job_name (id: $job_id) ---" >&2
           gh run view "$RUN_ID" "${REPO_ARG[@]}" --job "$job_id" --log-failed 2>/dev/null | tail -n "$FAILED_JOB_LOG_LINES" >&2 || true
           echo "---" >&2
+          header="--- Last ${FAILED_JOB_LOG_LINES} lines of failed step log (run_id: $RUN_ID, job: $job_name, job_id: $job_id"
+          [[ -n "$step_names" ]] && header="$header, step: $step_names"
+          echo "$header) ---" >&2
+          if [[ -n "$run_url" ]]; then
+            echo "Run detail: ${run_url}/job/${job_id}" >&2
+          fi
         done < <(gh run view "$RUN_ID" "${REPO_ARG[@]}" --json jobs -q '.jobs[] | select(.conclusion == "failure") | .databaseId' 2>/dev/null)
         exit 1
         ;;
