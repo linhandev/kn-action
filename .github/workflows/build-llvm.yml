@@ -1,5 +1,5 @@
 # Build LLVM toolchain for OpenHarmony using repo-managed multi-repo checkout.
-# Target: Mac ARM64 self-hosted runner. Brew deps (swig, git-lfs, coreutils, wget) pre-installed.
+# macOS: runs on host. Linux: runs inside OpenHarmony build env Docker image.
 # Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
 
 name: Build LLVM
@@ -26,10 +26,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner:
-          - [self-hosted, macOS, ARM64, llvm]
-          - [self-hosted, linux, X64, llvm]
+        include:
+          # macOS: run on host (no container)
+          - runner: [self-hosted, macOS, ARM64, llvm]
+            container_image: ''
+          # Linux: run inside OpenHarmony build env Docker image only
+          - runner: [self-hosted, linux, X64, llvm]
+            container_image: swr.cn-north-4.myhuaweicloud.com/ci-service/openharmony-release-build-env-jnlp:1.0.3
     runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container_image }}
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
@@ -49,6 +54,12 @@ jobs:
           LLVM_WORKSPACE=$LLVM_WORKSPACE
           clean_build=$CLEAN_BUILD
           EOF
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          apt-get update
+          apt-get install -y build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
 
       - name: Setup git
         run: |
@@ -99,7 +110,11 @@ jobs:
           cd "$LLVM_WORKSPACE"
           BUILD_SCRIPT="toolchain/llvm-project/llvm-build/build.sh"
           if [ "${{ steps.vars.outputs.clean_build }}" != "true" ]; then
-            sed -i '' 's|rm -rf ${WORK_DIR}/out|# rm -rf ${WORK_DIR}/out  # skipped for incremental build|' "$BUILD_SCRIPT"
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              sed -i 's|rm -rf ${WORK_DIR}/out|# rm -rf ${WORK_DIR}/out  # skipped for incremental build|' "$BUILD_SCRIPT"
+            else
+              sed -i '' 's|rm -rf ${WORK_DIR}/out|# rm -rf ${WORK_DIR}/out  # skipped for incremental build|' "$BUILD_SCRIPT"
+            fi
           fi
           bash "$BUILD_SCRIPT"
 
