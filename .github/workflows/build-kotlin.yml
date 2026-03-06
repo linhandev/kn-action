@@ -1,7 +1,7 @@
 # Build Kotlin for OpenHarmony: clone CPF-KMP-CMP/kotlin from GitCode and run scripts/build-ohos.sh
 # Target: Mac ARM64 self-hosted runner. Build steps per: linhandev.github.io/_posts/KMP/2026-02-11-Building-Kotlin (mac arm)
 # Requires: runner env has GitCode SSH access configured (no secrets used).
-# Incremental cache: RUNNER_TEMP is removed on job end; use cache_root (or default $HOME/kn-action-ci) for persistent cache across jobs.
+# Incremental by default: caches in $HOME/runner/cache/. Clean build uses a fresh RUNNER_TEMP dir for Gradle/Konan.
 
 name: Build Kotlin
 
@@ -27,6 +27,11 @@ on:
         options:
           - local
           - github
+      clean_build:
+        description: 'Discard Gradle/Konan caches and rebuild from scratch'
+        required: false
+        default: false
+        type: boolean
       maven_proxy_url:
         description: 'Maven proxy URL (empty to disable)'
         required: false
@@ -70,16 +75,15 @@ jobs:
           BRANCH="${{ github.event.inputs.branch || env.KOTLIN_BRANCH }}"
           COMMIT="${{ github.event.inputs.commit }}"
           PR_NUMBER="${{ github.event.inputs.pr_number }}"
-          INCREMENTAL="${{ github.event.inputs.incremental || 'true' }}"
+          CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
           ARTIFACT_DEST="${{ github.event.inputs.artifact_destination || 'local' }}"
           PROXY_URL="${{ github.event.inputs.maven_proxy_url || env.DEFAULT_MAVEN_PROXY_URL }}"
 
-          if [ "$INCREMENTAL" = "true" ]; then
-            CI_CACHE_ROOT="$HOME/runner/cache/"
+          if [ "$CLEAN_BUILD" = "true" ]; then
+            CI_CACHE_ROOT="$RUNNER_TEMP/clean-cache-$(date +%s)/"
           else
-            CI_CACHE_ROOT="$RUNNER_TEMP/cache/"
+            CI_CACHE_ROOT="$HOME/runner/cache/"
           fi
-          mkdir -p "$CI_CACHE_ROOT"
 
           GRADLE_USER_HOME="${CI_CACHE_ROOT}gradle_user_home"
           KONAN_DATA_DIR="${CI_CACHE_ROOT}konan_data"
