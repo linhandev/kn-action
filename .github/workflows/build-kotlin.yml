@@ -86,37 +86,23 @@ jobs:
           ARTIFACT_LOCAL_PATH="$HOME/runner/artifact"
           mkdir -p "$GRADLE_USER_HOME" "$KONAN_DATA_DIR" "$ARTIFACT_LOCAL_PATH"
 
-          {
-            echo "DEVELOPER_DIR=/Applications/Xcode-26.2.app/Contents/Developer"
-            echo "JDK_18=${{ steps.java8.outputs.path }}"
-            echo "GRADLE_USER_HOME=$GRADLE_USER_HOME"
-            echo "KONAN_DATA_DIR=$KONAN_DATA_DIR"
-            echo "MAVEN_PROXY_URL=$PROXY_URL"
-            echo "ARTIFACT_LOCAL_PATH=$ARTIFACT_LOCAL_PATH"
-          } >> "$GITHUB_ENV"
+          DEVELOPER_DIR=/Applications/Xcode-26.2.app/Contents/Developer
+          JDK_18="${{ steps.java8.outputs.path }}"
 
-          {
-            echo "branch=$BRANCH"
-            echo "commit=$COMMIT"
-            echo "pr_number=$PR_NUMBER"
-            echo "artifact_destination=$ARTIFACT_DEST"
-          } >> "$GITHUB_OUTPUT"
+          echo "java version: $(java -version 2>&1 | head -1)" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Environment summary
-        run: |
-          {
-            echo "## Build Environment"
-            echo "| Variable | Value |"
-            echo "|----------|-------|"
-            echo "| Xcode | \`$(xcodebuild -version 2>&1 | head -1)\` |"
-            echo "| Java 21 | \`$(java -version 2>&1 | head -1)\` |"
-            echo "| JDK_18 | \`$JDK_18\` |"
-            echo "| DEVELOPER_DIR | \`$DEVELOPER_DIR\` |"
-            echo "| GRADLE_USER_HOME | \`$GRADLE_USER_HOME\` |"
-            echo "| KONAN_DATA_DIR | \`$KONAN_DATA_DIR\` |"
-            echo "| MAVEN_PROXY_URL | \`${MAVEN_PROXY_URL:-disabled}\` |"
-            echo "| ARTIFACT_LOCAL_PATH | \`$ARTIFACT_LOCAL_PATH\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          tee -a "$GITHUB_ENV" >> "$GITHUB_OUTPUT" <<EOF
+          JDK_18=$JDK_18
+          DEVELOPER_DIR=$DEVELOPER_DIR
+          GRADLE_USER_HOME=$GRADLE_USER_HOME
+          KONAN_DATA_DIR=$KONAN_DATA_DIR
+          MAVEN_PROXY_URL=$PROXY_URL
+          ARTIFACT_LOCAL_PATH=$ARTIFACT_LOCAL_PATH
+          branch=$BRANCH
+          commit=$COMMIT
+          pr_number=$PR_NUMBER
+          artifact_destination=$ARTIFACT_DEST
+          EOF
 
       - name: Prepare Kotlin repo
         id: kotlin
