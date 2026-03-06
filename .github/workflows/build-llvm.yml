@@ -1,0 +1,109 @@
+# Build LLVM toolchain for OpenHarmony using repo-managed multi-repo checkout.
+# Target: Mac ARM64 self-hosted runner. Brew deps (swig, git-lfs, coreutils, wget) pre-installed.
+# Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
+
+name: Build LLVM
+
+on:
+  workflow_dispatch:
+    inputs:
+      clean_build:
+        description: 'Wipe workspace and build from scratch'
+        required: false
+        default: false
+        type: boolean
+  push:
+    paths:
+      - '.github/workflows/build-llvm.yml'
+
+env:
+  MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
+  MANIFEST_FILE: llvm-toolchain.xml
+  LOCAL_REFERENCE_DIR: ~/git/ci/llvm-project-kmp
+
+jobs:
+  build:
+    runs-on: [self-hosted, macOS, ARM64, llvm]
+    steps:
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+
+      - name: Setup environment
+        id: vars
+        run: |
+          CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
+          LLVM_WORKSPACE="$GITHUB_WORKSPACE/../cpf-llvm"
+
+          if [ "$CLEAN_BUILD" = "true" ]; then
+            rm -rf "$LLVM_WORKSPACE"
+          fi
+          mkdir -p "$LLVM_WORKSPACE"
+
+          tee -a "$GITHUB_ENV" >> "$GITHUB_OUTPUT" <<EOF
+          LLVM_WORKSPACE=$LLVM_WORKSPACE
+          clean_build=$CLEAN_BUILD
+          EOF
+
+      - name: Setup git
+        run: |
+          git config --global --add safe.directory "$LLVM_WORKSPACE/build"
+          git config --global --add safe.directory "$LLVM_WORKSPACE/third_party/musl"
+          git config --global user.email "ci@ci.ci"
+          git config --global user.name "ci"
+
+      - name: Setup repo tool
+        run: |
+          REPO_BIN="$GITHUB_WORKSPACE/bin/repo"
+          if ! command -v repo &>/dev/null && [ ! -x "$REPO_BIN" ]; then
+            mkdir -p "$(dirname "$REPO_BIN")"
+            curl -s https://gitee.com/oschina/repo/raw/fork_flow/repo-py3 -o "$REPO_BIN"
+            chmod a+x "$REPO_BIN"
+            pip3 install requests 2>/dev/null || true
+          fi
+          if ! command -v repo &>/dev/null; then
+            echo "$(dirname "$REPO_BIN")" >> "$GITHUB_PATH"
+            export PATH="$(dirname "$REPO_BIN"):$PATH"
+          fi
+          repo --version
+
+      - name: Init repo manifest
+        if: steps.vars.outputs.clean_build == 'true'
+        run: |
+          cd "$LLVM_WORKSPACE"
+          REFERENCE_FLAG=""
+          if [ -d "${{ env.LOCAL_REFERENCE_DIR }}" ]; then
+            REFERENCE_FLAG="--reference=${{ env.LOCAL_REFERENCE_DIR }}"
+          fi
+          repo init -u "${{ env.MANIFEST_URL }}" -m "${{ env.MANIFEST_FILE }}" $REFERENCE_FLAG
+
+      - name: Sync source
+        run: |
+          cd "$LLVM_WORKSPACE"
+          repo sync -c
+          repo forall -c 'git lfs pull'
+
+      - name: Prepare build environment
+        if: steps.vars.outputs.clean_build == 'true'
+        run: |
+          cd "$LLVM_WORKSPACE"
+          bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
+
+      - name: Build LLVM
+        run: |
+          cd "$LLVM_WORKSPACE"
+          BUILD_SCRIPT="toolchain/llvm-project/llvm-build/build.sh"
+          if [ "${{ steps.vars.outputs.clean_build }}" != "true" ]; then
+            sed -i '' 's|rm -rf ${WORK_DIR}/out|# rm -rf ${WORK_DIR}/out  # skipped for incremental build|' "$BUILD_SCRIPT"
+          fi
+          bash "$BUILD_SCRIPT"
+
+      # TODO: determine build output path and archive format
+      # - name: Archive build output
+      #   id: archive
+      #   run: |
+      #     GITHUB_SHA_SHORT="${GITHUB_SHA:0:7}"
+      #     ARCHIVE_NAME="llvm-toolchain_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
+      #     OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
+      #     tar -cf - -C "$LLVM_WORKSPACE" out | gzip -9 > "$OUT_PATH"
+      #     echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
+      #     echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
