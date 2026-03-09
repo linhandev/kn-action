@@ -38,6 +38,24 @@ GitHub Actions for KMP/Kotlin and related projects.
 
 **Requirement — GitCode SSH access:** The workflow clones `git@gitcode.com:CPF-KMP-CMP/kotlin.git`. The runner environment must already have SSH configured so that `git clone` to GitCode works without prompts (e.g. a self-hosted runner with an SSH key for GitCode in the agent’s `~/.ssh`, or an image/VM that has it preconfigured). The workflow does not inject or configure SSH keys; it assumes the environment is set up for GitCode access.
 
+## Scripts
+
+### Poll workflow run
+
+**Script:** `scripts/poll-workflow-run.py`
+
+Polls a workflow run until it finishes. Exit 0 on success, 1 on failure. On failure, prints the last 64 lines of the first failed job log.
+
+- **Default:** wait until all jobs finish, then exit 0 or 1.
+- **`--fail-fast`:** exit as soon as any job fails (print that job's log); do not wait for other jobs.
+
+**Usage:** `python3 scripts/poll-workflow-run.py RUN_ID [--repo OWNER/REPO] [--fail-fast]`
+
+**Requires:** `gh` CLI (authenticated), Python 3.9+.
+
+**Test:** `python3 scripts/test-poll-workflow-run.py [RUN_ID]` — with RUN_ID polls that run; without, triggers test-prepare-repo and polls.
+
+---
 
 maven proxy
 - maven-central: https://repo1.maven.org/maven2/
