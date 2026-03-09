@@ -126,20 +126,9 @@ jobs:
           repo sync -c
           repo forall -c 'git lfs pull'
 
-      - name: Prepare build environment
-        run: |
+          # download deps
           cd "$LLVM_WORKSPACE"
-          # Run when clean build, or when prebuilts are missing (e.g. first run or new runner)
-          if [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
-            bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
-          else
-            CMAKE_BIN="$LLVM_WORKSPACE/prebuilts/cmake/linux-x86/bin/cmake"
-            [ "$RUNNER_OS" = "Darwin" ] && CMAKE_BIN="$LLVM_WORKSPACE/prebuilts/cmake/darwin-universal/bin/cmake"
-            if [ ! -x "$CMAKE_BIN" ]; then
-              echo "Prebuilts missing, running env_prepare.sh"
-              bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
-            fi
-          fi
+          bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
 
       - name: Build LLVM
         run: |
