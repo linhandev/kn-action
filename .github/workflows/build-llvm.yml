@@ -72,6 +72,12 @@ jobs:
           git config --global user.email "ci@ci.ci"
           git config --global user.name "ci"
 
+      - name: Setup git credentials for GitCode
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
+
       - name: Setup repo tool
         run: |
           REPO_BIN="$GITHUB_WORKSPACE/bin/repo"
