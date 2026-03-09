@@ -32,10 +32,10 @@ jobs:
           # macOS: run on host (no container)
           - runner: [self-hosted, macOS, ARM64, llvm]
             container_image: ''
-          # Linux: run inside container (use China mirror when docker.io is unreachable)
+          # Linux: DaoCloud mirror (https://github.com/DaoCloud/public-image-mirror)
           - runner: [self-hosted, linux, X64, llvm]
             # container_image: swr.cn-north-4.myhuaweicloud.com/ci-service/openharmony-release-build-env-jnlp:1.0.3
-            container_image: registry.cn-hangzhou.aliyuncs.com/library/ubuntu:20.04
+            container_image: m.daocloud.io/docker.io/library/ubuntu:20.04
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container_image }}
     steps:
