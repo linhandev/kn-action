@@ -5,6 +5,7 @@ def proxyUrl = System.getenv('MAVEN_PROXY_URL')
 if (!proxyUrl) return
 
 println("Maven proxy enabled: ${proxyUrl}")
+gradle.startParameter.setRefreshDependencies(true)
 
 def proxyUri = uri(proxyUrl)
 def isInsecure = proxyUrl.startsWith('http://')
