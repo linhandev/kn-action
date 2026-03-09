@@ -48,7 +48,7 @@ env:
   KOTLIN_BRANCH: next/2.2.21-OH.0.1.0-01  # default branch for push trigger only
   WORKSPACE_DIR: ci-workspace
   LOCAL_REFERENCE_DIR: ~/git/ci/
-  DEFAULT_MAVEN_PROXY_URL: http://localhost:8080/releases
+  DEFAULT_MAVEN_PROXY_URL: http://192.168.3.4:8080/releases
   DEVELOPER_DIR: /Applications/Xcode-26.2.app/Contents/Developer
 
 jobs:
