@@ -82,10 +82,12 @@ jobs:
             echo "::error::GITCODE_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (GitCode token with read access)."
             exit 1
           fi
+          # Disable credential helper so we rely only on URL-embedded token (avoids cached bad credentials)
+          git config --global credential.helper ''
           # HTTPS: so repo sync uses token for https://gitcode.com/...
           git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
-          # SSH→HTTPS: so manifest projects using git@gitcode.com:... also use the token (Linux + Mac)
-          git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
+          # SSH→HTTPS: use --add so both rules are kept (second would overwrite first otherwise)
+          git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
       - name: Setup repo tool
         run: |
@@ -115,6 +117,8 @@ jobs:
           fi
 
       - name: Sync source
+        env:
+          GIT_TERMINAL_PROMPT: 0
         run: |
           cd "$LLVM_WORKSPACE"
           repo sync -c
