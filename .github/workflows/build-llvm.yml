@@ -107,9 +107,6 @@ jobs:
           repo --version
 
       - name: Init repo manifest
-        env:
-          # Use gitee mirror for repo tool (gerrit often unreachable from China)
-          REPO_URL: https://gitee.com/oschina/repo.git
         run: |
           # Init when .repo is missing (first run) or when doing a clean build
           if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
@@ -129,9 +126,7 @@ jobs:
           repo sync -c
           repo forall -c 'git lfs pull'
 
-      - name: Prepare build environment
-        if: steps.vars.outputs.clean_build == 'true'
-        run: |
+          # download deps
           cd "$LLVM_WORKSPACE"
           bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
 
