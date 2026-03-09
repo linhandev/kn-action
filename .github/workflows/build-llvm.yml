@@ -1,7 +1,7 @@
 # Build LLVM toolchain for OpenHarmony using repo-managed multi-repo checkout.
 # macOS: runs on host. Linux: runs inside OpenHarmony build env Docker image.
 # Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
-# Requires: repo secret GITCODE_TOKEN (GitCode PAT with read access) for repo sync from gitcode.com.
+# Requires: environment "env" with secret GITCODE_TOKEN (GitCode PAT with read access) for repo sync from gitcode.com.
 
 name: Build LLVM
 
@@ -24,6 +24,7 @@ env:
 
 jobs:
   build:
+    environment: env
     strategy:
       fail-fast: false
       matrix:
