@@ -95,8 +95,9 @@ jobs:
 
           GRADLE_USER_HOME="${CI_CACHE_ROOT}gradle_user_home"
           KONAN_DATA_DIR="${CI_CACHE_ROOT}konan_data"
+          MAVEN_LOCAL_REPO="${CI_CACHE_ROOT}m2_repository"
           ARTIFACT_LOCAL_PATH="$HOME/runner/artifact"
-          mkdir -p "$GRADLE_USER_HOME" "$KONAN_DATA_DIR" "$ARTIFACT_LOCAL_PATH"
+          mkdir -p "$GRADLE_USER_HOME" "$KONAN_DATA_DIR" "$MAVEN_LOCAL_REPO" "$ARTIFACT_LOCAL_PATH"
 
           JDK_18="${{ steps.java8.outputs.path }}"
 
@@ -111,13 +112,25 @@ jobs:
           DEVELOPER_DIR=$DEVELOPER_DIR
           GRADLE_USER_HOME=$GRADLE_USER_HOME
           KONAN_DATA_DIR=$KONAN_DATA_DIR
+          MAVEN_LOCAL_REPO=$MAVEN_LOCAL_REPO
           MAVEN_PROXY_URL=$PROXY_URL
           ARTIFACT_LOCAL_PATH=$ARTIFACT_LOCAL_PATH
           branch=$BRANCH
           commit=$COMMIT
           pr_number=$PR_NUMBER
           artifact_destination=$ARTIFACT_DEST
+          clean_build=$CLEAN_BUILD
           EOF
+
+      - name: Clean KONAN and Maven caches (clean build)
+        if: steps.vars.outputs.clean_build == 'true'
+        run: |
+          echo "Removing contents of KONAN_DATA_DIR and Maven local repo..."
+          rm -rf "$KONAN_DATA_DIR"
+          mkdir -p "$KONAN_DATA_DIR"
+          rm -rf "$MAVEN_LOCAL_REPO"
+          mkdir -p "$MAVEN_LOCAL_REPO"
+          echo "Done. KONAN_DATA_DIR and MAVEN_LOCAL_REPO are clean."
 
       - name: Prepare Kotlin repo
         id: kotlin
@@ -147,12 +160,15 @@ jobs:
           mkdir -p ~/.m2
           [ -f ~/.m2/settings.xml ] && cp ~/.m2/settings.xml ~/.m2/settings.xml.proxy-bak
           cat > ~/.m2/settings.xml <<EOF
-          <settings><mirrors><mirror>
-            <id>maven-proxy</id><mirrorOf>central</mirrorOf>
-            <url>$MAVEN_PROXY_URL</url>
-          </mirror></mirrors></settings>
+          <settings>
+            <localRepository>$MAVEN_LOCAL_REPO</localRepository>
+            <mirrors><mirror>
+              <id>maven-proxy</id><mirrorOf>central</mirrorOf>
+              <url>$MAVEN_PROXY_URL</url>
+            </mirror></mirrors>
+          </settings>
           EOF
-          echo "Maven: mirror set to $MAVEN_PROXY_URL"
+          echo "Maven: localRepository=$MAVEN_LOCAL_REPO, mirror=$MAVEN_PROXY_URL"
 
       - name: Build Kotlin
         shell: bash
