@@ -63,6 +63,8 @@ jobs:
           apt-get update
           apt-get install -y git build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
           apt install -y curl
+          # repo-py3 and other tools expect 'python'; Ubuntu 20.04 has only python3
+          ln -sf "$(command -v python3)" /usr/bin/python
 
       - name: Setup git
         run: |
