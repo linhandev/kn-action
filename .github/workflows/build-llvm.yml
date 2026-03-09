@@ -1,6 +1,7 @@
 # Build LLVM toolchain for OpenHarmony using repo-managed multi-repo checkout.
 # macOS: runs on host. Linux: runs inside OpenHarmony build env Docker image.
 # Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
+# Requires: repo secret GITCODE_TOKEN (GitCode PAT with read access) for repo sync from gitcode.com.
 
 name: Build LLVM
 
@@ -76,7 +77,14 @@ jobs:
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
         run: |
+          if [ -z "${GITCODE_TOKEN}" ]; then
+            echo "::error::GITCODE_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (GitCode token with read access)."
+            exit 1
+          fi
+          # HTTPS: so repo sync uses token for https://gitcode.com/...
           git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
+          # SSH→HTTPS: so manifest projects using git@gitcode.com:... also use the token (Linux + Mac)
+          git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
       - name: Setup repo tool
         run: |
