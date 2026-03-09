@@ -32,10 +32,10 @@ jobs:
           # macOS: run on host (no container)
           - runner: [self-hosted, macOS, ARM64, llvm]
             container_image: ''
-          # Linux: run inside OpenHarmony build env Docker image only
+          # Linux: run inside container (use China mirror when docker.io is unreachable)
           - runner: [self-hosted, linux, X64, llvm]
             # container_image: swr.cn-north-4.myhuaweicloud.com/ci-service/openharmony-release-build-env-jnlp:1.0.3
-            container_image: ubuntu:20.04
+            container_image: registry.cn-hangzhou.aliyuncs.com/library/ubuntu:20.04
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container_image }}
     steps:
@@ -84,6 +84,8 @@ jobs:
           fi
           # Disable credential helper so we rely only on URL-embedded token (avoids cached bad credentials)
           git config --global credential.helper ''
+          # Clear any persisted insteadOf from prior runs (self-hosted runners retain global config)
+          git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
           # HTTPS: so repo sync uses token for https://gitcode.com/...
           git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
           # SSH→HTTPS: use --add so both rules are kept (second would overwrite first otherwise)
