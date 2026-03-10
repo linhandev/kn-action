@@ -199,6 +199,7 @@ jobs:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
           DEVELOPER_DIR: ${{ steps.runner_env.outputs.developer_dir }}
+          JDK_18: ${{ steps.java8.outputs.path }}
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
           echo "## Build Steps" >> "$GITHUB_STEP_SUMMARY"
