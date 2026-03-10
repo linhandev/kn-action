@@ -120,7 +120,7 @@ jobs:
             echo "konan_data_dir=${CI_CACHE_ROOT}/konan_data"
             echo "maven_local_repo=${CI_CACHE_ROOT}/m2_repository"
             echo "maven_proxy_url=$PROXY_URL"
-          } | tee -a "$GITHUB_OUTPUT" | sed 's/^/::notice::/'
+          } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create cache directories
         run: |
