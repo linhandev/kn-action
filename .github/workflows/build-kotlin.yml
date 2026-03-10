@@ -41,7 +41,7 @@ on:
     paths:
       - '.github/workflows/build-kotlin.yml'
       - '.github/actions/prepare-repo/*'
-      - '.github/scripts/maven-proxy.init.gradle'
+      - 'scripts/maven-proxy.init.gradle'
 
 env:
   REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
@@ -154,7 +154,7 @@ jobs:
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
           mkdir -p "$GRADLE_USER_HOME/init.d"
-          cp "$GITHUB_WORKSPACE/.github/scripts/maven-proxy.init.gradle" "$GRADLE_USER_HOME/init.d/"
+          cp "$GITHUB_WORKSPACE/scripts/maven-proxy.init.gradle" "$GRADLE_USER_HOME/init.d/"
           echo "Gradle: init script installed to $GRADLE_USER_HOME/init.d/"
 
           mkdir -p ~/.m2
