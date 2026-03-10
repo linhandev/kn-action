@@ -154,18 +154,13 @@ jobs:
           local_reference_dir: ${{ env.LOCAL_REFERENCE_DIR }}
 
       - name: Configure Maven proxy
+        if: steps.vars.outputs.maven_proxy_url != ''
         id: maven_proxy
         env:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
           MAVEN_PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
           MAVEN_LOCAL_REPO: ${{ steps.vars.outputs.maven_local_repo }}
         run: |
-          if [ -z "$MAVEN_PROXY_URL" ]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
-
           mkdir -p "$GRADLE_USER_HOME/init.d"
           cp "$GITHUB_WORKSPACE/scripts/maven-proxy.init.gradle" "$GRADLE_USER_HOME/init.d/"
           echo "Gradle: init script installed to $GRADLE_USER_HOME/init.d/"
@@ -226,7 +221,7 @@ jobs:
           echo "Clean build cache promoted from $CI_CACHE_ROOT to $PERSISTED_CACHE_ROOT" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Restore Maven settings
-        if: always() && steps.maven_proxy.outputs.enabled == 'true'
+        if: always() && steps.maven_proxy.outcome != 'skipped'
         run: |
           if [ -f ~/.m2/settings.xml.proxy-bak ]; then
             mv ~/.m2/settings.xml.proxy-bak ~/.m2/settings.xml
@@ -256,3 +251,11 @@ jobs:
           name: kotlin-ohos-build-${{ runner.os }}-${{ runner.arch }}
           path: ${{ steps.archive.outputs.path }}
           retention-days: 14
+
+  actions-timeline:
+    needs: [build]
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+    steps:
+      - uses: Kesin11/actions-timeline@v3
