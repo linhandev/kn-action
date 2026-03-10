@@ -6,9 +6,10 @@ cd "$(dirname "$0")"
 
 JAVA="${JAVA:-/usr/lib/jvm/java-21-openjdk/bin/java}"
 WORKSPACE="$(pwd)/workspace"
-JAR="$WORKSPACE/reposilite.jar"
+JAR="reposilite.jar"
 
 mkdir -p "$WORKSPACE"
+cd "$WORKSPACE"
 
 if ! "$JAVA" -version &>/dev/null; then
   echo "Java not found: $JAVA" >&2
@@ -23,7 +24,6 @@ if [[ ! -f "$JAR" ]]; then
     "https://maven.reposilite.com/releases/com/reposilite/reposilite/3.5.28/reposilite-3.5.28-all.jar"
 fi
 
-
 exec "$JAVA" -jar "$JAR" \
-  --shared-configuration="configuration.shared.json" \
+  --shared-configuration="$(dirname "$0")/configuration.shared.json" \
   --working-directory="$WORKSPACE"
