@@ -53,8 +53,6 @@ env:
   WORKSPACE_DIR: ci-workspace
   LOCAL_REFERENCE_DIR: ~/git/ci/
   MAVEN_PROXY_URL: http://192.168.3.8:8080/releases
-  DEVELOPER_DIR: /Applications/Xcode-26.2.app/Contents/Developer/
-  CLEAN_CACHE_ROOT: ${{ runner.temp }}/clean-cache
   PERSISTED_CACHE_ROOT: ~/runner/cache
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
 
@@ -84,13 +82,25 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Setup runner env
+        id: runner_env
+        run: |
+          echo "clean_cache_root=${RUNNER_TEMP}/clean-cache" >> "$GITHUB_OUTPUT"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            echo "developer_dir=/Applications/Xcode-26.2.app/Contents/Developer/" >> "$GITHUB_OUTPUT"
+          else
+            echo "developer_dir=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup environment
         id: vars
+        env:
+          CLEAN_CACHE_ROOT: ${{ steps.runner_env.outputs.clean_cache_root }}
         run: |
           PERSISTED_CACHE_ROOT="$(echo "${{ env.PERSISTED_CACHE_ROOT }}/" | sed "s|^~|$HOME|")"
           CLEAN_BUILD="${{ github.event.inputs.clean_build || env.DEFAULT_CLEAN_BUILD }}"
           if [ "$CLEAN_BUILD" = "true" ]; then
-            CI_CACHE_ROOT="${{ env.CLEAN_CACHE_ROOT }}/"
+            CI_CACHE_ROOT="${CLEAN_CACHE_ROOT}/"
           else
             CI_CACHE_ROOT="${PERSISTED_CACHE_ROOT}"
           fi
@@ -102,6 +112,8 @@ jobs:
               PROXY_URL=""
             fi
           fi
+
+          echo "## Run Settings" >> "$GITHUB_STEP_SUMMARY"
 
           echo "java_version=$(java -version 2>&1 | head -1)" >> "$GITHUB_STEP_SUMMARY"
 
@@ -186,6 +198,7 @@ jobs:
         env:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
+          DEVELOPER_DIR: ${{ steps.runner_env.outputs.developer_dir }}
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
           echo "## Build Steps" >> "$GITHUB_STEP_SUMMARY"
