@@ -55,6 +55,7 @@ env:
   MAVEN_PROXY_URL: http://192.168.3.8:8080/releases
   PERSISTED_CACHE_ROOT: ~/runner/cache
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
+  DEVELOPER_DIR: /Applications/Xcode-26.2.app/Contents/Developer/
 
 jobs:
   build:
@@ -82,16 +83,6 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup runner env
-        id: runner_env
-        run: |
-          echo "clean_cache_root=${RUNNER_TEMP}/clean-cache" >> "$GITHUB_OUTPUT"
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            echo "developer_dir=/Applications/Xcode-26.2.app/Contents/Developer/" >> "$GITHUB_OUTPUT"
-          else
-            echo "developer_dir=" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Setup environment
         id: vars
         env:
@@ -107,7 +98,7 @@ jobs:
 
           PROXY_URL="${{ github.event.inputs.use_maven_proxy != 'false' && env.MAVEN_PROXY_URL || '' }}"
           if [ -n "$PROXY_URL" ]; then
-            if ! curl -sf -o /dev/null --connect-timeout 5 "$PROXY_URL"; then
+            if ! curl -sf -o /dev/null --connect-timeout 1 --max-time 3 "$PROXY_URL"; then
               echo "Maven proxy unreachable ($PROXY_URL), skipping" >> "$GITHUB_STEP_SUMMARY"
               PROXY_URL=""
             fi
@@ -198,7 +189,7 @@ jobs:
         env:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
-          DEVELOPER_DIR: ${{ steps.runner_env.outputs.developer_dir }}
+          DEVELOPER_DIR: ${{ env.DEVELOPER_DIR }}
           JDK_18: ${{ steps.java8.outputs.path }}
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
