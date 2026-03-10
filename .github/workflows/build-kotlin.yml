@@ -98,7 +98,6 @@ jobs:
           PROXY_URL="${{ github.event.inputs.use_maven_proxy != 'false' && env.DEFAULT_MAVEN_PROXY_URL || '' }}"
           if [ -n "$PROXY_URL" ]; then
             if ! curl -sf -o /dev/null --connect-timeout 1 --max-time 3 "$PROXY_URL"; then
-              echo "Maven proxy unreachable ($PROXY_URL), skipping" >> "$GITHUB_STEP_SUMMARY"
               PROXY_URL=""
             fi
           fi
@@ -187,16 +186,7 @@ jobs:
           JDK_18: ${{ steps.java8.outputs.path }}
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
-          echo "## Build Steps" >> "$GITHUB_STEP_SUMMARY"
-          set -o pipefail
-          bash scripts/build-ohos.sh 2>&1 | while IFS= read -r line; do
-            echo "$line"
-            case "$line" in
-              ":::: Step"*|"✅ Step"*|"❌"*|"🎉"*)
-                echo "$line" >> "$GITHUB_STEP_SUMMARY"
-                ;;
-            esac
-          done
+          bash scripts/build-ohos.sh
 
       - name: Promote clean build cache to persisted Gradle home
         if: success() && steps.vars.outputs.clean_build == 'true'
