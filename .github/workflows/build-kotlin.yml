@@ -13,6 +13,7 @@ on:
       branch:
         description: 'Branch to build'
         required: false
+        default: develop-2.2.21-OH
       pr_number:
         description: 'PR number to merge into branch (use with branch)'
         required: false
@@ -43,13 +44,19 @@ on:
       - '.github/actions/prepare-repo/*'
       - 'scripts/maven-proxy.init.gradle'
 
+# default or global config
 env:
+  DEFAULT_KOTLIN_BRANCH: develop-2.2.21-OH
+  DEFAULT_CLEAN_BUILD: false
+  DEFAULT_ARTIFACT_DESTINATION: local
   REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
-  KOTLIN_BRANCH: next/2.2.21-OH.0.1.0-01  # default branch for push trigger only
   WORKSPACE_DIR: ci-workspace
   LOCAL_REFERENCE_DIR: ~/git/ci/
-  DEFAULT_MAVEN_PROXY_URL: http://192.168.3.8:8080/releases
-  DEVELOPER_DIR: /Applications/Xcode-26.2.app/Contents/Developer
+  MAVEN_PROXY_URL: http://192.168.3.8:8080/releases
+  DEVELOPER_DIR: /Applications/Xcode-26.2.app/Contents/Developer/
+  CLEAN_CACHE_ROOT: ${{ runner.temp }}/clean-cache
+  PERSISTED_CACHE_ROOT: ~/runner/cache
+  ARTIFACT_LOCAL_PATH: ~/runner/artifact
 
 jobs:
   build:
@@ -80,57 +87,58 @@ jobs:
       - name: Setup environment
         id: vars
         run: |
-          BRANCH="${{ github.event.inputs.branch || env.KOTLIN_BRANCH }}"
-          COMMIT="${{ github.event.inputs.commit }}"
-          PR_NUMBER="${{ github.event.inputs.pr_number }}"
-          CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
-          ARTIFACT_DEST="${{ github.event.inputs.artifact_destination || 'local' }}"
-          PROXY_URL="${{ github.event.inputs.use_maven_proxy != 'false' && env.DEFAULT_MAVEN_PROXY_URL || '' }}"
-
+          PERSISTED_CACHE_ROOT="$(echo "${{ env.PERSISTED_CACHE_ROOT }}/" | sed "s|^~|$HOME|")"
+          CLEAN_BUILD="${{ github.event.inputs.clean_build || env.DEFAULT_CLEAN_BUILD }}"
           if [ "$CLEAN_BUILD" = "true" ]; then
-            CI_CACHE_ROOT="$RUNNER_TEMP/clean-cache-$(date +%s)/"
+            CI_CACHE_ROOT="${{ env.CLEAN_CACHE_ROOT }}/"
           else
-            CI_CACHE_ROOT="$HOME/runner/cache/"
+            CI_CACHE_ROOT="${PERSISTED_CACHE_ROOT}"
           fi
 
-          GRADLE_USER_HOME="${CI_CACHE_ROOT}gradle_user_home"
-          KONAN_DATA_DIR="${CI_CACHE_ROOT}konan_data"
-          MAVEN_LOCAL_REPO="${CI_CACHE_ROOT}m2_repository"
-          ARTIFACT_LOCAL_PATH="$HOME/runner/artifact"
-          mkdir -p "$GRADLE_USER_HOME" "$KONAN_DATA_DIR" "$MAVEN_LOCAL_REPO" "$ARTIFACT_LOCAL_PATH"
-
-          JDK_18="${{ steps.java8.outputs.path }}"
-
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            echo "DEVELOPER_DIR=${{ env.DEVELOPER_DIR }}" >> "$GITHUB_ENV"
+          PROXY_URL="${{ github.event.inputs.use_maven_proxy != 'false' && env.MAVEN_PROXY_URL || '' }}"
+          if [ -n "$PROXY_URL" ]; then
+            if ! curl -sf -o /dev/null --connect-timeout 5 "$PROXY_URL"; then
+              echo "Maven proxy unreachable ($PROXY_URL), skipping" >> "$GITHUB_STEP_SUMMARY"
+              PROXY_URL=""
+            fi
           fi
 
-          echo "java version: $(java -version 2>&1 | head -1)" >> "$GITHUB_STEP_SUMMARY"
+          echo "java_version=$(java -version 2>&1 | head -1)" >> "$GITHUB_STEP_SUMMARY"
 
-          tee -a "$GITHUB_ENV" >> "$GITHUB_OUTPUT" <<EOF
-          JDK_18=$JDK_18
-          DEVELOPER_DIR=$DEVELOPER_DIR
-          GRADLE_USER_HOME=$GRADLE_USER_HOME
-          KONAN_DATA_DIR=$KONAN_DATA_DIR
-          MAVEN_LOCAL_REPO=$MAVEN_LOCAL_REPO
-          MAVEN_PROXY_URL=$PROXY_URL
-          ARTIFACT_LOCAL_PATH=$ARTIFACT_LOCAL_PATH
-          branch=$BRANCH
-          commit=$COMMIT
-          pr_number=$PR_NUMBER
-          artifact_destination=$ARTIFACT_DEST
-          clean_build=$CLEAN_BUILD
-          EOF
+          {
+            echo "branch=${{ github.event.inputs.branch || env.DEFAULT_KOTLIN_BRANCH }}"
+            echo "commit=${{ github.event.inputs.commit }}"
+            echo "pr_number=${{ github.event.inputs.pr_number }}"
+            echo "clean_build=$CLEAN_BUILD"
+            echo "artifact_destination=${{ github.event.inputs.artifact_destination || env.DEFAULT_ARTIFACT_DESTINATION }}"
+            echo "persisted_cache_root=$PERSISTED_CACHE_ROOT"
+            echo "ci_cache_root=$CI_CACHE_ROOT"
+            echo "artifact_local_path="$(echo "${{ env.ARTIFACT_LOCAL_PATH }}" | sed "s|^~|$HOME|")""
+            echo "gradle_user_home=${CI_CACHE_ROOT}gradle_user_home"
+            echo "konan_data_dir=${CI_CACHE_ROOT}/konan_data"
+            echo "maven_local_repo=${CI_CACHE_ROOT}/m2_repository"
+            echo "maven_proxy_url=$PROXY_URL"
+          } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Clean KONAN and Maven caches (clean build)
+      - name: Create cache directories
+        run: |
+          mkdir -p \
+            "${{ steps.vars.outputs.gradle_user_home }}" \
+            "${{ steps.vars.outputs.konan_data_dir }}" \
+            "${{ steps.vars.outputs.maven_local_repo }}" \
+            "${{ steps.vars.outputs.artifact_local_path }}"
+
+      - name: Clean Konan and Maven caches for clean build
         if: steps.vars.outputs.clean_build == 'true'
+        env:
+          KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
+          MAVEN_LOCAL_REPO: ${{ steps.vars.outputs.maven_local_repo }}
         run: |
           echo "Removing contents of KONAN_DATA_DIR and Maven local repo..."
           rm -rf "$KONAN_DATA_DIR"
           mkdir -p "$KONAN_DATA_DIR"
           rm -rf "$MAVEN_LOCAL_REPO"
           mkdir -p "$MAVEN_LOCAL_REPO"
-          echo "Done. KONAN_DATA_DIR and MAVEN_LOCAL_REPO are clean."
 
       - name: Prepare Kotlin repo
         id: kotlin
@@ -145,10 +153,13 @@ jobs:
 
       - name: Configure Maven proxy
         id: maven_proxy
+        env:
+          GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
+          MAVEN_PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
+          MAVEN_LOCAL_REPO: ${{ steps.vars.outputs.maven_local_repo }}
         run: |
           if [ -z "$MAVEN_PROXY_URL" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Maven proxy: disabled"
             exit 0
           fi
           echo "enabled=true" >> "$GITHUB_OUTPUT"
@@ -172,6 +183,9 @@ jobs:
 
       - name: Build Kotlin
         shell: bash
+        env:
+          GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
+          KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
           echo "## Build Steps" >> "$GITHUB_STEP_SUMMARY"
@@ -185,6 +199,28 @@ jobs:
             esac
           done
 
+      - name: Promote clean build cache to persisted Gradle home
+        if: success() && steps.vars.outputs.clean_build == 'true'
+        env:
+          CI_CACHE_ROOT: ${{ steps.vars.outputs.ci_cache_root }}
+          PERSISTED_CACHE_ROOT: ${{ steps.vars.outputs.persisted_cache_root }}
+        shell: bash
+        run: |
+          if [ ! -d "$CI_CACHE_ROOT" ]; then
+            echo "Clean cache dir not found, skipping promotion."
+            exit 0
+          fi
+          ls -la "$CI_CACHE_ROOT"
+
+          echo "Removing existing persisted cache at $PERSISTED_CACHE_ROOT"
+          rm -rf "$PERSISTED_CACHE_ROOT"
+          mkdir -p "$PERSISTED_CACHE_ROOT"
+
+          echo "Moving contents of $CI_CACHE_ROOT to $PERSISTED_CACHE_ROOT"
+          mv "$CI_CACHE_ROOT"/* "$PERSISTED_CACHE_ROOT/"
+
+          echo "Clean build cache promoted from $CI_CACHE_ROOT to $PERSISTED_CACHE_ROOT" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Restore Maven settings
         if: always() && steps.maven_proxy.outputs.enabled == 'true'
         run: |
@@ -196,6 +232,8 @@ jobs:
 
       - name: Archive build output
         id: archive
+        env:
+          ARTIFACT_LOCAL_PATH: ${{ steps.vars.outputs.artifact_local_path }}
         run: |
           KOTLIN_SHA="${{ steps.kotlin.outputs.sha }}"
           KOTLIN_SHA_SHORT="${KOTLIN_SHA:0:7}"
