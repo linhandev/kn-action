@@ -49,10 +49,10 @@ env:
   DEFAULT_KOTLIN_BRANCH: develop-2.2.21-OH
   DEFAULT_CLEAN_BUILD: false
   DEFAULT_ARTIFACT_DESTINATION: local
+  DEFAULT_MAVEN_PROXY_URL: http://192.168.3.8:8080/releases
   REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
   WORKSPACE_DIR: ci-workspace
   LOCAL_REFERENCE_DIR: ~/git/ci/
-  MAVEN_PROXY_URL: http://192.168.3.8:8080/releases
   PERSISTED_CACHE_ROOT: ~/runner/cache
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
   DEVELOPER_DIR: /Applications/Xcode-26.2.app/Contents/Developer/
@@ -85,9 +85,8 @@ jobs:
 
       - name: Setup environment
         id: vars
-        env:
-          CLEAN_CACHE_ROOT: ${{ steps.runner_env.outputs.clean_cache_root }}
         run: |
+          CLEAN_CACHE_ROOT="${RUNNER_TEMP}/clean-cache"
           PERSISTED_CACHE_ROOT="$(echo "${{ env.PERSISTED_CACHE_ROOT }}/" | sed "s|^~|$HOME|")"
           CLEAN_BUILD="${{ github.event.inputs.clean_build || env.DEFAULT_CLEAN_BUILD }}"
           if [ "$CLEAN_BUILD" = "true" ]; then
@@ -96,7 +95,7 @@ jobs:
             CI_CACHE_ROOT="${PERSISTED_CACHE_ROOT}"
           fi
 
-          PROXY_URL="${{ github.event.inputs.use_maven_proxy != 'false' && env.MAVEN_PROXY_URL || '' }}"
+          PROXY_URL="${{ github.event.inputs.use_maven_proxy != 'false' && env.DEFAULT_MAVEN_PROXY_URL || '' }}"
           if [ -n "$PROXY_URL" ]; then
             if ! curl -sf -o /dev/null --connect-timeout 1 --max-time 3 "$PROXY_URL"; then
               echo "Maven proxy unreachable ($PROXY_URL), skipping" >> "$GITHUB_STEP_SUMMARY"
