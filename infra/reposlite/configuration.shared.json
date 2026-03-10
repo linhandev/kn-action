@@ -1,0 +1,45 @@
+{
+  "frontend": {
+    "title": "Reposilite Repository",
+    "description": "Proxy for gradle/maven build dependencies"
+  },
+  "maven": {
+    "repositories": [
+      {
+        "id": "releases",
+        "visibility": "PUBLIC",
+        "redeployment": false,
+        "proxied": [
+          {
+            "reference": "https://mirrors.huaweicloud.com/repository/maven/",
+            "store": true
+          },
+          {
+            "reference": "https://repo1.maven.org/maven2/",
+            "store": true
+          },
+          {
+            "reference": "https://dl.google.com/dl/android/maven2/",
+            "store": true
+          },
+          {
+            "reference": "https://packages.jetbrains.team/maven/p/ij/intellij-dependencies",
+            "store": true
+          },
+          {
+            "reference": "https://redirector.kotlinlang.org/maven/kotlin-dependencies",
+            "store": true
+          },
+          {
+            "reference": "https://redirector.kotlinlang.org/maven/bootstrap",
+            "store": true
+          },
+          {
+            "reference": "https://maven.eazytec-cloud.com/nexus/repository/maven-public",
+            "store": true
+          }
+        ]
+      }
+    ]
+  }
+}
