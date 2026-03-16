@@ -134,7 +134,7 @@ jobs:
         env:
           LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
         run: |
-          ls -lah
+          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
           # Init when .repo is missing (first run) or when doing a clean build
           if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
             cd "$LLVM_WORKSPACE"
@@ -149,6 +149,7 @@ jobs:
         env:
           GIT_TERMINAL_PROMPT: 0
         run: |
+          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo sync -c -v -j 16
           repo forall -c 'git lfs pull'
