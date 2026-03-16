@@ -4,11 +4,16 @@
 set -e
 cd "$(dirname "$0")"
 
-JAVA="${JAVA:-/usr/lib/jvm/java-21-openjdk/bin/java}"
+if [[ -z "${JAVA:-}" ]]; then
+  JAVA=/usr/lib/jvm/java-21-openjdk/bin/java
+  if [[ ! -x "$JAVA" ]]; then
+    JAVA=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java
+  fi
+fi
 WORKSPACE="$(pwd)/workspace"
 JAR="reposilite.jar"
 
-mkdir -p "$WORKSPACE"
+mkdir -p "$WORKSPACE/logs"
 cd "$WORKSPACE"
 
 if ! "$JAVA" -version &>/dev/null; then

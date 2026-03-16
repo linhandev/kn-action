@@ -11,6 +11,7 @@
 | `workspace/reposilite.jar` | 从 Release 下载后放到这里（勿提交） |
 | `workspace/reposilite.db` | SQLite 库，自动生成或从旧实例拷贝 |
 | `workspace/repositories/` | Maven 缓存，自动生成或从旧实例拷贝 |
+| `com.kmp.reposilite.plist` | macOS launchd 配置模板（见下方 macOS 安装） |
 
 ## 首次 setup
 
@@ -28,9 +29,9 @@
 
 ## 环境变量
 
-- `JAVA`：覆盖 Java 路径，默认 `/usr/lib/jvm/java-21-openjdk/bin/java`
+- `JAVA`：覆盖 Java 路径。默认：Linux `/usr/lib/jvm/java-21-openjdk/bin/java`；若不存在则尝试 macOS Temurin `/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java`。
 
-## 以 systemd user 服务安装
+## 以 systemd user 服务安装（Linux）
 
 ```bash
 # 1. 进入本目录
@@ -54,3 +55,35 @@ systemctl --user stop reposilite
 systemctl --user start reposilite
 journalctl --user -u reposilite -f   # 看日志
 ```
+
+## 以 launchd 服务安装（macOS）
+
+1. **创建日志目录**（launchd 启动前需存在）：
+   ```bash
+   cd infra/reposlite
+   mkdir -p workspace/logs
+   ```
+
+2. **安装 launchd 用户 agent**（将 `REPOSILITE_DIR` 替换为当前目录的绝对路径）：
+   ```bash
+   sed "s|REPOSILITE_DIR|$(pwd)|g" com.kmp.reposilite.plist > ~/Library/LaunchAgents/com.kmp.reposilite.plist
+   ```
+
+3. **加载并启动服务**：
+   ```bash
+   launchctl load ~/Library/LaunchAgents/com.kmp.reposilite.plist
+   launchctl start com.kmp.reposilite
+   ```
+
+常用命令：
+
+```bash
+launchctl list com.kmp.reposilite   # 状态
+launchctl stop com.kmp.reposilite
+launchctl start com.kmp.reposilite
+# 卸载：launchctl unload ~/Library/LaunchAgents/com.kmp.reposilite.plist
+```
+
+日志位置：`workspace/logs/reposilite-stdout.log`、`workspace/logs/reposilite-stderr.log`。
+
+`start.sh` 默认找 Temurin 21 的 java；也可在 plist 的 `EnvironmentVariables` 中取消注释并设置 `JAVA` 为你的 `java` 可执行路径。

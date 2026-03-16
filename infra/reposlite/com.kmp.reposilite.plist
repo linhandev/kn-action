@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.kmp.reposilite</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>REPOSILITE_DIR/start.sh</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>REPOSILITE_DIR</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>REPOSILITE_DIR/workspace/logs/reposilite-stdout.log</string>
+	<key>StandardErrorPath</key>
+	<string>REPOSILITE_DIR/workspace/logs/reposilite-stderr.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!-- Uncomment and set if Java is not in default locations -->
+		<!-- <key>JAVA</key>
+		<string>/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java</string> -->
+	</dict>
+</dict>
+</plist>
