@@ -98,8 +98,13 @@ jobs:
           PROXY_URL="${{ github.event.inputs.use_maven_proxy != 'false' && env.DEFAULT_MAVEN_PROXY_URL || '' }}"
           echo "PROXY_URL from setting: $PROXY_URL"
           if [ -n "$PROXY_URL" ]; then
-            if ! curl -sf -o /dev/null --connect-timeout 1 --max-time 3 "$PROXY_URL"; then
+            # Require only that the host responds (any HTTP status); -f would fail on 4xx/5xx (e.g. 404 on /releases)
+            HTTP_CODE=$(curl -so /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 "$PROXY_URL" || true)
+            if [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" = "000" ]; then
+              echo "Proxy unreachable (no response or connection failed), clearing PROXY_URL"
               PROXY_URL=""
+            else
+              echo "Proxy reachable (HTTP $HTTP_CODE)"
             fi
           fi
           echo "PROXY_URL after network test: $PROXY_URL"
