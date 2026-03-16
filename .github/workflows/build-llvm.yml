@@ -130,13 +130,14 @@ jobs:
             repo init -u "${{ env.MANIFEST_URL }}" -m "${{ env.MANIFEST_FILE }}" $REFERENCE_FLAG
           fi
 
-      - name: Sync source
-        env:
-          GIT_TERMINAL_PROMPT: 0
-        run: |
-          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
-          repo sync -c -v -j 16
-          repo forall -c 'git lfs pull'
+      # dont sync source for now    
+      # - name: Sync source
+      #   env:
+      #     GIT_TERMINAL_PROMPT: 0
+      #   run: |
+      #     cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
+      #     repo sync -c -v -j 16
+      #     repo forall -c 'git lfs pull'
 
       - name: Prepare build environment
         if: steps.vars.outputs.need_env_prepare == 'true'
