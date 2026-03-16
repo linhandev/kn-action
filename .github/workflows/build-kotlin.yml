@@ -169,13 +169,13 @@ jobs:
           workspace_dir: ${{ env.WORKSPACE_DIR }}
           local_reference_dir: ${{ env.LOCAL_REFERENCE_DIR }}
 
-      - name: Patch Kotlin repo to use Maven proxy
-        if: steps.vars.outputs.maven_proxy_url != ''
-        env:
-          WORKSPACE_DIR: ${{ env.WORKSPACE_DIR }}
-          PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
-        run: |
-          bash "$GITHUB_WORKSPACE/scripts/patch-kotlin-repo-proxy.sh"
+      # - name: Patch Kotlin repo to use Maven proxy
+      #   if: steps.vars.outputs.maven_proxy_url != ''
+      #   env:
+      #     WORKSPACE_DIR: ${{ env.WORKSPACE_DIR }}
+      #     PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
+      #   run: |
+      #     bash "$GITHUB_WORKSPACE/scripts/patch-kotlin-repo-proxy.sh"
 
       - name: Configure Maven proxy
         if: steps.vars.outputs.maven_proxy_url != ''
