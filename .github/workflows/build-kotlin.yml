@@ -43,6 +43,7 @@ on:
       - '.github/workflows/build-kotlin.yml'
       - '.github/actions/prepare-repo/*'
       - 'scripts/maven-proxy.init.gradle'
+      - 'scripts/patch-kotlin-repo-proxy.sh'
 
 # default or global config
 env:
@@ -168,6 +169,14 @@ jobs:
           workspace_dir: ${{ env.WORKSPACE_DIR }}
           local_reference_dir: ${{ env.LOCAL_REFERENCE_DIR }}
 
+      - name: Patch Kotlin repo to use Maven proxy
+        if: steps.vars.outputs.maven_proxy_url != ''
+        env:
+          WORKSPACE_DIR: ${{ env.WORKSPACE_DIR }}
+          PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/patch-kotlin-repo-proxy.sh"
+
       - name: Configure Maven proxy
         if: steps.vars.outputs.maven_proxy_url != ''
         id: maven_proxy
@@ -247,8 +256,8 @@ jobs:
 
           OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
           tar -cf - -C "${{ env.WORKSPACE_DIR }}" build/repo | gzip -9 > "$OUT_PATH"
+          echo "path=$OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
           echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
-          echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact to GitHub
         if: steps.vars.outputs.artifact_destination == 'github'
