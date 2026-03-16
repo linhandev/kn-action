@@ -64,6 +64,7 @@ jobs:
       matrix:
         include:
           - runner: [self-hosted, macOS, ARM64, kotlin]
+          - runner: [self-hosted, macOS, X64, kotlin]
           - runner: [self-hosted, linux, X64, kotlin]
     runs-on: ${{ matrix.runner }}
     steps:
