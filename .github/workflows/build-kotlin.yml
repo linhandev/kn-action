@@ -96,11 +96,13 @@ jobs:
           fi
 
           PROXY_URL="${{ github.event.inputs.use_maven_proxy != 'false' && env.DEFAULT_MAVEN_PROXY_URL || '' }}"
+          echo "PROXY_URL from setting: $PROXY_URL"
           if [ -n "$PROXY_URL" ]; then
             if ! curl -sf -o /dev/null --connect-timeout 1 --max-time 3 "$PROXY_URL"; then
               PROXY_URL=""
             fi
           fi
+          echo "PROXY_URL after network test: $PROXY_URL"
 
           echo "## Run Settings" >> "$GITHUB_STEP_SUMMARY"
 
