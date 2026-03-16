@@ -54,9 +54,15 @@ jobs:
           fi
           mkdir -p "$LLVM_WORKSPACE"
 
-          echo "LLVM_WORKSPACE=$LLVM_WORKSPACE" | tee -a "$GITHUB_ENV" >> "$GITHUB_OUTPUT"
-          echo "clean_build=$CLEAN_BUILD" | tee -a "$GITHUB_ENV" >> "$GITHUB_OUTPUT"
-          echo "LLVM_WORKSPACE=$LLVM_WORKSPACE" && echo "clean_build=$CLEAN_BUILD"
+          NEED_ENV_PREPARE="false"
+          if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
+            NEED_ENV_PREPARE="true"
+          fi
+          {
+            echo "LLVM_WORKSPACE=$LLVM_WORKSPACE"
+            echo "clean_build=$CLEAN_BUILD"
+            echo "need_env_prepare=$NEED_ENV_PREPARE"
+          } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -69,6 +75,8 @@ jobs:
           ln -sf "$(command -v python3)" /usr/bin/python
 
       - name: Setup git
+        env:
+          LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
         run: |
           git config --global --add safe.directory "$LLVM_WORKSPACE/build"
           git config --global --add safe.directory "$LLVM_WORKSPACE/third_party/musl"
@@ -109,7 +117,7 @@ jobs:
 
       - name: Init repo manifest
         env:
-          # Use gitee mirror for repo tool (gerrit often unreachable from China)
+          LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
           REPO_URL: https://gitee.com/oschina/repo.git
         run: |
           # Init when .repo is missing (first run) or when doing a clean build
@@ -126,19 +134,19 @@ jobs:
         env:
           GIT_TERMINAL_PROMPT: 0
         run: |
-          cd "$LLVM_WORKSPACE"
-          repo sync -c -v
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
+          repo sync -c -v -j 16
           repo forall -c 'git lfs pull'
 
       - name: Prepare build environment
-        if: steps.vars.outputs.clean_build == 'true'
+        if: steps.vars.outputs.need_env_prepare == 'true'
         run: |
-          cd "$LLVM_WORKSPACE"
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
 
       - name: Build LLVM
         run: |
-          cd "$LLVM_WORKSPACE"
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           BUILD_SCRIPT="toolchain/llvm-project/llvm-build/build.sh"
           if [ "${{ steps.vars.outputs.clean_build }}" != "true" ]; then
             if [ "$RUNNER_OS" = "Linux" ]; then
