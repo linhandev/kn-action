@@ -133,6 +133,7 @@ jobs:
         env:
           LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
         run: |
+          ls -lah
           # Init when .repo is missing (first run) or when doing a clean build
           if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
             cd "$LLVM_WORKSPACE"
