@@ -79,9 +79,9 @@ journalctl --user -u reposilite -f   # 看日志
 常用命令：
 
 ```bash
-launchctl list com.kmp.reposilite   # 状态
 launchctl stop com.kmp.reposilite
 launchctl start com.kmp.reposilite
+launchctl list com.kmp.reposilite   # 状态
 # 卸载：launchctl unload ~/Library/LaunchAgents/com.kmp.reposilite.plist
 ```
 
