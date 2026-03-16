@@ -10,7 +10,6 @@ on:
     inputs:
       clean_build:
         description: 'Wipe workspace and build from scratch'
-        required: false
         default: false
         type: boolean
   push:
@@ -48,31 +47,40 @@ jobs:
         run: |
           CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
           LLVM_WORKSPACE="$GITHUB_WORKSPACE/llvm"
-          ls -lah $LLVM_WORKSPACE
+          REPO_DIR="$GITHUB_WORKSPACE/bin"
 
           if [ "$CLEAN_BUILD" = "true" ]; then
             rm -rf "$LLVM_WORKSPACE"
           fi
           mkdir -p "$LLVM_WORKSPACE"
 
+          exit 2
+
           NEED_ENV_PREPARE="false"
           if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
             NEED_ENV_PREPARE="true"
           fi
+
+          REPO_READY="false"
+          if command -v repo &>/dev/null; then
+            REPO_READY="true"
+          fi
+
           {
             echo "LLVM_WORKSPACE=$LLVM_WORKSPACE"
             echo "clean_build=$CLEAN_BUILD"
             echo "need_env_prepare=$NEED_ENV_PREPARE"
+            echo "repo_dir=$REPO_DIR"
+            echo "repo_ready=$REPO_READY"
           } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          apt-get update
-          apt-get install -y git build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2 wget
-          apt install -y curl python3-requests git-lfs
-          # repo-py3 and other tools expect 'python'; Ubuntu 20.04 has only python3
+          apt update
+          apt install -y git build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
+          apt install -y curl python3-requests git-lfs wget
           ln -sf "$(command -v python3)" /usr/bin/python
 
       - name: Setup git
@@ -101,21 +109,9 @@ jobs:
           # SSH→HTTPS: use --add so both rules are kept (second would overwrite first otherwise)
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
-      - name: Check repo tool
-        id: check_repo
-        run: |
-          # Only skip setup when repo is already on PATH (e.g. system-installed).
-          # When bin/repo exists but isn't on PATH, we still need the setup step to add it to GITHUB_PATH.
-          if command -v repo &>/dev/null; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Setup repo tool
-        if: steps.check_repo.outputs.ready != 'true'
+        if: steps.vars.outputs.repo_ready != 'true'
         run: |
-          set -e
           REPO_BIN="$GITHUB_WORKSPACE/bin/repo"
           REPO_DIR="$(dirname "$REPO_BIN")"
           mkdir -p "$REPO_DIR"
@@ -127,14 +123,14 @@ jobs:
           fi
           echo "$REPO_DIR" >> "$GITHUB_PATH"
           export PATH="$REPO_DIR:$PATH"
-          # Run with python3 explicitly so shebang/python symlink is not required
-          python3 "$REPO_BIN" --version
+          repo --version
 
       - name: Init repo manifest
         env:
           LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
+          REPO_DIR: ${{ steps.vars.outputs.repo_dir }}
         run: |
-          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
+          export PATH="$REPO_DIR:$PATH"
           # Init when .repo is missing (first run) or when doing a clean build
           if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
             cd "$LLVM_WORKSPACE"
@@ -148,8 +144,9 @@ jobs:
       - name: Sync source
         env:
           GIT_TERMINAL_PROMPT: 0
+          REPO_DIR: ${{ steps.vars.outputs.repo_dir }}
         run: |
-          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
+          export PATH="$REPO_DIR:$PATH"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo sync -c -v -j 16
           repo forall -c 'git lfs pull'
