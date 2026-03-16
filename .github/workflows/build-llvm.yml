@@ -20,6 +20,8 @@ env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
   MANIFEST_FILE: llvm-toolchain.xml
   LOCAL_REFERENCE_DIR: ~/git/ci/llvm-project-kmp
+  LLVM_WORKSPACE: ${{ github.workspace }}/llvm
+  REPO_DIR: ${{ github.workspace }}/bin
 
 jobs:
   build:
@@ -41,13 +43,14 @@ jobs:
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
+        with:
+          path: kn-action
 
       - name: Setup environment
         id: vars
+        shell: bash
         run: |
           CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
-          LLVM_WORKSPACE="$GITHUB_WORKSPACE/llvm"
-          REPO_DIR="$GITHUB_WORKSPACE/bin"
 
           if [ "$CLEAN_BUILD" = "true" ]; then
             rm -rf "$LLVM_WORKSPACE"
@@ -59,21 +62,16 @@ jobs:
             NEED_ENV_PREPARE="true"
           fi
 
-          REPO_READY="false"
-          if command -v repo &>/dev/null; then
-            REPO_READY="true"
-          fi
-
           {
             echo "LLVM_WORKSPACE=$LLVM_WORKSPACE"
             echo "clean_build=$CLEAN_BUILD"
             echo "need_env_prepare=$NEED_ENV_PREPARE"
             echo "repo_dir=$REPO_DIR"
-            echo "repo_ready=$REPO_READY"
           } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt update
@@ -82,6 +80,7 @@ jobs:
           ln -sf "$(command -v python3)" /usr/bin/python
 
       - name: Setup git
+        shell: bash
         env:
           LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
         run: |
@@ -91,6 +90,7 @@ jobs:
           git config --global user.name "ci"
 
       - name: Setup git credentials for GitCode
+        shell: bash
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
         run: |
@@ -108,27 +108,27 @@ jobs:
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
       - name: Setup repo tool
-        if: steps.vars.outputs.repo_ready != 'true'
+        shell: bash
         run: |
-          REPO_BIN="$GITHUB_WORKSPACE/bin/repo"
-          REPO_DIR="$(dirname "$REPO_BIN")"
+          REPO_DIR="$GITHUB_WORKSPACE/bin"
+          REPO_BIN="$REPO_DIR/repo"
           mkdir -p "$REPO_DIR"
           if [ ! -x "$REPO_BIN" ]; then
             curl -fSL -o "$REPO_BIN" "https://gitee.com/oschina/repo/raw/fork_flow/repo-py3"
             head -c 2 "$REPO_BIN" | grep -q '#!' || { echo "::error::Downloaded repo script invalid (no shebang)"; exit 1; }
             chmod a+x "$REPO_BIN"
-            pip3 install requests 2>/dev/null || true
+            python3 -m pip install requests 2>/dev/null || pip3 install requests 2>/dev/null || true
           fi
           echo "$REPO_DIR" >> "$GITHUB_PATH"
           export PATH="$REPO_DIR:$PATH"
           repo --version
 
       - name: Init repo manifest
+        shell: bash
         env:
           LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
-          REPO_DIR: ${{ steps.vars.outputs.repo_dir }}
         run: |
-          export PATH="$REPO_DIR:$PATH"
+          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
           # Init when .repo is missing (first run) or when doing a clean build
           if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
             cd "$LLVM_WORKSPACE"
@@ -140,22 +140,24 @@ jobs:
           fi
 
       - name: Sync source
+        shell: bash
         env:
           GIT_TERMINAL_PROMPT: 0
-          REPO_DIR: ${{ steps.vars.outputs.repo_dir }}
         run: |
-          export PATH="$REPO_DIR:$PATH"
+          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo sync -c -v -j 16
           repo forall -c 'git lfs pull'
 
       - name: Prepare build environment
         if: steps.vars.outputs.need_env_prepare == 'true'
+        shell: bash
         run: |
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
 
       - name: Build LLVM
+        shell: bash
         run: |
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           BUILD_SCRIPT="toolchain/llvm-project/llvm-build/build.sh"
