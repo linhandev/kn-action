@@ -43,7 +43,6 @@ on:
       - '.github/workflows/build-kotlin.yml'
       - '.github/actions/prepare-repo/*'
       - 'scripts/maven-proxy.init.gradle'
-      - 'scripts/patch-kotlin-repo-proxy.sh'
 
 # default or global config
 env:
@@ -71,6 +70,8 @@ jobs:
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
+        with:
+          path: kn-action
 
       - name: Set up Java 8
         id: java8
@@ -169,14 +170,6 @@ jobs:
           workspace_dir: ${{ env.WORKSPACE_DIR }}
           local_reference_dir: ${{ env.LOCAL_REFERENCE_DIR }}
 
-      # - name: Patch Kotlin repo to use Maven proxy
-      #   if: steps.vars.outputs.maven_proxy_url != ''
-      #   env:
-      #     WORKSPACE_DIR: ${{ env.WORKSPACE_DIR }}
-      #     PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
-      #   run: |
-      #     bash "$GITHUB_WORKSPACE/scripts/patch-kotlin-repo-proxy.sh"
-
       - name: Configure Maven proxy
         if: steps.vars.outputs.maven_proxy_url != ''
         id: maven_proxy
@@ -186,7 +179,7 @@ jobs:
           MAVEN_LOCAL_REPO: ${{ steps.vars.outputs.maven_local_repo }}
         run: |
           mkdir -p "$GRADLE_USER_HOME/init.d"
-          cp "$GITHUB_WORKSPACE/scripts/maven-proxy.init.gradle" "$GRADLE_USER_HOME/init.d/"
+          cp "$GITHUB_WORKSPACE/kn-action/scripts/maven-proxy.init.gradle" "$GRADLE_USER_HOME/init.d/"
           echo "Gradle: init script installed to $GRADLE_USER_HOME/init.d/"
 
           mkdir -p ~/.m2
