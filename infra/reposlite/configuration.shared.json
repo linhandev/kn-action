@@ -33,6 +33,10 @@
           {
             "reference": "https://maven.eazytec-cloud.com/nexus/repository/maven-public",
             "store": true
+          },
+          {
+            "reference": "https://plugins.gradle.org/m2/",
+            "store": true
           }
         ]
       }
