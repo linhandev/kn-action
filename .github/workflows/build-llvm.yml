@@ -54,8 +54,6 @@ jobs:
           fi
           mkdir -p "$LLVM_WORKSPACE"
 
-          exit 2
-
           NEED_ENV_PREPARE="false"
           if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
             NEED_ENV_PREPARE="true"
