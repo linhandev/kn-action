@@ -126,7 +126,7 @@ jobs:
           GIT_TERMINAL_PROMPT: 0
         run: |
           cd "$LLVM_WORKSPACE"
-          repo sync -c
+          repo sync -c -v
           repo forall -c 'git lfs pull'
 
       - name: Prepare build environment
