@@ -74,6 +74,7 @@ journalctl --user -u reposilite -f   # 看日志
    launchctl load ~/Library/LaunchAgents/com.kmp.reposilite.plist
    launchctl start com.kmp.reposilite
    ```
+   之后每次**用户登录**会自动加载并启动（plist 中 `RunAtLoad` 已开启），无需再手动操作。
 
 常用命令：
 

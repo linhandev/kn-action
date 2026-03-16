@@ -78,7 +78,15 @@ jobs:
           distribution: 'zulu'
           java-version: '8'
 
+      - name: Set up Java 11
+        # required for mac x64 only
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+  
       - name: Set up Java 21
+        # required for linux only
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
