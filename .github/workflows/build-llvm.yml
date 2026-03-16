@@ -100,25 +100,38 @@ jobs:
           # SSH→HTTPS: use --add so both rules are kept (second would overwrite first otherwise)
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
-      - name: Setup repo tool
+      - name: Check repo tool
+        id: check_repo
         run: |
+          # Only skip setup when repo is already on PATH (e.g. system-installed).
+          # When bin/repo exists but isn't on PATH, we still need the setup step to add it to GITHUB_PATH.
+          if command -v repo &>/dev/null; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup repo tool
+        if: steps.check_repo.outputs.ready != 'true'
+        run: |
+          set -e
           REPO_BIN="$GITHUB_WORKSPACE/bin/repo"
-          if ! command -v repo &>/dev/null && [ ! -x "$REPO_BIN" ]; then
-            mkdir -p "$(dirname "$REPO_BIN")"
-            curl -s https://gitee.com/oschina/repo/raw/fork_flow/repo-py3 -o "$REPO_BIN"
+          REPO_DIR="$(dirname "$REPO_BIN")"
+          mkdir -p "$REPO_DIR"
+          if [ ! -x "$REPO_BIN" ]; then
+            curl -fSL -o "$REPO_BIN" "https://gitee.com/oschina/repo/raw/fork_flow/repo-py3"
+            head -c 2 "$REPO_BIN" | grep -q '#!' || { echo "::error::Downloaded repo script invalid (no shebang)"; exit 1; }
             chmod a+x "$REPO_BIN"
             pip3 install requests 2>/dev/null || true
           fi
-          if ! command -v repo &>/dev/null; then
-            echo "$(dirname "$REPO_BIN")" >> "$GITHUB_PATH"
-            export PATH="$(dirname "$REPO_BIN"):$PATH"
-          fi
-          repo --version
+          echo "$REPO_DIR" >> "$GITHUB_PATH"
+          export PATH="$REPO_DIR:$PATH"
+          # Run with python3 explicitly so shebang/python symlink is not required
+          python3 "$REPO_BIN" --version
 
       - name: Init repo manifest
         env:
           LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
-          REPO_URL: https://gitee.com/oschina/repo.git
         run: |
           # Init when .repo is missing (first run) or when doing a clean build
           if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
