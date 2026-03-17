@@ -77,7 +77,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt update
           apt install -y git build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
-          apt install -y curl python3-requests git-lfs wget rsync # ccache
+          apt install -y curl python3-requests git-lfs wget rsync ccache
           ln -sf "$(command -v python3)" /usr/bin/python
 
       - name: Setup git
@@ -160,6 +160,10 @@ jobs:
       - name: Build LLVM
         shell: bash
         run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            export CCACHE_DIR="${{ github.workspace }}/.ccache"
+            export CCACHE_MAXSIZE=5G
+          fi
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           BUILD_SCRIPT="toolchain/llvm-project/llvm-build/build.sh"
           if [ "${{ steps.vars.outputs.clean_build }}" != "true" ]; then
