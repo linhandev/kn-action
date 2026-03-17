@@ -205,6 +205,8 @@ jobs:
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
           DEVELOPER_DIR: ${{ env.DEVELOPER_DIR }}
           JDK_18: ${{ steps.java8.outputs.path }}
+          # Gradle repository HTTP retry (test before upstreaming to cpf-kotlin gradle.properties)
+          GRADLE_OPTS: "-Dorg.gradle.internal.repository.max.tentavies=5 -Dorg.gradle.internal.repository.initial.backoff=2000"
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
           bash scripts/build-ohos.sh
