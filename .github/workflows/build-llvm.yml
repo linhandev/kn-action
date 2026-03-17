@@ -31,14 +31,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS: run on host (no container)
           - runner: [self-hosted, macOS, ARM64, llvm]
             container_image: ''
-          # Linux: DaoCloud mirror (https://github.com/DaoCloud/public-image-mirror)
+          # If Linux job fails with "image not found", read infra/docker/README.md and run the build command on the runner.
           - runner: [self-hosted, linux, X64, llvm]
-            # container_image: swr.cn-north-4.myhuaweicloud.com/ci-service/openharmony-release-build-env-jnlp:1.0.3
-            # container_image: m.daocloud.io/docker.io/library/ubuntu:20.04
-            container_image: ubuntu:20.04
+            container_image: linux-llvm-builder:latest
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container_image }}
     steps:
@@ -176,11 +173,20 @@ jobs:
           fi
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           BUILD_SCRIPT="toolchain/llvm-project/llvm-build/build.sh"
+          MINGW_PY="toolchain/llvm-project/llvm-build/mingw.py"
           if [ "${{ steps.vars.outputs.clean_build }}" != "true" ]; then
             if [ "$RUNNER_OS" = "Linux" ]; then
               sed -i 's|rm -rf ${WORK_DIR}/out|# rm -rf ${WORK_DIR}/out  # skipped for incremental build|' "$BUILD_SCRIPT"
             else
               sed -i '' 's|rm -rf ${WORK_DIR}/out|# rm -rf ${WORK_DIR}/out  # skipped for incremental build|' "$BUILD_SCRIPT"
+            fi
+            # Upstream robustness: mingw.py uses os.makedirs(target_dir) without exist_ok. Dir may exist from a prior run (incremental) or from another code path in the same run; patch so makedirs is idempotent.
+            if [ -f "$MINGW_PY" ]; then
+              if [ "$RUNNER_OS" = "Linux" ]; then
+                sed -i 's/os\.makedirs(target_dir)/os.makedirs(target_dir, exist_ok=True)/' "$MINGW_PY"
+              else
+                sed -i '' 's/os\.makedirs(target_dir)/os.makedirs(target_dir, exist_ok=True)/' "$MINGW_PY"
+              fi
             fi
           fi
           bash "$BUILD_SCRIPT"
