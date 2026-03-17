@@ -77,8 +77,14 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt update
           apt install -y git build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
-          apt install -y curl python3-requests git-lfs wget rsync ccache
+          apt install -y curl python3-requests git-lfs wget rsync ccache pigz
           ln -sf "$(command -v python3)" /usr/bin/python
+
+      - name: Install pigz (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install swig git-lfs java coreutils wget 
+          brew install pigz
 
       - name: Setup git
         shell: bash
@@ -190,7 +196,7 @@ jobs:
           ARCHIVE_NAME="llvm-toolchain_${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
 
           OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
-          tar -cf - -C "$LLVM_WORKSPACE" out | gzip -9 > "$OUT_PATH"
+          tar -cf - -C "$LLVM_WORKSPACE" out/llvm-install | pigz -9 > "$OUT_PATH"
           echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
           echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
           echo "path=$OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
