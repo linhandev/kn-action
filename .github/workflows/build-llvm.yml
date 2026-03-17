@@ -22,6 +22,7 @@ env:
   LOCAL_REFERENCE_DIR: ~/git/ci/llvm-project-kmp
   LLVM_WORKSPACE: ${{ github.workspace }}/llvm
   REPO_DIR: ${{ github.workspace }}/bin
+  ARTIFACT_LOCAL_PATH: ~/runner/artifact
 
 jobs:
   build:
@@ -76,7 +77,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt update
           apt install -y git build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
-          apt install -y curl python3-requests git-lfs wget
+          apt install -y curl python3-requests git-lfs wget rsync # ccache
           ln -sf "$(command -v python3)" /usr/bin/python
 
       - name: Setup git
@@ -170,13 +171,29 @@ jobs:
           fi
           bash "$BUILD_SCRIPT"
 
-      # TODO: determine build output path and archive format
-      # - name: Archive build output
-      #   id: archive
-      #   run: |
-      #     GITHUB_SHA_SHORT="${GITHUB_SHA:0:7}"
-      #     ARCHIVE_NAME="llvm-toolchain_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
-      #     OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
-      #     tar -cf - -C "$LLVM_WORKSPACE" out | gzip -9 > "$OUT_PATH"
-      #     echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
-      #     echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+      - name: Archive build output
+        id: archive
+        env:
+          ARTIFACT_LOCAL_PATH: ${{ env.ARTIFACT_LOCAL_PATH }}
+        run: |
+          ARTIFACT_LOCAL_PATH="$(echo "$ARTIFACT_LOCAL_PATH" | sed "s|^~|$HOME|")"
+          mkdir -p "$ARTIFACT_LOCAL_PATH"
+
+          LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
+          LLVM_SHA="$(git -C "$LLVM_PROJECT_DIR" rev-parse HEAD)"
+          LLVM_SHA_SHORT="${LLVM_SHA:0:7}"
+          GITHUB_SHA_SHORT="${GITHUB_SHA:0:7}"
+          ARCHIVE_NAME="llvm-toolchain_${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
+
+          OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
+          tar -cf - -C "$LLVM_WORKSPACE" out | gzip -9 > "$OUT_PATH"
+          echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
+          echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+          echo "path=$OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-toolchain-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ steps.archive.outputs.path }}
+          retention-days: 14
