@@ -77,6 +77,11 @@ jobs:
             echo "repo_dir=$REPO_DIR"
           } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3'
+
       - name: Install macOS build dependencies
         if: runner.os == 'macOS'
         env:
@@ -92,7 +97,7 @@ jobs:
             return $ret
           }
           brew_install_quiet swig git-lfs java coreutils wget
-          brew_install_quiet pigz python
+          brew_install_quiet pigz
 
       - name: Setup git
         shell: bash
@@ -132,7 +137,7 @@ jobs:
             curl -fSL -o "$REPO_BIN" "https://gitee.com/oschina/repo/raw/fork_flow/repo-py3"
             head -c 2 "$REPO_BIN" | grep -q '#!' || { echo "::error::Downloaded repo script invalid (no shebang)"; exit 1; }
             chmod a+x "$REPO_BIN"
-            python3 -m pip install requests 2>/dev/null || pip3 install requests 2>/dev/null || true
+            python -m pip install requests
           fi
           echo "$REPO_DIR" >> "$GITHUB_PATH"
           export PATH="$REPO_DIR:$PATH"
