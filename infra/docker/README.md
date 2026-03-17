@@ -2,7 +2,17 @@
 
 Ubuntu 20.04 image with dependencies used by the [Build LLVM](../../.github/workflows/build-llvm.yml) workflow on Linux.
 
-## How to build
+## CI: GitHub Container Registry
+
+The [Build Linux image](../../.github/workflows/build-linux-image.yml) workflow builds this image and pushes it to **GitHub Container Registry** as `ghcr.io/<owner>/kn-action-linux-llvm-builder:latest`. The Build LLVM workflow uses that image for the Linux job; the runner pulls it automatically.
+
+If the Linux runner cannot pull the image (private package), either make the package public (Package page → Package settings) or log in to GHCR on the runner (e.g. `docker login ghcr.io -u <user> -p <PAT>` with `read:packages`).
+
+The image is rebuilt when:
+- You push changes under `infra/docker/` or the build-linux-image workflow
+- You run the "Build Linux image" workflow manually
+
+## Local build (optional)
 
 From this directory:
 
@@ -11,13 +21,4 @@ cd infra/docker
 docker build -t linux-llvm-builder:latest .
 ```
 
-The workflow expects the image name **`linux-llvm-builder:latest`** on the Linux runner. If the Build LLVM job fails on Linux with "image not found", build the image on that runner (or a machine that can push to the runner’s Docker), then re-run the workflow.
-
-To publish for a registry (e.g. for multiple runners), tag and push:
-
-```bash
-docker tag linux-llvm-builder:latest ghcr.io/your-org/linux-llvm-builder:1.0
-docker push ghcr.io/your-org/linux-llvm-builder:1.0
-```
-
-Then set the workflow’s Linux job `container_image` to that URL.
+For local runs or if you need to test image changes before pushing, you can temporarily change the Linux job's `container_image` in `build-llvm.yml` back to `linux-llvm-builder:latest` and ensure the image exists on the runner.
