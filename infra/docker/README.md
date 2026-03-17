@@ -4,13 +4,7 @@ Ubuntu 20.04 image with dependencies used by the [Build LLVM](../../.github/work
 
 ## How to build
 
-From the repo root:
-
-```bash
-docker build -t linux-llvm-builder:latest infra/docker
-```
-
-Or from this directory:
+From this directory:
 
 ```bash
 cd infra/docker

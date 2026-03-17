@@ -77,7 +77,7 @@ jobs:
           apt install -y curl python3-requests git-lfs wget rsync ccache pigz
           ln -sf "$(command -v python3)" /usr/bin/python
 
-      - name: Install pigz (macOS)
+      - name: Install MacOS build dependencies
         if: runner.os == 'macOS'
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
@@ -206,7 +206,8 @@ jobs:
           ARCHIVE_NAME="llvm-toolchain_${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
 
           OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
-          tar -I 'pigz -9' -cf "$OUT_PATH" -C "$LLVM_WORKSPACE" out/llvm-install
+          # Pipe through pigz so it works on both GNU tar (Linux) and BSD tar (macOS)
+          tar -cf - -C "$LLVM_WORKSPACE" out/llvm-install | pigz -9 > "$OUT_PATH"
           echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
           echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
           echo "path=$OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
