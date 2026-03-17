@@ -82,9 +82,13 @@ jobs:
 
       - name: Install pigz (macOS)
         if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_ENV_HINTS: 1
+          CI: 1
         run: |
-          brew install swig git-lfs java coreutils wget 
-          brew install pigz
+          brew install swig git-lfs java coreutils wget 2>&1 | cat; exit ${PIPESTATUS[0]}
+          brew install pigz 2>&1 | cat; exit ${PIPESTATUS[0]}
 
       - name: Setup git
         shell: bash
@@ -196,7 +200,7 @@ jobs:
           ARCHIVE_NAME="llvm-toolchain_${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
 
           OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
-          tar -cf - -C "$LLVM_WORKSPACE" out/llvm-install | pigz -9 > "$OUT_PATH"
+          tar -I 'pigz -9' -cf "$OUT_PATH" -C "$LLVM_WORKSPACE" out/llvm-install
           echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
           echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
           echo "path=$OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
