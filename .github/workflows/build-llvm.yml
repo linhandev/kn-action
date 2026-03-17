@@ -33,7 +33,6 @@ jobs:
         include:
           - runner: [self-hosted, macOS, ARM64, llvm]
             container_image: ''
-          # Uses image from Build Linux image workflow (ghcr.io).
           - runner: [self-hosted, linux, X64, llvm]
             container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:latest
     runs-on: ${{ matrix.runner }}
