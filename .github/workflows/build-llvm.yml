@@ -75,8 +75,15 @@ jobs:
           HOMEBREW_NO_ENV_HINTS: 1
           CI: 1
         run: |
-          brew install swig git-lfs java coreutils wget 2>&1 | cat; exit ${PIPESTATUS[0]}
-          brew install pigz 2>&1 | cat; exit ${PIPESTATUS[0]}
+          brew_install_quiet() {
+            local out
+            out=$(brew install "$@" 2>&1)
+            local ret=$?
+            echo "$out" | grep -v 'Warning:.*already installed and up-to-date' | grep -v 'To reinstall' | grep -v '  brew reinstall' || true
+            return $ret
+          }
+          brew_install_quiet swig git-lfs java coreutils wget
+          brew_install_quiet pigz
 
       - name: Setup git
         shell: bash
@@ -210,10 +217,65 @@ jobs:
           name: llvm-toolchain-${{ runner.os }}-${{ runner.arch }}
           path: ${{ steps.archive.outputs.path }}
           retention-days: 1
-  
+
+  # Post step: on GitHub-hosted runner, merge Linux x64 artifact into other artifacts
+  cross-copy:
+    needs: [build]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download Linux and macOS ARM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: llvm-toolchain-(Linux-X64|macOS-ARM64)
+          path: artifacts-in
+          merge-multiple: false
+
+      - name: Extract artifacts
+        run: |
+          mkdir -p linux_llvm mac_arm_llvm
+          TAR_LINUX="$(find artifacts-in/llvm-toolchain-Linux-X64 -name '*.tar.gz' -print -quit)"
+          TAR_MAC="$(find artifacts-in/llvm-toolchain-macOS-ARM64 -name '*.tar.gz' -print -quit)"
+          tar -xzf "$TAR_LINUX" -C linux_llvm
+          tar -xzf "$TAR_MAC" -C mac_arm_llvm
+
+      - name: Cross-copy Linux bits into macOS ARM (dereference symlinks)
+        run: |
+          clang_linux_x86_64="$(pwd)/linux_llvm/out/llvm-install"
+          clang_darwin_arm64="$(pwd)/mac_arm_llvm/out/llvm-install"
+
+          # make sure target folder exists to get consistent copy behavior
+          mkdir -p "${clang_darwin_arm64}/include"
+
+          if [ ! -e "${clang_darwin_arm64}/bin/aarch64-unknown-linux-ohos-clang++" ]; then
+            cp -f "${clang_linux_x86_64}/bin/aarch64-unknown-linux-ohos-clang++" "${clang_darwin_arm64}/bin/aarch64-unknown-linux-ohos-clang++"
+          fi
+
+          cp -Lrf "${clang_linux_x86_64}/lib/aarch64-linux-ohos" "${clang_darwin_arm64}/lib"
+          cp -Lrf "${clang_linux_x86_64}/include/libcxx-ohos" "${clang_darwin_arm64}/include"
+          cp -Lrf "${clang_linux_x86_64}/lib/x86_64-linux-ohos" "${clang_darwin_arm64}/lib"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/bin" "${clang_darwin_arm64}/lib/clang/19"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/profile" "${clang_darwin_arm64}/lib/clang/19/include"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/fuzzer" "${clang_darwin_arm64}/lib/clang/19/include"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/share" "${clang_darwin_arm64}/lib/clang/19"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/sanitizer" "${clang_darwin_arm64}/lib/clang/19/include"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/lib" "${clang_darwin_arm64}/lib/clang/19"
+
+      - name: Re-pack and upload macOS ARM artifact with Linux cross
+        run: |
+          ARCHIVE_NAME="llvm-toolchain_macOS-ARM64-with-linux-cross_$(date +%Y%m%d-%H%M%S).tar.gz"
+          tar -cf - -C mac_arm_llvm out/llvm-install | pigz -9 > "$ARCHIVE_NAME"
+          echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+        id: repack
+
+      - name: Upload merged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-toolchain-macOS-ARM64-with-linux-cross
+          path: ${{ steps.repack.outputs.archive_name }}
+          retention-days: 1
 
   actions-timeline:
-    needs: [build]
+    needs: [cross-copy]
     runs-on: ubuntu-22.04
     permissions:
       actions: read
