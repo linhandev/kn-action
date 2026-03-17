@@ -67,15 +67,15 @@ jobs:
             echo "repo_dir=$REPO_DIR"
           } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          apt update
-          apt install -y git build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
-          apt install -y curl python3-requests git-lfs wget rsync ccache pigz
-          ln -sf "$(command -v python3)" /usr/bin/python
+      # - name: Install Linux build dependencies
+      #   if: runner.os == 'Linux'
+      #   shell: bash
+      #   run: |
+      #     export DEBIAN_FRONTEND=noninteractive
+      #     apt update
+      #     apt install -y git build-essential swig python3-dev libedit-dev libncurses5-dev binutils-dev gcc-multilib abigail-tools elfutils pkg-config autoconf autoconf-archive libxml2
+      #     apt install -y curl python3-requests git-lfs wget rsync ccache pigz
+      #     ln -sf "$(command -v python3)" /usr/bin/python
 
       - name: Install MacOS build dependencies
         if: runner.os == 'macOS'
