@@ -97,6 +97,9 @@ jobs:
       - name: Setup environment
         id: vars
         run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            /usr/bin/xcrun -f bitcode-build-tool
+          fi
           CLEAN_CACHE_ROOT="${RUNNER_TEMP}/clean-cache"
           PERSISTED_CACHE_ROOT="$(echo "${{ env.PERSISTED_CACHE_ROOT }}/" | sed "s|^~|$HOME|")"
           CLEAN_BUILD="${{ github.event_name == 'schedule' && 'true' || github.event.inputs.clean_build || env.DEFAULT_CLEAN_BUILD }}"
