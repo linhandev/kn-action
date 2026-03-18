@@ -104,8 +104,8 @@ jobs:
         run: |
           git config --global --add safe.directory "$LLVM_WORKSPACE/build"
           git config --global --add safe.directory "$LLVM_WORKSPACE/third_party/musl"
-          git config --global user.email "ci@ci.ci"
-          git config --global user.name "ci"
+          git config --global user.email &>/dev/null || git config --global user.email "ci@ci.ci"
+          git config --global user.name &>/dev/null || git config --global user.name "ci"
 
       - name: Setup git credentials for GitCode
         shell: bash
