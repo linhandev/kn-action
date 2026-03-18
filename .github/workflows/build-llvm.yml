@@ -238,7 +238,6 @@ jobs:
     needs: [build]
     if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
     env:
-      HOST_DIR: ${{ matrix.host_dir }}
       HOST_SUFFIX: ${{ matrix.host_suffix }}
     strategy:
       fail-fast: false
@@ -246,11 +245,9 @@ jobs:
         include:
           - platform: macos-arm64
             runner: [self-hosted, macOS, ARM64, llvm]
-            host_dir: host_arm_llvm
             host_suffix: macOS_ARM64
           - platform: macos-x64
             runner: [self-hosted, macOS, X64, llvm]
-            host_dir: host_x64_llvm
             host_suffix: macOS_X64
     runs-on: ${{ matrix.runner }}
     steps:
@@ -293,7 +290,7 @@ jobs:
         id: extract
         run: |
           echo "artifacts-in: $(ls artifacts-in)"
-          mkdir -p linux_llvm "$HOST_DIR"
+          mkdir -p linux_llvm host_llvm
           TAR_LINUX="$(find artifacts-in -name '*.tar.gz' -path '*Linux*X64*' -print -quit)"
           TAR_HOST="$(find artifacts-in -name '*.tar.gz' -path "*${HOST_SUFFIX}*" -print -quit)"
           if [ -z "$TAR_LINUX" ] || [ ! -f "$TAR_LINUX" ]; then
@@ -309,12 +306,12 @@ jobs:
           echo "host_tar_basename=$(basename "$TAR_HOST")" >> "$GITHUB_OUTPUT"
           tar -xzf "$TAR_LINUX" -C linux_llvm
           # Suppress macOS xattr extended-header warning (LIBARCHIVE.xattr.com.apple.provenance)
-          tar -xzf "$TAR_HOST" -C "$HOST_DIR" 2>/dev/null
+          tar -xzf "$TAR_HOST" -C host_llvm 2>/dev/null
 
       - name: Cross-copy Linux bits into host toolchain (dereference symlinks)
         run: |
           clang_linux_x86_64="$(pwd)/linux_llvm/out/llvm-install"
-          clang_host="$(pwd)/$HOST_DIR/out/llvm-install"
+          clang_host="$(pwd)/host_llvm/out/llvm-install"
 
           # make sure target folder exists to get consistent copy behavior
           mkdir -p "${clang_host}/include"
@@ -345,7 +342,7 @@ jobs:
 
       - name: Build and run host test exe
         run: |
-          TC="$(pwd)/$HOST_DIR/out/llvm-install"
+          TC="$(pwd)/host_llvm/out/llvm-install"
           export PATH="$TC/bin:$PATH"
           # Use host platform SDK so toolchain clang gets proper libc (e.g. macOS: xcrun --show-sdk-path)
           SDK="$(xcrun --show-sdk-path)"
@@ -379,7 +376,7 @@ jobs:
 
       - name: Build OHOS test program
         run: |
-          TC="$(pwd)/$HOST_DIR/out/llvm-install"
+          TC="$(pwd)/host_llvm/out/llvm-install"
           export PATH="$TC/bin:$PATH"
           RESOURCE_DIR="$TC/lib/clang/19"
           SYSROOT="$(pwd)/sysroot-ohos-aarch64/$OHOS_SYSROOT"
@@ -395,7 +392,7 @@ jobs:
         run: |
           HOST_BASENAME="${{ steps.extract.outputs.host_tar_basename }}"
           ARCHIVE_NAME="${HOST_BASENAME%.tar.gz}-full.tar.gz"
-          tar -cf - -C "$HOST_DIR" out/llvm-install | pigz -9 > "$ARCHIVE_NAME"
+          tar -cf - -C host_llvm out/llvm-install | pigz -9 > "$ARCHIVE_NAME"
           echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
         id: repack
 
@@ -407,10 +404,10 @@ jobs:
       - name: Pack test binaries
         id: test_binaries
         env:
-          LLVM_SHA: ${{ needs.build.outputs.llvm_sha_short }}
-          ACTION_SHA: ${{ needs.build.outputs.action_sha_short }}
+          HOST_TAR_BASENAME: ${{ steps.extract.outputs.host_tar_basename }}
         run: |
-          TEST_ARCHIVE="test-binaries-${LLVM_SHA}_act-${ACTION_SHA}_${HOST_SUFFIX}.tar.gz"
+          # Derive name from host LLVM artifact (works when build was skipped)
+          TEST_ARCHIVE="test-binaries-${HOST_TAR_BASENAME#llvm-}"
           tar -cf - -C test-build test-host test-ohos-aarch64 | pigz -9 > "$TEST_ARCHIVE"
           echo "archive_name=$TEST_ARCHIVE" >> "$GITHUB_OUTPUT"
 
