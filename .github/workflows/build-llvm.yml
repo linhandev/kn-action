@@ -63,6 +63,7 @@ jobs:
         id: vars
         shell: bash
         run: |
+          echo $(realpath ${{ env.ARTIFACT_LOCAL_PATH }})
           CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
 
           if [ "$CLEAN_BUILD" = "true" ]; then
