@@ -5,6 +5,8 @@
 
 name: Build LLVM
 
+run-name: ${{ github.event.inputs.run_name || 'Build LLVM' }}
+
 on:
   workflow_dispatch:
     inputs:
@@ -14,6 +16,10 @@ on:
         type: boolean
       run_id:
         description: 'When post step only: use this run ID for artifacts (leave empty for latest success)'
+        required: false
+        type: string
+      run_name:
+        description: 'Custom title for this run (shown in Actions UI)'
         required: false
         type: string
   # push:
@@ -265,8 +271,8 @@ jobs:
           clang_darwin_arm64="$(pwd)/mac_arm_llvm/out/llvm-install"
           
           ls -lah
-          ls clang_linux_x86_64
-          ls clang_darwin_arm64
+          ls $clang_linux_x86_64
+          ls $clang_darwin_arm64
 
           # make sure target folder exists to get consistent copy behavior
           mkdir -p "${clang_darwin_arm64}/include"
