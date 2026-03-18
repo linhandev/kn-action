@@ -8,8 +8,8 @@ from pathlib import Path
 import os
 import re
 
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 app = FastAPI(title="Artifact Server", version="1.0")
 
@@ -67,6 +67,24 @@ def _artifacts_listing_html() -> str:
 def _artifacts_list() -> list[str]:
     """Return sorted list of artifact filenames."""
     return sorted(p.name for p in ARTIFACTS_DIR.iterdir() if p.is_file())
+
+
+@app.get("/artifacts/latest")
+async def latest_artifact(pattern: str = Query(..., description="Regex to match artifact names")):
+    """Redirect to the latest (by mtime) artifact whose name matches the regex."""
+    try:
+        rx = re.compile(pattern)
+    except re.error as e:
+        raise HTTPException(status_code=400, detail=f"Invalid regex: {e}")
+    matches = []
+    for p in ARTIFACTS_DIR.iterdir():
+        if p.is_file() and rx.search(p.name):
+            matches.append((p.name, p.stat().st_mtime))
+    if not matches:
+        raise HTTPException(status_code=404, detail="No artifact matching pattern")
+    matches.sort(key=lambda x: -x[1])
+    latest_name = matches[0][0]
+    return RedirectResponse(url=f"/artifacts/{latest_name}", status_code=302)
 
 
 @app.get("/artifacts", response_class=HTMLResponse)

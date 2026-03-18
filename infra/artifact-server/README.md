@@ -6,6 +6,7 @@ Simple HTTP server to store and serve build artifacts (tar/zip) on your LAN, so 
 
 - **POST /upload** — Upload a file. Body: multipart form with `file`. Stored under the uploaded filename.
 - **GET /artifacts** — Directory listing (HTML with links) or JSON list when `Accept: application/json`.
+- **GET /artifacts/latest?pattern={regex}** — Redirect (302) to the latest (by mtime) artifact whose name matches the regex.
 - **GET /artifacts/{name}** — Download artifact by name.
 
 ## Setup (macOS)
