@@ -228,11 +228,17 @@ jobs:
           path: ${{ steps.archive.outputs.path }}
           retention-days: 1
 
-  # Post step: on GitHub-hosted runner, merge Linux x64 artifact into other artifacts
+  # Post step: merge Linux x64 artifact into host toolchain, then build/run tests (matrix: mac arm only for now; mac x64 / windows later).
   cross-copy:
     needs: [build]
     if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
     permissions:
       actions: read
     steps:
@@ -247,8 +253,9 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Extract artifacts
+        id: extract
         run: |
-          ls -lah
+          ls -lah artifacts-in
           mkdir -p linux_llvm mac_arm_llvm
           TAR_LINUX="$(find artifacts-in -name '*.tar.gz' -path '*Linux*X64*' -print -quit)"
           TAR_MAC="$(find artifacts-in -name '*.tar.gz' -path '*macOS*ARM64*' -print -quit)"
@@ -262,6 +269,7 @@ jobs:
             find artifacts-in -type f 2>/dev/null || true
             exit 1
           fi
+          echo "mac_tar_basename=$(basename "$TAR_MAC")" >> "$GITHUB_OUTPUT"
           tar -xzf "$TAR_LINUX" -C linux_llvm
           # Suppress macOS xattr extended-header warning (LIBARCHIVE.xattr.com.apple.provenance)
           tar -xzf "$TAR_MAC" -C mac_arm_llvm 2>/dev/null
@@ -272,8 +280,8 @@ jobs:
           clang_darwin_arm64="$(pwd)/mac_arm_llvm/out/llvm-install"
           
           ls -lah
-          ls $clang_linux_x86_64
-          ls $clang_darwin_arm64
+          ls "$clang_linux_x86_64"
+          ls "$clang_darwin_arm64"
 
           # make sure target folder exists to get consistent copy behavior
           mkdir -p "${clang_darwin_arm64}/include"
@@ -292,9 +300,44 @@ jobs:
           cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/sanitizer" "${clang_darwin_arm64}/lib/clang/19/include"
           cp -Lrf "${clang_linux_x86_64}/lib/clang/19/lib" "${clang_darwin_arm64}/lib/clang/19"
 
+      - name: Create test source
+        run: |
+          mkdir -p test-build
+          cat > test-build/main.cpp << 'EOF'
+          #include <cstdio>
+          int main() {
+            std::printf("ok\n");
+            return 0;
+          }
+          EOF
+
+      - name: Build and run macOS test exe
+        run: |
+          TC="$(pwd)/mac_arm_llvm/out/llvm-install"
+          export PATH="$TC/bin:$PATH"
+          clang++ -std=c++17 test-build/main.cpp -o test-build/test-macos
+          OUT="$(./test-build/test-macos)"
+          if [ "$OUT" != "ok" ]; then
+            echo "::error::Expected output 'ok', got: $OUT"
+            exit 1
+          fi
+
+      - name: Build OHOS test program
+        run: |
+          TC="$(pwd)/mac_arm_llvm/out/llvm-install"
+          export PATH="$TC/bin:$PATH"
+          RESOURCE_DIR="$TC/lib/clang/19"
+          clang++ -std=c++17 test-build/main.cpp \
+            -target aarch64-linux-ohos \
+            -resource-dir "$RESOURCE_DIR" \
+            -L"$TC/lib/aarch64-linux-ohos" \
+            -o test-build/test-ohos-aarch64
+          file test-build/test-ohos-aarch64
+
       - name: Re-pack and upload macOS ARM artifact with Linux cross
         run: |
-          ARCHIVE_NAME="llvm-toolchain_macOS-ARM64-with-linux-cross_$(date +%Y%m%d-%H%M%S).tar.gz"
+          MAC_BASENAME="${{ steps.extract.outputs.mac_tar_basename }}"
+          ARCHIVE_NAME="${MAC_BASENAME%.tar.gz}-full.tar.gz"
           tar -cf - -C mac_arm_llvm out/llvm-install | pigz -9 > "$ARCHIVE_NAME"
           echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
         id: repack
@@ -304,6 +347,20 @@ jobs:
         with:
           name: llvm-toolchain-macOS-ARM64-with-linux-cross
           path: ${{ steps.repack.outputs.archive_name }}
+          retention-days: 7
+
+      - name: Upload test binary (macOS host)
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-binary-${{ matrix.platform }}
+          path: test-build/test-macos
+          retention-days: 1
+
+      - name: Upload test binary (OHOS aarch64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-binary-ohos-aarch64
+          path: test-build/test-ohos-aarch64
           retention-days: 1
 
   actions-timeline:
