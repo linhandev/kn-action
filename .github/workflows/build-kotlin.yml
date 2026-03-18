@@ -206,7 +206,7 @@ jobs:
           DEVELOPER_DIR: ${{ env.DEVELOPER_DIR }}
           JDK_18: ${{ steps.java8.outputs.path }}
           # When using maven proxy, disable Kotlin's cache-redirector so resolution goes to proxy (init script replaces cache-redirector URLs)
-          ORG_GRADLE_PROJECT_cacheRedirectorEnabled: ${{ steps.vars.outputs.maven_proxy_url != '' && 'false' || '' }}
+          # ORG_GRADLE_PROJECT_cacheRedirectorEnabled: ${{ steps.vars.outputs.maven_proxy_url != '' && 'false' || '' }}
           # Gradle repository HTTP retry (test before upstreaming to cpf-kotlin gradle.properties)
           GRADLE_OPTS: "-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000"
         run: |
