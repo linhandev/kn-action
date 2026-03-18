@@ -33,6 +33,7 @@ env:
   LLVM_WORKSPACE: ${{ github.workspace }}/llvm
   REPO_DIR: ${{ github.workspace }}/bin
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
+  OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02
 
 jobs:
   build:
@@ -354,13 +355,36 @@ jobs:
             exit 1
           fi
 
+      - name: Download OHOS sysroot (on demand)
+        env:
+          CLEAN_BUILD: ${{ github.event.inputs.clean_build }}
+        run: |
+          SYSROOT_DIR="$(pwd)/sysroot-ohos-aarch64"
+          SYSROOT_TOP="$OHOS_SYSROOT"
+          SYSROOT_URL="https://maven.eazytec-cloud.com/nexus/repository/file-storage/${SYSROOT_TOP}.tar.gz"
+          if [ "$CLEAN_BUILD" = "true" ]; then
+            echo "Clean build: removing existing sysroot to re-download"
+            rm -rf "$SYSROOT_DIR"
+          fi
+          if [ ! -d "$SYSROOT_DIR/$SYSROOT_TOP" ]; then
+            echo "Downloading OHOS aarch64 sysroot..."
+            mkdir -p "$SYSROOT_DIR"
+            curl -sSL "$SYSROOT_URL" | tar -xzf - -C "$SYSROOT_DIR"
+            echo "Sysroot at $SYSROOT_DIR/$SYSROOT_TOP"
+            ls -la "$SYSROOT_DIR"
+          else
+            echo "Using existing sysroot at $SYSROOT_DIR/$SYSROOT_TOP"
+          fi
+
       - name: Build OHOS test program
         run: |
           TC="$(pwd)/mac_arm_llvm/out/llvm-install"
           export PATH="$TC/bin:$PATH"
           RESOURCE_DIR="$TC/lib/clang/19"
+          SYSROOT="$(pwd)/sysroot-ohos-aarch64/$OHOS_SYSROOT"
           clang++ -std=c++17 test-build/main.cpp \
             -target aarch64-linux-ohos \
+            --sysroot "$SYSROOT" \
             -resource-dir "$RESOURCE_DIR" \
             -L"$TC/lib/aarch64-linux-ohos" \
             -o test-build/test-ohos-aarch64
