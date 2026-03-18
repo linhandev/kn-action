@@ -47,7 +47,10 @@ jobs:
           - runner: [self-hosted, linux, X64, llvm]
             container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:latest
     runs-on: ${{ matrix.runner }}
-    container: ${{ matrix.container_image }}
+    container:
+      image: ${{ matrix.container_image }}
+      volumes:
+        - ${{ github.workspace }}/../../../artifact:/home/runner/runner/artifact
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
