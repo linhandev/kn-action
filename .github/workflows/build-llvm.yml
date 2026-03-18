@@ -37,6 +37,7 @@ env:
 
 jobs:
   build:
+    name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
     if: github.event.inputs.skip_build != 'true'
     environment: env
     outputs:
@@ -235,6 +236,7 @@ jobs:
 
   # Post step: merge Linux x64 artifact into host toolchain, then build/run tests
   cross-copy:
+    name: cross-copy (${{ matrix.platform }})
     needs: [build]
     if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
     env:
