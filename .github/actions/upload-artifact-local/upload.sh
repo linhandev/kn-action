@@ -24,7 +24,12 @@ code=$(curl -sS -w '%{http_code}' -o /tmp/upload-artifact-local.out \
   -F "file=@$path" \
   "$server_url/upload")
 if [ "$code" != "200" ]; then
-  echo "::error::Upload failed (HTTP $code): $(cat /tmp/upload-artifact-local.out)"
+  msg="$(cat /tmp/upload-artifact-local.out 2>/dev/null)"
+  if [ "$code" = "409" ]; then
+    echo "::error::Re-upload forbidden: artifact already exists. $msg"
+  else
+    echo "::error::Upload failed (HTTP $code): $msg"
+  fi
   exit 1
 fi
 download_url="${server_url}/artifacts/${name}"

@@ -31,9 +31,14 @@ def safe_name(name: str) -> str:
 
 @app.post("/upload")
 async def upload_artifact(file: UploadFile = File(...)):
-    """Upload a single file (e.g. tar.gz or zip). Stored under the uploaded filename."""
+    """Upload a single file (e.g. tar.gz or zip). Stored under the uploaded filename. Re-upload of existing name is forbidden."""
     artifact_name = safe_name(file.filename or "artifact")
     dest = ARTIFACTS_DIR / artifact_name
+    if dest.is_file():
+        raise HTTPException(
+            status_code=409,
+            detail=f"Artifact already exists: {artifact_name}. Re-upload is not allowed.",
+        )
     try:
         # Stream write for concurrent uploads; each request writes to its own file
         with open(dest, "wb") as f:
