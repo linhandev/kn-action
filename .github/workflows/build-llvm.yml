@@ -20,9 +20,9 @@ on:
         description: 'When post step only: use this run ID for artifacts (leave empty for latest success)'
         required: false
         type: string
-  push:
-    paths:
-      - '.github/workflows/build-llvm.yml'
+  # push:
+  #   paths:
+  #     - '.github/workflows/build-llvm.yml'
 
 env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
@@ -270,7 +270,7 @@ jobs:
       - name: Download Linux and macOS ARM artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: llvm-toolchain-(Linux-X64|macOS-ARM64)
+          pattern: llvm-*
           path: artifacts-in
           merge-multiple: false
           run-id: ${{ steps.artifact_run.outputs.run_id }}
@@ -278,8 +278,18 @@ jobs:
       - name: Extract artifacts
         run: |
           mkdir -p linux_llvm mac_arm_llvm
-          TAR_LINUX="$(find artifacts-in/llvm-toolchain-Linux-X64 -name '*.tar.gz' -print -quit)"
-          TAR_MAC="$(find artifacts-in/llvm-toolchain-macOS-ARM64 -name '*.tar.gz' -print -quit)"
+          TAR_LINUX="$(find artifacts-in -name '*.tar.gz' -path '*Linux*X64*' -print -quit)"
+          TAR_MAC="$(find artifacts-in -name '*.tar.gz' -path '*macOS*ARM64*' -print -quit)"
+          if [ -z "$TAR_LINUX" ] || [ ! -f "$TAR_LINUX" ]; then
+            echo "::error::Linux X64 artifact not found under artifacts-in. Contents:"
+            find artifacts-in -type f 2>/dev/null || true
+            exit 1
+          fi
+          if [ -z "$TAR_MAC" ] || [ ! -f "$TAR_MAC" ]; then
+            echo "::error::macOS ARM64 artifact not found under artifacts-in. Contents:"
+            find artifacts-in -type f 2>/dev/null || true
+            exit 1
+          fi
           tar -xzf "$TAR_LINUX" -C linux_llvm
           tar -xzf "$TAR_MAC" -C mac_arm_llvm
 
