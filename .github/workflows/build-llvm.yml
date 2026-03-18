@@ -128,7 +128,7 @@ jobs:
             curl -fSL -o "$REPO_BIN" "https://gitee.com/oschina/repo/raw/fork_flow/repo-py3"
             head -c 2 "$REPO_BIN" | grep -q '#!' || { echo "::error::Downloaded repo script invalid (no shebang)"; exit 1; }
             chmod a+x "$REPO_BIN"
-            python -m pip install requests 2>/dev/null || pip3 install requests 2>/dev/null || true
+            python -m pip install requests || pip3 install requests || pip install requests
           fi
           echo "$REPO_DIR" >> "$GITHUB_PATH"
           export PATH="$REPO_DIR:$PATH"
@@ -207,7 +207,7 @@ jobs:
           LLVM_SHA="$(git -C "$LLVM_PROJECT_DIR" rev-parse HEAD)"
           LLVM_SHA_SHORT="${LLVM_SHA:0:7}"
           GITHUB_SHA_SHORT="${GITHUB_SHA:0:7}"
-          ARCHIVE_NAME="llvm-toolchain_${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
+          ARCHIVE_NAME="llvm-${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
 
           OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
           # Pipe through pigz so it works on both GNU tar (Linux) and BSD tar (macOS)
@@ -219,7 +219,7 @@ jobs:
       - name: Upload artifact to GitHub
         uses: actions/upload-artifact@v4
         with:
-          name: llvm-toolchain-${{ runner.os }}-${{ runner.arch }}
+          name: ${{ steps.archive.outputs.name }}
           path: ${{ steps.archive.outputs.path }}
           retention-days: 1
 
