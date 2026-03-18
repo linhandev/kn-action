@@ -1,4 +1,6 @@
 // Adds a Maven proxy as the first repository for all resolution.
+// When proxy is set, replaces cache-redirector.jetbrains.com URLs with the proxy so
+// dependency resolution never hits JetBrains' cache redirector (avoids network failures in CI).
 // Activated only when MAVEN_PROXY_URL env var is set. No-op otherwise.
 
 def proxyUrl = System.getenv('MAVEN_PROXY_URL')
@@ -10,6 +12,7 @@ gradle.startParameter.setRefreshDependencies(true)
 def proxyUri = uri(proxyUrl)
 def isInsecure = proxyUrl.startsWith('http://')
 
+// Add proxy first for plugin management
 beforeSettings { settings ->
     settings.pluginManagement.repositories {
         maven {
@@ -19,11 +22,59 @@ beforeSettings { settings ->
     }
 }
 
-allprojects {
-    repositories {
+// After settings (and cache-redirector plugin) run, replace any cache-redirector.jetbrains.com
+// repository URLs with our proxy so resolution goes to the proxy instead of JetBrains.
+gradle.settingsEvaluated { settings ->
+    def replaceCacheRedirector = { repo ->
+        if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+            def u = repo.getUrl().toString()
+            if (u.contains('cache-redirector.jetbrains.com')) {
+                repo.setUrl(proxyUri)
+                if (isInsecure) repo.allowInsecureProtocol = true
+            }
+        }
+    }
+    settings.pluginManagement.repositories.configureEach(replaceCacheRedirector)
+    try {
+        def drm = settings.dependencyResolutionManagement
+        if (drm.repositories) drm.repositories.configureEach(replaceCacheRedirector)
+    } catch (Exception ignored) { /* DRM may not be present */ }
+}
+
+// Add proxy first so it is tried before any project-declared repos
+gradle.beforeProject { project ->
+    project.repositories {
         maven {
             url = proxyUri
             if (isInsecure) allowInsecureProtocol = true
+        }
+    }
+    project.buildscript.repositories {
+        maven {
+            url = proxyUri
+            if (isInsecure) allowInsecureProtocol = true
+        }
+    }
+}
+
+// Replace cache-redirector URLs so resolution never hits JetBrains (avoids network failures)
+allprojects { project ->
+    project.repositories.configureEach { repo ->
+        if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+            def u = repo.getUrl().toString()
+            if (u.contains('cache-redirector.jetbrains.com')) {
+                repo.setUrl(proxyUri)
+                if (isInsecure) repo.allowInsecureProtocol = true
+            }
+        }
+    }
+    project.buildscript.repositories.configureEach { repo ->
+        if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+            def u = repo.getUrl().toString()
+            if (u.contains('cache-redirector.jetbrains.com')) {
+                repo.setUrl(proxyUri)
+                if (isInsecure) repo.allowInsecureProtocol = true
+            }
         }
     }
 }
