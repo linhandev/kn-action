@@ -233,16 +233,25 @@ jobs:
         with:
           path: ${{ steps.archive.outputs.path }}
 
-  # Post step: merge Linux x64 artifact into host toolchain, then build/run tests (runs on self-hosted macOS ARM64).
+  # Post step: merge Linux x64 artifact into host toolchain, then build/run tests
   cross-copy:
     needs: [build]
     if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    env:
+      HOST_DIR: ${{ matrix.host_dir }}
+      HOST_SUFFIX: ${{ matrix.host_suffix }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macos-arm64
             runner: [self-hosted, macOS, ARM64, llvm]
+            host_dir: host_arm_llvm
+            host_suffix: macOS_ARM64
+          - platform: macos-x64
+            runner: [self-hosted, macOS, X64, llvm]
+            host_dir: host_x64_llvm
+            host_suffix: macOS_X64
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout kn-action
@@ -260,10 +269,10 @@ jobs:
         run: |
           if [ "$SKIP_BUILD" = "true" ]; then
             echo "linux_pattern=llvm-.*_Linux_X64\.tar\.gz" >> "$GITHUB_OUTPUT"
-            echo "mac_pattern=llvm-.*_macOS_ARM64\.tar\.gz" >> "$GITHUB_OUTPUT"
+            echo "host_pattern=llvm-.*_${HOST_SUFFIX}\\.tar\\.gz" >> "$GITHUB_OUTPUT"
           else
             echo "linux_artifact_name=llvm-${LLVM_SHA}_act-${ACTION_SHA}_Linux_X64.tar.gz" >> "$GITHUB_OUTPUT"
-            echo "mac_artifact_name=llvm-${LLVM_SHA}_act-${ACTION_SHA}_macOS_ARM64.tar.gz" >> "$GITHUB_OUTPUT"
+            echo "host_artifact_name=llvm-${LLVM_SHA}_act-${ACTION_SHA}_${HOST_SUFFIX}.tar.gz" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download Linux X64 artifact
@@ -273,60 +282,52 @@ jobs:
           pattern: ${{ steps.artifacts.outputs.linux_pattern }}
           path: ${{ github.workspace }}/artifacts-in
 
-      - name: Download macOS ARM64 artifact
+      - name: Download host artifact
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: ${{ steps.artifacts.outputs.mac_artifact_name }}
-          pattern: ${{ steps.artifacts.outputs.mac_pattern }}
+          name: ${{ steps.artifacts.outputs.host_artifact_name }}
+          pattern: ${{ steps.artifacts.outputs.host_pattern }}
           path: ${{ github.workspace }}/artifacts-in
 
       - name: Extract artifacts
         id: extract
         run: |
-          ls -lah artifacts-in
-          mkdir -p linux_llvm mac_arm_llvm
+          echo "artifacts-in: $(ls artifacts-in)"
+          mkdir -p linux_llvm "$HOST_DIR"
           TAR_LINUX="$(find artifacts-in -name '*.tar.gz' -path '*Linux*X64*' -print -quit)"
-          TAR_MAC="$(find artifacts-in -name '*.tar.gz' -path '*macOS*ARM64*' -print -quit)"
+          TAR_HOST="$(find artifacts-in -name '*.tar.gz' -path "*${HOST_SUFFIX}*" -print -quit)"
           if [ -z "$TAR_LINUX" ] || [ ! -f "$TAR_LINUX" ]; then
             echo "::error::Linux X64 artifact not found under artifacts-in. Contents:"
             find artifacts-in -type f 2>/dev/null || true
             exit 1
           fi
-          if [ -z "$TAR_MAC" ] || [ ! -f "$TAR_MAC" ]; then
-            echo "::error::macOS ARM64 artifact not found under artifacts-in. Contents:"
+          if [ -z "$TAR_HOST" ] || [ ! -f "$TAR_HOST" ]; then
+            echo "::error::Host artifact ($HOST_SUFFIX) not found under artifacts-in. Contents:"
             find artifacts-in -type f 2>/dev/null || true
             exit 1
           fi
-          echo "mac_tar_basename=$(basename "$TAR_MAC")" >> "$GITHUB_OUTPUT"
+          echo "host_tar_basename=$(basename "$TAR_HOST")" >> "$GITHUB_OUTPUT"
           tar -xzf "$TAR_LINUX" -C linux_llvm
           # Suppress macOS xattr extended-header warning (LIBARCHIVE.xattr.com.apple.provenance)
-          tar -xzf "$TAR_MAC" -C mac_arm_llvm 2>/dev/null
+          tar -xzf "$TAR_HOST" -C "$HOST_DIR" 2>/dev/null
 
-      - name: Cross-copy Linux bits into macOS ARM (dereference symlinks)
+      - name: Cross-copy Linux bits into host toolchain (dereference symlinks)
         run: |
           clang_linux_x86_64="$(pwd)/linux_llvm/out/llvm-install"
-          clang_darwin_arm64="$(pwd)/mac_arm_llvm/out/llvm-install"
-          
-          ls -lah
-          ls "$clang_linux_x86_64"
-          ls "$clang_darwin_arm64"
+          clang_host="$(pwd)/$HOST_DIR/out/llvm-install"
 
           # make sure target folder exists to get consistent copy behavior
-          mkdir -p "${clang_darwin_arm64}/include"
+          mkdir -p "${clang_host}/include"
 
-          # if [ ! -e "${clang_darwin_arm64}/bin/aarch64-unknown-linux-ohos-clang++" ]; then
-          #   cp -f "${clang_linux_x86_64}/bin/aarch64-unknown-linux-ohos-clang++" "${clang_darwin_arm64}/bin/aarch64-unknown-linux-ohos-clang++"
-          # fi
-
-          cp -Lrf "${clang_linux_x86_64}/lib/aarch64-linux-ohos" "${clang_darwin_arm64}/lib"
-          cp -Lrf "${clang_linux_x86_64}/include/libcxx-ohos" "${clang_darwin_arm64}/include"
-          cp -Lrf "${clang_linux_x86_64}/lib/x86_64-linux-ohos" "${clang_darwin_arm64}/lib"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/bin" "${clang_darwin_arm64}/lib/clang/19"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/profile" "${clang_darwin_arm64}/lib/clang/19/include"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/fuzzer" "${clang_darwin_arm64}/lib/clang/19/include"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/share" "${clang_darwin_arm64}/lib/clang/19"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/sanitizer" "${clang_darwin_arm64}/lib/clang/19/include"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/lib" "${clang_darwin_arm64}/lib/clang/19"
+          cp -Lrf "${clang_linux_x86_64}/lib/aarch64-linux-ohos" "${clang_host}/lib"
+          cp -Lrf "${clang_linux_x86_64}/include/libcxx-ohos" "${clang_host}/include"
+          cp -Lrf "${clang_linux_x86_64}/lib/x86_64-linux-ohos" "${clang_host}/lib"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/bin" "${clang_host}/lib/clang/19"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/profile" "${clang_host}/lib/clang/19/include"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/fuzzer" "${clang_host}/lib/clang/19/include"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/share" "${clang_host}/lib/clang/19"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/sanitizer" "${clang_host}/lib/clang/19/include"
+          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/lib" "${clang_host}/lib/clang/19"
 
       - name: Create test source
         run: |
@@ -342,14 +343,14 @@ jobs:
           int main() { return 0; }
           EOF
 
-      - name: Build and run macOS test exe
+      - name: Build and run host test exe
         run: |
-          TC="$(pwd)/mac_arm_llvm/out/llvm-install"
+          TC="$(pwd)/$HOST_DIR/out/llvm-install"
           export PATH="$TC/bin:$PATH"
-          # Use host macOS SDK so toolchain clang gets proper libc (printf, etc.)
+          # Use host platform SDK so toolchain clang gets proper libc (e.g. macOS: xcrun --show-sdk-path)
           SDK="$(xcrun --show-sdk-path)"
-          clang -isysroot "$SDK" test-build/main.c -o test-build/test-macos
-          OUT="$(./test-build/test-macos)"
+          clang -isysroot "$SDK" test-build/main.c -o test-build/test-host
+          OUT="$(./test-build/test-host)"
           if [ "$OUT" != "ok" ]; then
             echo "::error::Expected output 'ok', got: $OUT"
             exit 1
@@ -378,7 +379,7 @@ jobs:
 
       - name: Build OHOS test program
         run: |
-          TC="$(pwd)/mac_arm_llvm/out/llvm-install"
+          TC="$(pwd)/$HOST_DIR/out/llvm-install"
           export PATH="$TC/bin:$PATH"
           RESOURCE_DIR="$TC/lib/clang/19"
           SYSROOT="$(pwd)/sysroot-ohos-aarch64/$OHOS_SYSROOT"
@@ -390,11 +391,11 @@ jobs:
             -o test-build/test-ohos-aarch64
           file test-build/test-ohos-aarch64
 
-      - name: Re-pack and upload macOS ARM artifact with Linux cross
+      - name: Re-pack and upload host artifact with Linux cross
         run: |
-          MAC_BASENAME="${{ steps.extract.outputs.mac_tar_basename }}"
-          ARCHIVE_NAME="${MAC_BASENAME%.tar.gz}-full.tar.gz"
-          tar -cf - -C mac_arm_llvm out/llvm-install | pigz -9 > "$ARCHIVE_NAME"
+          HOST_BASENAME="${{ steps.extract.outputs.host_tar_basename }}"
+          ARCHIVE_NAME="${HOST_BASENAME%.tar.gz}-full.tar.gz"
+          tar -cf - -C "$HOST_DIR" out/llvm-install | pigz -9 > "$ARCHIVE_NAME"
           echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
         id: repack
 
@@ -403,21 +404,26 @@ jobs:
         with:
           path: ${{ github.workspace }}/${{ steps.repack.outputs.archive_name }}
 
-      - name: Upload test binary (macOS host)
-        uses: ./kn-action/.github/actions/upload-artifact-local
-        with:
-          path: ${{ github.workspace }}/test-build/test-macos
+      - name: Pack test binaries
+        id: test_binaries
+        env:
+          LLVM_SHA: ${{ needs.build.outputs.llvm_sha_short }}
+          ACTION_SHA: ${{ needs.build.outputs.action_sha_short }}
+        run: |
+          TEST_ARCHIVE="test-binaries-${LLVM_SHA}_act-${ACTION_SHA}_${HOST_SUFFIX}.tar.gz"
+          tar -cf - -C test-build test-host test-ohos-aarch64 | pigz -9 > "$TEST_ARCHIVE"
+          echo "archive_name=$TEST_ARCHIVE" >> "$GITHUB_OUTPUT"
 
-      - name: Upload test binary (OHOS aarch64)
+      - name: Upload test binaries artifact
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
-          path: ${{ github.workspace }}/test-build/test-ohos-aarch64
+          path: ${{ github.workspace }}/${{ steps.test_binaries.outputs.archive_name }}
 
   actions-timeline:
     needs: [cross-copy]
+    if: always()
     runs-on: ubuntu-22.04
     permissions:
       actions: read
     steps:
       - uses: Kesin11/actions-timeline@v3
-        
