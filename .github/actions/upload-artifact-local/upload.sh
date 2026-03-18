@@ -12,7 +12,9 @@ fi
 
 mkdir -p "$cache_dir"
 cache_path="$cache_dir/$name"
-cp -f "$path" "$cache_path"
+if ! [ "$path" -ef "$cache_path" ]; then
+  cp -f "$path" "$cache_path"
+fi
 echo "path=$cache_path" >> "$GITHUB_OUTPUT"
 echo "Cached to $cache_path"
 
