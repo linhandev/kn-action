@@ -12,9 +12,10 @@ Uploads a single tar/zip file to your LAN artifact server and to the runner's lo
 
 ## Outputs
 
-| Output | Description |
-|--------|-------------|
-| `path` | Path where the artifact was written in the local cache. |
+| Output         | Description |
+|----------------|-------------|
+| `path`         | Path where the artifact was written in the local cache. |
+| `download_url` | URL to download the artifact from the server (e.g. for job summary). |
 
 ## Example
 

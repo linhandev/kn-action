@@ -27,4 +27,7 @@ if [ "$code" != "200" ]; then
   echo "::error::Upload failed (HTTP $code): $(cat /tmp/upload-artifact-local.out)"
   exit 1
 fi
+download_url="${server_url}/artifacts/${name}"
+echo "download_url=$download_url" >> "$GITHUB_OUTPUT"
 echo "Uploaded artifact: $name"
+echo "Download: $download_url"

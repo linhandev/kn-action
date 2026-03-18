@@ -18,6 +18,9 @@ outputs:
   path:
     description: 'Path where the artifact was written in the local cache'
     value: ${{ steps.upload.outputs.path }}
+  download_url:
+    description: 'URL to download the artifact from the server'
+    value: ${{ steps.upload.outputs.download_url }}
 runs:
   using: composite
   steps:

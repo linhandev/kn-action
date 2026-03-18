@@ -38,6 +38,9 @@ jobs:
   build:
     if: github.event.inputs.skip_build != 'true'
     environment: env
+    outputs:
+      llvm_sha_short: ${{ steps.archive.outputs.llvm_sha_short }}
+      action_sha_short: ${{ steps.archive.outputs.action_sha_short }}
     strategy:
       fail-fast: false
       matrix:
@@ -220,6 +223,8 @@ jobs:
           tar -cf - -C "$LLVM_WORKSPACE" out/llvm-install | pigz -9 > "$OUT_PATH"
           echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
           echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+          echo "llvm_sha_short=$LLVM_SHA_SHORT" >> "$GITHUB_OUTPUT"
+          echo "action_sha_short=$GITHUB_SHA_SHORT" >> "$GITHUB_OUTPUT"
           echo "path=$OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact to local server
@@ -244,32 +249,34 @@ jobs:
         with:
           path: kn-action
 
-      # Build job uses artifact name llvm-<llvm_sha>_act-<github_sha>_<OS>_<ARCH>.tar.gz
-      - name: Set download patterns
-        id: patterns
+      # When skip_build false: use exact artifact names from build job (llvm + action commit). When true: use pattern for latest.
+      - name: Set artifact names or patterns
+        id: artifacts
         env:
-          GITHUB_SHA: ${{ github.sha }}
           SKIP_BUILD: ${{ github.event.inputs.skip_build }}
+          LLVM_SHA: ${{ needs.build.outputs.llvm_sha_short }}
+          ACTION_SHA: ${{ needs.build.outputs.action_sha_short }}
         run: |
           if [ "$SKIP_BUILD" = "true" ]; then
             echo "linux_pattern=llvm-.*_Linux_X64\.tar\.gz" >> "$GITHUB_OUTPUT"
             echo "mac_pattern=llvm-.*_macOS_ARM64\.tar\.gz" >> "$GITHUB_OUTPUT"
           else
-            SHORT="${GITHUB_SHA:0:7}"
-            echo "linux_pattern=llvm-.*_act-${SHORT}_Linux_X64\.tar\.gz" >> "$GITHUB_OUTPUT"
-            echo "mac_pattern=llvm-.*_act-${SHORT}_macOS_ARM64\.tar\.gz" >> "$GITHUB_OUTPUT"
+            echo "linux_artifact_name=llvm-${LLVM_SHA}_act-${ACTION_SHA}_Linux_X64.tar.gz" >> "$GITHUB_OUTPUT"
+            echo "mac_artifact_name=llvm-${LLVM_SHA}_act-${ACTION_SHA}_macOS_ARM64.tar.gz" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download Linux X64 artifact
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          pattern: ${{ steps.patterns.outputs.linux_pattern }}
+          name: ${{ steps.artifacts.outputs.linux_artifact_name }}
+          pattern: ${{ steps.artifacts.outputs.linux_pattern }}
           path: ${{ github.workspace }}/artifacts-in
 
       - name: Download macOS ARM64 artifact
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          pattern: ${{ steps.patterns.outputs.mac_pattern }}
+          name: ${{ steps.artifacts.outputs.mac_artifact_name }}
+          pattern: ${{ steps.artifacts.outputs.mac_pattern }}
           path: ${{ github.workspace }}/artifacts-in
 
       - name: Extract artifacts
