@@ -77,11 +77,6 @@ jobs:
             echo "repo_dir=$REPO_DIR"
           } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3'
-
       - name: Install macOS build dependencies
         if: runner.os == 'macOS'
         env:
@@ -97,7 +92,7 @@ jobs:
             return $ret
           }
           brew_install_quiet swig git-lfs java coreutils wget
-          brew_install_quiet pigz
+          brew_install_quiet pigz python
 
       - name: Setup git
         shell: bash
@@ -118,13 +113,9 @@ jobs:
             echo "::error::GITCODE_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (GitCode token with read access)."
             exit 1
           fi
-          # Disable credential helper so we rely only on URL-embedded token (avoids cached bad credentials)
           git config --global credential.helper ''
-          # Clear any persisted insteadOf from prior runs (self-hosted runners retain global config)
           git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
-          # HTTPS: so repo sync uses token for https://gitcode.com/...
           git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
-          # SSH→HTTPS: use --add so both rules are kept (second would overwrite first otherwise)
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
       - name: Setup repo tool
@@ -137,7 +128,7 @@ jobs:
             curl -fSL -o "$REPO_BIN" "https://gitee.com/oschina/repo/raw/fork_flow/repo-py3"
             head -c 2 "$REPO_BIN" | grep -q '#!' || { echo "::error::Downloaded repo script invalid (no shebang)"; exit 1; }
             chmod a+x "$REPO_BIN"
-            python -m pip install requests
+            python -m pip install requests 2>/dev/null || pip3 install requests 2>/dev/null || true
           fi
           echo "$REPO_DIR" >> "$GITHUB_PATH"
           export PATH="$REPO_DIR:$PATH"
