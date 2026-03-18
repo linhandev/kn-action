@@ -12,10 +12,6 @@ on:
         description: 'Wipe workspace and build from scratch'
         default: false
         type: boolean
-      post_step_only:
-        description: 'Skip build; run post step only using artifacts from latest successful run'
-        default: false
-        type: boolean
       run_id:
         description: 'When post step only: use this run ID for artifacts (leave empty for latest success)'
         required: false
@@ -34,7 +30,7 @@ env:
 
 jobs:
   build:
-    if: github.event.inputs.post_step_only != 'true'
+    if: github.event.inputs.run_id == ''
     environment: env
     strategy:
       fail-fast: false
@@ -234,46 +230,13 @@ jobs:
     permissions:
       actions: read
     steps:
-      - name: Get run ID for artifact download
-        if: github.event.inputs.post_step_only == 'true'
-        id: get_run
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const runIdInput = '${{ github.event.inputs.run_id }}'.trim();
-            if (runIdInput) {
-              core.setOutput('run_id', runIdInput);
-              return;
-            }
-            const { data } = await github.rest.actions.listWorkflowRunsForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'build-llvm.yml',
-              status: 'success',
-              per_page: 1
-            });
-            if (!data.workflow_runs?.length) {
-              core.setFailed('No successful run found for this workflow. Run a full build first.');
-              return;
-            }
-            core.setOutput('run_id', String(data.workflow_runs[0].id));
-
-      - name: Set artifact run ID
-        id: artifact_run
-        run: |
-          if [ "${{ github.event.inputs.post_step_only }}" = "true" ]; then
-            echo "run_id=${{ steps.get_run.outputs.run_id }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "run_id=${{ github.run_id }}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Download Linux and macOS ARM artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: llvm-*
           path: artifacts-in
           merge-multiple: false
-          run-id: ${{ steps.artifact_run.outputs.run_id }}
+          run-id: ${{ github.event.inputs.run_id || github.run_id }}
 
       - name: Extract artifacts
         run: |

@@ -212,6 +212,7 @@ jobs:
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
           bash scripts/build-ohos.sh
+          ./gradlew --stop
 
       - name: Promote clean build cache to persisted Gradle home
         if: success() && steps.vars.outputs.clean_build == 'true'
