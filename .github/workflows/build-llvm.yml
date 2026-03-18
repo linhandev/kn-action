@@ -242,6 +242,7 @@ jobs:
 
       - name: Extract artifacts
         run: |
+          ls -lah
           mkdir -p linux_llvm mac_arm_llvm
           TAR_LINUX="$(find artifacts-in -name '*.tar.gz' -path '*Linux*X64*' -print -quit)"
           TAR_MAC="$(find artifacts-in -name '*.tar.gz' -path '*macOS*ARM64*' -print -quit)"
@@ -262,6 +263,10 @@ jobs:
         run: |
           clang_linux_x86_64="$(pwd)/linux_llvm/out/llvm-install"
           clang_darwin_arm64="$(pwd)/mac_arm_llvm/out/llvm-install"
+          
+          ls -lah
+          ls clang_linux_x86_64
+          ls clang_darwin_arm64
 
           # make sure target folder exists to get consistent copy behavior
           mkdir -p "${clang_darwin_arm64}/include"
