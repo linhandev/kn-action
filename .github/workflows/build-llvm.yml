@@ -263,7 +263,8 @@ jobs:
             exit 1
           fi
           tar -xzf "$TAR_LINUX" -C linux_llvm
-          tar -xzf "$TAR_MAC" -C mac_arm_llvm
+          # Suppress macOS xattr extended-header warning (LIBARCHIVE.xattr.com.apple.provenance)
+          tar -xzf "$TAR_MAC" -C mac_arm_llvm 2>/dev/null
 
       - name: Cross-copy Linux bits into macOS ARM (dereference symlinks)
         run: |
@@ -277,9 +278,9 @@ jobs:
           # make sure target folder exists to get consistent copy behavior
           mkdir -p "${clang_darwin_arm64}/include"
 
-          if [ ! -e "${clang_darwin_arm64}/bin/aarch64-unknown-linux-ohos-clang++" ]; then
-            cp -f "${clang_linux_x86_64}/bin/aarch64-unknown-linux-ohos-clang++" "${clang_darwin_arm64}/bin/aarch64-unknown-linux-ohos-clang++"
-          fi
+          # if [ ! -e "${clang_darwin_arm64}/bin/aarch64-unknown-linux-ohos-clang++" ]; then
+          #   cp -f "${clang_linux_x86_64}/bin/aarch64-unknown-linux-ohos-clang++" "${clang_darwin_arm64}/bin/aarch64-unknown-linux-ohos-clang++"
+          # fi
 
           cp -Lrf "${clang_linux_x86_64}/lib/aarch64-linux-ohos" "${clang_darwin_arm64}/lib"
           cp -Lrf "${clang_linux_x86_64}/include/libcxx-ohos" "${clang_darwin_arm64}/include"
