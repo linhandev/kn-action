@@ -230,13 +230,15 @@ jobs:
     permissions:
       actions: read
     steps:
-      - name: Download Linux and macOS ARM artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: llvm-*
           path: artifacts-in
           merge-multiple: false
           run-id: ${{ github.event.inputs.run_id || github.run_id }}
+          # Required when run-id is a different run: explicit token so cross-run download works (see actions/download-artifact#295)
+          github-token: ${{ github.token }}
 
       - name: Extract artifacts
         run: |
