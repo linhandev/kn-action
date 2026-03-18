@@ -223,7 +223,7 @@ jobs:
           echo "path=$OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact to local server
-        uses: ./.github/actions/upload-artifact-local
+        uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ steps.archive.outputs.path }}
 
@@ -265,13 +265,13 @@ jobs:
           echo "mac_artifact_name=$TAR_MAC" >> "$GITHUB_OUTPUT"
 
       - name: Download Linux X64 artifact
-        uses: ./.github/actions/download-artifact-local
+        uses: ./kn-action/.github/actions/download-artifact-local
         with:
           name: ${{ steps.list.outputs.linux_artifact_name }}
           path: ${{ github.workspace }}/artifacts-in
 
       - name: Download macOS ARM64 artifact
-        uses: ./.github/actions/download-artifact-local
+        uses: ./kn-action/.github/actions/download-artifact-local
         with:
           name: ${{ steps.list.outputs.mac_artifact_name }}
           path: ${{ github.workspace }}/artifacts-in
@@ -372,17 +372,17 @@ jobs:
         id: repack
 
       - name: Upload merged artifact
-        uses: ./.github/actions/upload-artifact-local
+        uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ github.workspace }}/${{ steps.repack.outputs.archive_name }}
 
       - name: Upload test binary (macOS host)
-        uses: ./.github/actions/upload-artifact-local
+        uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ github.workspace }}/test-build/test-macos
 
       - name: Upload test binary (OHOS aarch64)
-        uses: ./.github/actions/upload-artifact-local
+        uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ github.workspace }}/test-build/test-ohos-aarch64
 
