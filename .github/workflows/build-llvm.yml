@@ -222,14 +222,12 @@ jobs:
           echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
           echo "path=$OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload artifact to GitHub
-        uses: actions/upload-artifact@v4
+      - name: Upload artifact to local server
+        uses: ./.github/actions/upload-artifact-local
         with:
-          name: ${{ steps.archive.outputs.name }}
           path: ${{ steps.archive.outputs.path }}
-          retention-days: 1
 
-  # Post step: merge Linux x64 artifact into host toolchain, then build/run tests (matrix: mac arm only for now; mac x64 / windows later).
+  # Post step: merge Linux x64 artifact into host toolchain, then build/run tests (runs on self-hosted macOS ARM64).
   cross-copy:
     needs: [build]
     if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
@@ -238,20 +236,45 @@ jobs:
       matrix:
         include:
           - platform: macos-arm64
-            runner: macos-14
+            runner: [self-hosted, macOS, ARM64, llvm]
     runs-on: ${{ matrix.runner }}
-    permissions:
-      actions: read
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
         with:
-          pattern: llvm-*
-          path: artifacts-in
-          merge-multiple: false
-          run-id: ${{ github.event.inputs.run_id || github.run_id }}
-          # Required when run-id is a different run: explicit token so cross-run download works (see actions/download-artifact#295)
-          github-token: ${{ github.token }}
+          path: kn-action
+
+      - name: List artifacts and resolve names
+        id: list
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
+          JSON="$(curl -sS -H "Accept: application/json" "$SERVER/artifacts")"
+          ALL=$(echo "$JSON" | python3 -c "import sys,json; a=json.load(sys.stdin).get('artifacts',[]); print('\n'.join(a))")
+          # Prefer artifacts from this run (name contains act-<short-sha>)
+          SHORT="${GITHUB_SHA:0:7}"
+          NAMES=$(echo "$ALL" | grep "act-${SHORT}" || echo "$ALL")
+          TAR_LINUX="$(echo "$NAMES" | grep -E 'Linux.*X64|X64.*Linux' | head -1)"
+          TAR_MAC="$(echo "$NAMES" | grep -E 'macOS.*ARM64|ARM64.*macOS' | head -1)"
+          if [ -z "$TAR_LINUX" ] || [ -z "$TAR_MAC" ]; then
+            echo "::error::Could not find Linux X64 and macOS ARM64 artifacts. List: $ALL"
+            exit 1
+          fi
+          echo "linux_artifact_name=$TAR_LINUX" >> "$GITHUB_OUTPUT"
+          echo "mac_artifact_name=$TAR_MAC" >> "$GITHUB_OUTPUT"
+
+      - name: Download Linux X64 artifact
+        uses: ./.github/actions/download-artifact-local
+        with:
+          name: ${{ steps.list.outputs.linux_artifact_name }}
+          path: ${{ github.workspace }}/artifacts-in
+
+      - name: Download macOS ARM64 artifact
+        uses: ./.github/actions/download-artifact-local
+        with:
+          name: ${{ steps.list.outputs.mac_artifact_name }}
+          path: ${{ github.workspace }}/artifacts-in
 
       - name: Extract artifacts
         id: extract
@@ -304,19 +327,24 @@ jobs:
       - name: Create test source
         run: |
           mkdir -p test-build
-          cat > test-build/main.cpp << 'EOF'
-          #include <cstdio>
-          int main() {
-            std::printf("ok\n");
+          cat > test-build/main.c << 'EOF'
+          #include <stdio.h>
+          int main(void) {
+            printf("ok\n");
             return 0;
           }
+          EOF
+          cat > test-build/main.cpp << 'EOF'
+          int main() { return 0; }
           EOF
 
       - name: Build and run macOS test exe
         run: |
           TC="$(pwd)/mac_arm_llvm/out/llvm-install"
           export PATH="$TC/bin:$PATH"
-          clang++ -std=c++17 test-build/main.cpp -o test-build/test-macos
+          # Use host macOS SDK so toolchain clang gets proper libc (printf, etc.)
+          SDK="$(xcrun --show-sdk-path)"
+          clang -isysroot "$SDK" test-build/main.c -o test-build/test-macos
           OUT="$(./test-build/test-macos)"
           if [ "$OUT" != "ok" ]; then
             echo "::error::Expected output 'ok', got: $OUT"
@@ -344,25 +372,19 @@ jobs:
         id: repack
 
       - name: Upload merged artifact
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-local
         with:
-          name: llvm-toolchain-macOS-ARM64-with-linux-cross
-          path: ${{ steps.repack.outputs.archive_name }}
-          retention-days: 7
+          path: ${{ github.workspace }}/${{ steps.repack.outputs.archive_name }}
 
       - name: Upload test binary (macOS host)
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-local
         with:
-          name: test-binary-${{ matrix.platform }}
-          path: test-build/test-macos
-          retention-days: 1
+          path: ${{ github.workspace }}/test-build/test-macos
 
       - name: Upload test binary (OHOS aarch64)
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-local
         with:
-          name: test-binary-ohos-aarch64
-          path: test-build/test-ohos-aarch64
-          retention-days: 1
+          path: ${{ github.workspace }}/test-build/test-ohos-aarch64
 
   actions-timeline:
     needs: [cross-copy]

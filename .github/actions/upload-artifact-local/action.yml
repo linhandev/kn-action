@@ -1,0 +1,32 @@
+# Upload a single tar/zip artifact to the local artifact server and to the runner cache.
+# Replaces actions/upload-artifact when using self-hosted runners on LAN with infra/artifact-server.
+name: Upload artifact (local)
+description: Upload a tar/zip file to the artifact server and save to local cache (~/runner/artifact).
+inputs:
+  path:
+    description: 'Path to the tar or zip file to upload (filename used as artifact name)'
+    required: true
+  server_url:
+    description: 'Base URL of the artifact server'
+    required: false
+    default: 'http://192.168.3.5:8765'
+  cache_dir:
+    description: 'Local cache directory (default ~/runner/artifact)'
+    required: false
+    default: '~/runner/artifact'
+outputs:
+  path:
+    description: 'Path where the artifact was written in the local cache'
+    value: ${{ steps.upload.outputs.path }}
+runs:
+  using: composite
+  steps:
+    - name: Upload artifact to local server and cache
+      id: upload
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_SERVER_URL: ${{ inputs.server_url }}
+        INPUT_CACHE_DIR: ${{ inputs.cache_dir }}
+      run: |
+        bash "$GITHUB_ACTION_PATH/upload.sh"

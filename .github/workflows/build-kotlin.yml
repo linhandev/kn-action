@@ -97,7 +97,6 @@ jobs:
       - name: Setup environment
         id: vars
         run: |
-          echo realpath ${{ env.ARTIFACT_LOCAL_PATH }}
           if [ "$RUNNER_OS" = "macOS" ]; then
             /usr/bin/xcrun -f bitcode-build-tool
           fi

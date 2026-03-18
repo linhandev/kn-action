@@ -1,0 +1,37 @@
+# Download an artifact from the local cache or from the artifact server.
+# If the file exists in ~/runner/artifact, use it; otherwise download from server and cache it.
+name: Download artifact (local)
+description: Download a tar/zip artifact by name; use local cache if present.
+inputs:
+  name:
+    description: 'Artifact name (e.g. llvm-abc123_act-def456_macOS_ARM64.tar.gz)'
+    required: true
+  server_url:
+    description: 'Base URL of the artifact server'
+    required: false
+    default: 'http://192.168.3.5:8765'
+  cache_dir:
+    description: 'Local cache directory (default ~/runner/artifact)'
+    required: false
+    default: '~/runner/artifact'
+  path:
+    description: 'Directory to place the downloaded file (default: cache_dir); file will be cache_dir/name'
+    required: false
+    default: ''
+outputs:
+  path:
+    description: 'Absolute path to the downloaded artifact file'
+    value: ${{ steps.download.outputs.path }}
+runs:
+  using: composite
+  steps:
+    - name: Download artifact from cache or server
+      id: download
+      shell: bash
+      env:
+        INPUT_NAME: ${{ inputs.name }}
+        INPUT_SERVER_URL: ${{ inputs.server_url }}
+        INPUT_CACHE_DIR: ${{ inputs.cache_dir }}
+        INPUT_PATH: ${{ inputs.path }}
+      run: |
+        bash "$GITHUB_ACTION_PATH/download.sh"
