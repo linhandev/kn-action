@@ -52,7 +52,7 @@ jobs:
           - runner: [self-hosted, macOS, X64, llvm]
             container_image: ''
           - runner: [self-hosted, linux, X64, llvm]
-            container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:latest
+            container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:cd720ae
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ matrix.container_image }}
@@ -236,7 +236,7 @@ jobs:
 
   # Post step: merge Linux x64 artifact into host toolchain, then build/run tests
   cross-copy:
-    name: cross-copy (${{ matrix.platform }})
+    name: ${{ format('cross-copy ({0})', matrix.platform) }}
     needs: [build]
     if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
     env:
