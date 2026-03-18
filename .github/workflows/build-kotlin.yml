@@ -38,11 +38,11 @@ on:
         required: true
         default: true
         type: boolean
-  # push:
-  #   paths:
-  #     - '.github/workflows/build-kotlin.yml'
-  #     - '.github/actions/prepare-repo/*'
-  #     - 'scripts/maven-proxy.init.gradle'
+  push:
+    paths:
+      - '.github/workflows/build-kotlin.yml'
+      - '.github/actions/prepare-repo/*'
+      - 'scripts/maven-proxy.init.gradle'
 
 # default or global config
 env:
@@ -59,6 +59,7 @@ env:
 
 jobs:
   build:
+    name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
     strategy:
       fail-fast: false
       matrix:
