@@ -49,7 +49,7 @@ env:
   DEFAULT_KOTLIN_BRANCH: develop-2.2.21-OH
   DEFAULT_CLEAN_BUILD: false
   DEFAULT_ARTIFACT_DESTINATION: local
-  DEFAULT_MAVEN_PROXY_URL: http://192.168.3.6:8080/releases
+  DEFAULT_MAVEN_PROXY_URL: http://192.168.3.5:8080/releases
   REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
   WORKSPACE_DIR: ci-workspace
   LOCAL_REFERENCE_DIR: ~/git/ci/
