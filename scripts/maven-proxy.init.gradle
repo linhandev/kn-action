@@ -1,80 +1,90 @@
-// Adds a Maven proxy as the first repository for all resolution.
-// When proxy is set, replaces cache-redirector.jetbrains.com URLs with the proxy so
-// dependency resolution never hits JetBrains' cache redirector (avoids network failures in CI).
+// Forces ALL Gradle dependency resolution through a single Maven proxy.
+// Redirects every remote Maven repository (Maven Central, Google, JetBrains,
+// Gradle Plugin Portal, etc.) to the proxy and removes non-Maven repos.
+// Local file:// repositories are left untouched.
 // Activated only when MAVEN_PROXY_URL env var is set. No-op otherwise.
 
 def proxyUrl = System.getenv('MAVEN_PROXY_URL')
 if (!proxyUrl) return
 
-println("Maven proxy enabled: ${proxyUrl}")
-gradle.startParameter.setRefreshDependencies(true)
-
 def proxyUri = uri(proxyUrl)
 def isInsecure = proxyUrl.startsWith('http://')
 
-// Add proxy first for plugin management
+println("[maven-proxy] Forcing all repositories → ${proxyUrl}")
+
+gradle.startParameter.setRefreshDependencies(true)
+
+// Redirect a Maven repo to the proxy unless it is file-local or already proxied.
+def redirectRepo = { repo ->
+    if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+        def u = repo.url.toString()
+        if (!u.startsWith('file:') && u != proxyUri.toString()) {
+            repo.setUrl(proxyUri)
+            if (isInsecure) repo.allowInsecureProtocol = true
+        }
+    }
+}
+
+// Remove every remote repo from a container, leaving only the proxy (and any file:// repos).
+def enforceExclusiveProxy = { repos, String label ->
+    def toRemove = repos.findAll { repo ->
+        if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+            def u = repo.url.toString()
+            return !u.startsWith('file:') && u != proxyUri.toString()
+        }
+        return true // Ivy, flat-dir, or other non-Maven repos
+    }
+    toRemove.each { repo ->
+        def desc = repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository \
+            ? repo.url : repo.getClass().simpleName
+        println("[maven-proxy]   ${label}: removed ${repo.name} (${desc})")
+        repos.remove(repo)
+    }
+    if (!repos.any { it instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository &&
+                      it.url.toString() == proxyUri.toString() }) {
+        repos.maven {
+            name = 'maven-proxy'
+            url = proxyUri
+            if (isInsecure) allowInsecureProtocol = true
+        }
+    }
+}
+
+// ── Plugin management ────────────────────────────────────────────────
+// Add proxy first so it is available immediately for plugin resolution.
+// Also intercept any repo added later during settings evaluation.
 beforeSettings { settings ->
     settings.pluginManagement.repositories {
         maven {
+            name = 'maven-proxy'
             url = proxyUri
             if (isInsecure) allowInsecureProtocol = true
         }
     }
+    settings.pluginManagement.repositories.whenObjectAdded(redirectRepo)
 }
 
-// After settings (and cache-redirector plugin) run, replace any cache-redirector.jetbrains.com
-// repository URLs with our proxy so resolution goes to the proxy instead of JetBrains.
+// ── Settings-level cleanup ───────────────────────────────────────────
+// After settings fully evaluated, strip out any repo that isn't the proxy.
 gradle.settingsEvaluated { settings ->
-    def replaceCacheRedirector = { repo ->
-        if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
-            def u = repo.getUrl().toString()
-            if (u.contains('cache-redirector.jetbrains.com')) {
-                repo.setUrl(proxyUri)
-                if (isInsecure) repo.allowInsecureProtocol = true
-            }
-        }
-    }
-    settings.pluginManagement.repositories.configureEach(replaceCacheRedirector)
+    enforceExclusiveProxy(settings.pluginManagement.repositories, 'pluginManagement')
     try {
         def drm = settings.dependencyResolutionManagement
-        if (drm.repositories) drm.repositories.configureEach(replaceCacheRedirector)
-    } catch (Exception ignored) { /* DRM may not be present */ }
+        if (drm.repositories.size() > 0) {
+            enforceExclusiveProxy(drm.repositories, 'dependencyResolutionManagement')
+        }
+    } catch (Exception ignored) {}
 }
 
-// Add proxy first so it is tried before any project-declared repos
-gradle.beforeProject { project ->
-    project.repositories {
-        maven {
-            url = proxyUri
-            if (isInsecure) allowInsecureProtocol = true
-        }
-    }
-    project.buildscript.repositories {
-        maven {
-            url = proxyUri
-            if (isInsecure) allowInsecureProtocol = true
-        }
-    }
-}
-
-// Replace cache-redirector URLs so resolution never hits JetBrains (avoids network failures)
+// ── Project-level: intercept additions + enforce after evaluation ────
+// whenObjectAdded redirects repos the moment they are registered.
+// afterEvaluate is the final pass to remove anything that slipped through.
 allprojects { project ->
-    project.repositories.configureEach { repo ->
-        if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
-            def u = repo.getUrl().toString()
-            if (u.contains('cache-redirector.jetbrains.com')) {
-                repo.setUrl(proxyUri)
-                if (isInsecure) repo.allowInsecureProtocol = true
-            }
-        }
-    }
-    project.buildscript.repositories.configureEach { repo ->
-        if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
-            def u = repo.getUrl().toString()
-            if (u.contains('cache-redirector.jetbrains.com')) {
-                repo.setUrl(proxyUri)
-                if (isInsecure) repo.allowInsecureProtocol = true
-            }
-        }
+    project.repositories.whenObjectAdded(redirectRepo)
+    project.buildscript.repositories.whenObjectAdded(redirectRepo)
+
+    project.afterEvaluate {
+        enforceExclusiveProxy(project.repositories, "project:${project.path}")
+        enforceExclusiveProxy(project.buildscript.repositories, "buildscript:${project.path}")
     }
 }

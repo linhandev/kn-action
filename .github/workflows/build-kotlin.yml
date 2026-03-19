@@ -64,8 +64,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: [self-hosted, macOS, ARM64, kotlin]
-          - runner: [self-hosted, macOS, X64, kotlin]
+          # - runner: [self-hosted, macOS, ARM64, kotlin]
+          # - runner: [self-hosted, macOS, X64, kotlin]
           - runner: [self-hosted, linux, X64, kotlin]
     runs-on: ${{ matrix.runner }}
     steps:
@@ -192,7 +192,7 @@ jobs:
           <settings>
             <localRepository>$MAVEN_LOCAL_REPO</localRepository>
             <mirrors><mirror>
-              <id>maven-proxy</id><mirrorOf>central</mirrorOf>
+              <id>maven-proxy</id><mirrorOf>*</mirrorOf>
               <url>$MAVEN_PROXY_URL</url>
             </mirror></mirrors>
           </settings>
