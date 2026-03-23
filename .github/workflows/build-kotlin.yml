@@ -82,14 +82,21 @@ jobs:
           java-version: '8'
 
       - name: Set up Java 11
-        # required for mac x64 only
+        if: runner.os == 'macOS' && runner.arch == 'X64'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '11'
-  
+
+      - name: Set up Java 17
+        if: runner.os == 'Linux'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Set up Java 21
-        # required for linux only
+        if: runner.os == 'Linux'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
