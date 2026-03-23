@@ -146,7 +146,8 @@ jobs:
             echo "artifact_local_path="$(echo "${{ env.ARTIFACT_LOCAL_PATH }}" | sed "s|^~|$HOME|")""
             echo "gradle_user_home=${CI_CACHE_ROOT}gradle_user_home"
             echo "konan_data_dir=${CI_CACHE_ROOT}/konan_data"
-            echo "maven_local_repo=${CI_CACHE_ROOT}/m2_repository"
+            echo "maven_user_home=${CI_CACHE_ROOT}maven_user_home"
+            echo "maven_local_repo=${CI_CACHE_ROOT}maven_user_home/.m2/repository"
             echo "maven_proxy_url=$PROXY_URL"
           } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
@@ -155,20 +156,20 @@ jobs:
           mkdir -p \
             "${{ steps.vars.outputs.gradle_user_home }}" \
             "${{ steps.vars.outputs.konan_data_dir }}" \
-            "${{ steps.vars.outputs.maven_local_repo }}" \
+            "${{ steps.vars.outputs.maven_user_home }}/.m2" \
             "${{ steps.vars.outputs.artifact_local_path }}"
 
       - name: Clean Konan and Maven caches for clean build
         if: steps.vars.outputs.clean_build == 'true'
         env:
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
-          MAVEN_LOCAL_REPO: ${{ steps.vars.outputs.maven_local_repo }}
+          MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
         run: |
-          echo "Removing contents of KONAN_DATA_DIR and Maven local repo..."
+          echo "Removing contents of KONAN_DATA_DIR and Maven user home (same layout as GRADLE_USER_HOME)..."
           rm -rf "$KONAN_DATA_DIR"
           mkdir -p "$KONAN_DATA_DIR"
-          rm -rf "$MAVEN_LOCAL_REPO"
-          mkdir -p "$MAVEN_LOCAL_REPO"
+          rm -rf "$MAVEN_USER_HOME"
+          mkdir -p "$MAVEN_USER_HOME/.m2"
 
       - name: Prepare Kotlin repo
         id: kotlin
@@ -187,15 +188,15 @@ jobs:
         env:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
           MAVEN_PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
+          MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
           MAVEN_LOCAL_REPO: ${{ steps.vars.outputs.maven_local_repo }}
         run: |
           mkdir -p "$GRADLE_USER_HOME/init.d"
           cp "$GITHUB_WORKSPACE/kn-action/scripts/maven-proxy.init.gradle" "$GRADLE_USER_HOME/init.d/"
           echo "Gradle: init script installed to $GRADLE_USER_HOME/init.d/"
 
-          mkdir -p ~/.m2
-          [ -f ~/.m2/settings.xml ] && cp ~/.m2/settings.xml ~/.m2/settings.xml.proxy-bak
-          cat > ~/.m2/settings.xml <<EOF
+          mkdir -p "$MAVEN_USER_HOME/.m2"
+          cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
           <settings>
             <localRepository>$MAVEN_LOCAL_REPO</localRepository>
             <mirrors><mirror>
@@ -204,15 +205,18 @@ jobs:
             </mirror></mirrors>
           </settings>
           EOF
-          echo "Maven: localRepository=$MAVEN_LOCAL_REPO, mirror=$MAVEN_PROXY_URL"
+          echo "Maven: MAVEN_USER_HOME=$MAVEN_USER_HOME localRepository=$MAVEN_LOCAL_REPO mirror=$MAVEN_PROXY_URL"
 
       - name: Build Kotlin
         shell: bash
         env:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
+          MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
           DEVELOPER_DIR: ${{ env.DEVELOPER_DIR }}
           JDK_18: ${{ steps.java8.outputs.path }}
+          # Isolate Maven from the runner's ~/.m2 (same idea as GRADLE_USER_HOME). Optional -U when clean or using proxy.
+          MAVEN_OPTS: -Duser.home=${{ steps.vars.outputs.maven_user_home }} ${{ (steps.vars.outputs.clean_build == 'true' || steps.vars.outputs.maven_proxy_url != '') && '-U' || '' }}
           # When using maven proxy, disable Kotlin's cache-redirector so resolution goes to proxy (init script replaces cache-redirector URLs)
           # ORG_GRADLE_PROJECT_cacheRedirectorEnabled: ${{ steps.vars.outputs.maven_proxy_url != '' && 'false' || '' }}
           # Gradle repository HTTP retry (test before upstreaming to cpf-kotlin gradle.properties)
@@ -243,15 +247,6 @@ jobs:
           mv "$CI_CACHE_ROOT"/* "$PERSISTED_CACHE_ROOT/"
 
           echo "Clean build cache promoted from $CI_CACHE_ROOT to $PERSISTED_CACHE_ROOT" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Restore Maven settings
-        if: always() && steps.maven_proxy.outcome != 'skipped'
-        run: |
-          if [ -f ~/.m2/settings.xml.proxy-bak ]; then
-            mv ~/.m2/settings.xml.proxy-bak ~/.m2/settings.xml
-          else
-            rm -f ~/.m2/settings.xml
-          fi
 
       - name: Archive build output
         id: archive
