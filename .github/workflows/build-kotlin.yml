@@ -13,10 +13,11 @@ on:
       branch:
         description: 'Branch to build'
         required: false
-        default: develop-2.2.21-OH
+        default: next/2.2.21-OH.0.1.0-01
       pr_number:
         description: 'PR number to merge into branch (use with branch)'
         required: false
+        default: "51"
       commit:
         description: 'Commit SHA to build (if set, overrides branch/pr)'
         required: false
@@ -67,6 +68,7 @@ jobs:
           - runner: [self-hosted, macOS, ARM64, kotlin]
           - runner: [self-hosted, macOS, X64, kotlin]
           - runner: [self-hosted, linux, X64, kotlin]
+          - runner: [self-hosted, Windows, X64, kotlin]
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout kn-action
