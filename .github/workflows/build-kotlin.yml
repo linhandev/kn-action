@@ -168,7 +168,7 @@ jobs:
 
       - name: Prepare Kotlin repo
         id: kotlin
-        uses: ./.github/actions/prepare-repo
+        uses: ./kn-action/.github/actions/prepare-repo
         with:
           repo_url: ${{ env.REPO_URL }}
           branch: ${{ steps.vars.outputs.branch }}
@@ -191,11 +191,12 @@ jobs:
           echo "Gradle: init script installed to $GRADLE_USER_HOME/init.d/"
 
           mkdir -p "$MAVEN_USER_HOME/.m2"
+          # mirrorOf * would send file:// (and other local) repos to the proxy; external:* leaves them untouched.
           cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
           <settings>
             <localRepository>$MAVEN_LOCAL_REPO</localRepository>
             <mirrors><mirror>
-              <id>maven-proxy</id><mirrorOf>*</mirrorOf>
+              <id>maven-proxy</id><mirrorOf>external:*</mirrorOf>
               <url>$MAVEN_PROXY_URL</url>
             </mirror></mirrors>
           </settings>
@@ -206,13 +207,11 @@ jobs:
         env:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
           MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
+          MAVEN_PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
           DEVELOPER_DIR: ${{ env.DEVELOPER_DIR }}
           JDK_18: ${{ steps.java8.outputs.path }}
           MAVEN_OPTS: -Duser.home=${{ steps.vars.outputs.maven_user_home }}
-          # When using maven proxy, disable Kotlin's cache-redirector so resolution goes to proxy (init script replaces cache-redirector URLs)
-          # ORG_GRADLE_PROJECT_cacheRedirectorEnabled: ${{ steps.vars.outputs.maven_proxy_url != '' && 'false' || '' }}
-          # Gradle repository HTTP retry (test before upstreaming to cpf-kotlin gradle.properties)
           GRADLE_OPTS: "-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000"
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
@@ -256,7 +255,7 @@ jobs:
           echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
-        uses: ./.github/actions/upload-artifact-local
+        uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ steps.archive.outputs.path }}
 

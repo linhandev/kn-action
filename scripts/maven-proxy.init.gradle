@@ -1,90 +1,116 @@
-// Forces ALL Gradle dependency resolution through a single Maven proxy.
-// Redirects every remote Maven repository (Maven Central, Google, JetBrains,
-// Gradle Plugin Portal, etc.) to the proxy and removes non-Maven repos.
-// Local file:// repositories are left untouched.
-// Activated only when MAVEN_PROXY_URL env var is set. No-op otherwise.
+/*
+ * Maven mirror for Gradle (same behavior as pre-refactor cpf-kotlin/scripts/maven-proxy.init.gradle).
+ *
+ * Before the kotlin repo change, build-ohos.sh passed:
+ *   --init-script scripts/maven-proxy.init.gradle  and  -Pmaven.repository.mirror=<url>
+ * That script always ran. kn-action also installed this file under GRADLE_USER_HOME/init.d/;
+ * the kn-action variant that required MAVEN_PROXY_URL was often a no-op because MAVEN_PROXY_URL
+ * was not exported from the shell — the kotlin --init-script path was what actually applied.
+ *
+ * Mirror URL (first non-blank wins):
+ *   -P maven.repository.mirror=...  →  env MAVEN_PROXY_URL  →  default below.
+ */
 
-def proxyUrl = System.getenv('MAVEN_PROXY_URL')
-if (!proxyUrl) return
-
-def proxyUri = uri(proxyUrl)
-def isInsecure = proxyUrl.startsWith('http://')
-
-println("[maven-proxy] Forcing all repositories → ${proxyUrl}")
-
-gradle.startParameter.setRefreshDependencies(true)
-
-// Redirect a Maven repo to the proxy unless it is file-local or already proxied.
-def redirectRepo = { repo ->
-    if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
-        def u = repo.url.toString()
-        if (!u.startsWith('file:') && u != proxyUri.toString()) {
-            repo.setUrl(proxyUri)
-            if (isInsecure) repo.allowInsecureProtocol = true
-        }
-    }
+def proxyUrlProp = gradle.startParameter.projectProperties?.get('maven.repository.mirror')
+def proxyUrl = proxyUrlProp?.toString()?.trim()
+if (!proxyUrl) {
+    proxyUrl = System.getenv('MAVEN_PROXY_URL')?.trim()
+}
+if (!proxyUrl) {
+    proxyUrl = 'http://192.168.3.5:8080/releases'
 }
 
-// Remove every remote repo from a container, leaving only the proxy (and any file:// repos).
-def enforceExclusiveProxy = { repos, String label ->
-    def toRemove = repos.findAll { repo ->
-        if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
-            def u = repo.url.toString()
-            return !u.startsWith('file:') && u != proxyUri.toString()
-        }
-        return true // Ivy, flat-dir, or other non-Maven repos
-    }
-    toRemove.each { repo ->
-        def desc = repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository \
-            ? repo.url : repo.getClass().simpleName
-        println("[maven-proxy]   ${label}: removed ${repo.name} (${desc})")
-        repos.remove(repo)
-    }
-    if (!repos.any { it instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository &&
-                      it.url.toString() == proxyUri.toString() }) {
-        repos.maven {
-            name = 'maven-proxy'
-            url = proxyUri
-            if (isInsecure) allowInsecureProtocol = true
-        }
-    }
-}
+println("[maven-proxy] Using mirror → ${proxyUrl}")
 
-// ── Plugin management ────────────────────────────────────────────────
-// Add proxy first so it is available immediately for plugin resolution.
-// Also intercept any repo added later during settings evaluation.
-beforeSettings { settings ->
-    settings.pluginManagement.repositories {
-        maven {
-            name = 'maven-proxy'
-            url = proxyUri
-            if (isInsecure) allowInsecureProtocol = true
-        }
+/** Do not rewrite mavenLocal() / maven { url = uri("file:...") } to the HTTP proxy. */
+def isLocalFileMavenRepo = { repo ->
+    if (!(repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository)) {
+        return false
     }
-    settings.pluginManagement.repositories.whenObjectAdded(redirectRepo)
-}
-
-// ── Settings-level cleanup ───────────────────────────────────────────
-// After settings fully evaluated, strip out any repo that isn't the proxy.
-gradle.settingsEvaluated { settings ->
-    enforceExclusiveProxy(settings.pluginManagement.repositories, 'pluginManagement')
+    def url = repo.url
+    if (url == null) {
+        return false
+    }
     try {
-        def drm = settings.dependencyResolutionManagement
-        if (drm.repositories.size() > 0) {
-            enforceExclusiveProxy(drm.repositories, 'dependencyResolutionManagement')
-        }
-    } catch (Exception ignored) {}
+        def u = url instanceof URI ? url : URI.create(url.toString())
+        return 'file'.equalsIgnoreCase(u.scheme)
+    } catch (Throwable ignored) {
+        return false
+    }
 }
 
-// ── Project-level: intercept additions + enforce after evaluation ────
-// whenObjectAdded redirects repos the moment they are registered.
-// afterEvaluate is the final pass to remove anything that slipped through.
-allprojects { project ->
-    project.repositories.whenObjectAdded(redirectRepo)
-    project.buildscript.repositories.whenObjectAdded(redirectRepo)
-
-    project.afterEvaluate {
-        enforceExclusiveProxy(project.repositories, "project:${project.path}")
-        enforceExclusiveProxy(project.buildscript.repositories, "buildscript:${project.path}")
+def rewriteMavenRepoToProxy = { repo ->
+    if (!(repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) || isLocalFileMavenRepo(repo)) {
+        return
     }
+    repo.setUrl(URI.create(proxyUrl))
+    repo.setAllowInsecureProtocol(true)
+}
+
+// Disable cache-redirector via startParameter for the root build
+def props = new HashMap(gradle.startParameter.projectProperties ?: [:])
+props.put('cacheRedirectorEnabled', 'false')
+gradle.startParameter.setProjectProperties(props)
+
+beforeSettings { settings ->
+    settings.pluginManagement {
+        repositories {
+            clear()
+            maven {
+                url proxyUrl
+                allowInsecureProtocol = true
+            }
+        }
+    }
+}
+
+gradle.settingsEvaluated { settings ->
+    def sp = new HashMap(settings.startParameter.projectProperties ?: [:])
+    sp.put('cacheRedirectorEnabled', 'false')
+    settings.startParameter.setProjectProperties(sp)
+
+    // Rewrite every repo URL to the proxy instead of clearing (preserves exclusiveContent rules)
+    settings.pluginManagement.repositories.each { repo ->
+        if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+            rewriteMavenRepoToProxy(repo)
+        }
+    }
+    try {
+        settings.dependencyResolutionManagement.repositories.each { repo ->
+            if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+                rewriteMavenRepoToProxy(repo)
+            }
+        }
+    } catch (Throwable ignored) {}
+}
+
+gradle.beforeProject { project ->
+    try {
+        project.repositories.each { repo ->
+            if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+                rewriteMavenRepoToProxy(repo)
+            }
+        }
+    } catch (Throwable t) {
+        println("[maven-proxy] beforeProject ${project.path}: ${t.message}")
+    }
+}
+
+gradle.afterProject { project ->
+    try {
+        project.repositories.each { repo ->
+            if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+                rewriteMavenRepoToProxy(repo)
+            }
+        }
+    } catch (Throwable t) {
+        println("[maven-proxy] afterProject repos ${project.path}: ${t.message}")
+    }
+    try {
+        project.buildscript.repositories.each { repo ->
+            if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+                rewriteMavenRepoToProxy(repo)
+            }
+        }
+    } catch (Throwable ignored) {}
 }
