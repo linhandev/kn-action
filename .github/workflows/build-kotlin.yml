@@ -21,14 +21,6 @@ on:
       commit:
         description: 'Commit SHA to build (if set, overrides branch/pr)'
         required: false
-      artifact_destination:
-        description: 'Where to save artifact, github or ~/runner/artifact'
-        required: false
-        default: 'local'
-        type: choice
-        options:
-          - local
-          - github
       clean_build:
         description: 'Discard Gradle/Konan caches and rebuild from scratch'
         required: false
@@ -49,7 +41,6 @@ on:
 env:
   DEFAULT_KOTLIN_BRANCH: develop-2.2.21-OH
   DEFAULT_CLEAN_BUILD: false
-  DEFAULT_ARTIFACT_DESTINATION: local
   DEFAULT_MAVEN_PROXY_URL: http://192.168.3.5:8080/releases
   REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
   WORKSPACE_DIR: ci-workspace
@@ -142,7 +133,6 @@ jobs:
             echo "commit=${{ github.event.inputs.commit }}"
             echo "pr_number=${{ github.event.inputs.pr_number }}"
             echo "clean_build=$CLEAN_BUILD"
-            echo "artifact_destination=${{ github.event.inputs.artifact_destination || env.DEFAULT_ARTIFACT_DESTINATION }}"
             echo "persisted_cache_root=$PERSISTED_CACHE_ROOT"
             echo "ci_cache_root=$CI_CACHE_ROOT"
             echo "artifact_local_path="$(echo "${{ env.ARTIFACT_LOCAL_PATH }}" | sed "s|^~|$HOME|")""
@@ -266,7 +256,6 @@ jobs:
           echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
-        if: steps.vars.outputs.artifact_destination == 'github'
         uses: ./.github/actions/upload-artifact-local
         with:
           path: ${{ steps.archive.outputs.path }}
