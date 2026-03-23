@@ -37,7 +37,18 @@
           {
             "reference": "https://maven.pkg.jetbrains.space/kotlin/p/kotlin/bootstrap/",
             "store": true,
-            "allowedExtensions": [ ".jar", ".pom", ".xml", ".klib", ".module" ]
+            "allowedExtensions": [
+              ".jar",
+              ".pom",
+              ".xml",
+              ".module",
+              ".klib",
+              ".sha1",
+              ".sha256",
+              ".md5",
+              ".asc",
+              ".kotlin_module"
+            ]
           },
           {
             "reference": "https://plugins.gradle.org/m2/",
@@ -62,7 +73,18 @@
           {
             "reference": "https://maven.eazytec-cloud.com/nexus/repository/maven-public/",
             "store": true,
-            "allowedExtensions": [ ".jar", ".pom", ".xml", ".klib", ".module" ]
+            "allowedExtensions": [
+              ".jar",
+              ".pom",
+              ".xml",
+              ".module",
+              ".klib",
+              ".sha1",
+              ".sha256",
+              ".md5",
+              ".asc",
+              ".kotlin_module"
+            ]
           }
         ]
       }
