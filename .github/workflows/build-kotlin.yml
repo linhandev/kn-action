@@ -207,8 +207,7 @@ jobs:
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
           DEVELOPER_DIR: ${{ env.DEVELOPER_DIR }}
           JDK_18: ${{ steps.java8.outputs.path }}
-          # Isolate Maven from the runner's ~/.m2 (same idea as GRADLE_USER_HOME). Optional -U when clean or using proxy.
-          MAVEN_OPTS: -Duser.home=${{ steps.vars.outputs.maven_user_home }} ${{ (steps.vars.outputs.clean_build == 'true' || steps.vars.outputs.maven_proxy_url != '') && '-U' || '' }}
+          MAVEN_OPTS: -Duser.home=${{ steps.vars.outputs.maven_user_home }}
           # When using maven proxy, disable Kotlin's cache-redirector so resolution goes to proxy (init script replaces cache-redirector URLs)
           # ORG_GRADLE_PROJECT_cacheRedirectorEnabled: ${{ steps.vars.outputs.maven_proxy_url != '' && 'false' || '' }}
           # Gradle repository HTTP retry (test before upstreaming to cpf-kotlin gradle.properties)
