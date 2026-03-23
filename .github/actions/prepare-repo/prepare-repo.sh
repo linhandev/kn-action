@@ -40,10 +40,14 @@ if [[ -d "$WORKSPACE_DIR/.git" ]]; then
   git remote set-url origin "$REPO_URL"
   git fetch origin
 else
-  # Fresh clone (optionally with --reference)
+  # Fresh clone (optionally with --reference-if-able / --reference)
   rm -rf "$WORKSPACE_DIR"
   if [[ -d "$REFERENCE_REPO/.git" ]]; then
-    git clone --reference "$REFERENCE_REPO" "$REPO_URL" "$WORKSPACE_DIR"
+    if GIT_PAGER=cat git clone -h 2>&1 | grep -qF -- '--reference-if-able'; then
+      git clone --reference-if-able "$REFERENCE_REPO" "$REPO_URL" "$WORKSPACE_DIR"
+    else
+      git clone --reference "$REFERENCE_REPO" "$REPO_URL" "$WORKSPACE_DIR"
+    fi
   else
     git clone "$REPO_URL" "$WORKSPACE_DIR"
   fi

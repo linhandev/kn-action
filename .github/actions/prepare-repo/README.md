@@ -36,7 +36,7 @@ Reusable composite action: setup a local repo to match branch/commit/PR then for
 
 ## Local reference
 
-Reference path = `local_reference_dir` + repo name from URL (e.g. `~/git/ci/test-prepare-repo`). If that path exists and is a git repo, clone and fetch use `--reference` for faster operations.
+Reference path = `local_reference_dir` + repo name from URL (e.g. `~/git/ci/test-prepare-repo`). If that path exists and is a git repo, the initial clone uses `--reference-if-able` when supported, otherwise `--reference`, for faster object reuse.
 
 ## Reuse
 
