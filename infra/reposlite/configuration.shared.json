@@ -19,24 +19,50 @@
             "store": true
           },
           {
-            "reference": "https://packages.jetbrains.team/maven/p/ij/intellij-dependencies",
+            "reference": "https://packages.jetbrains.team/maven/p/ij/intellij-dependencies/",
             "store": true
           },
           {
-            "reference": "https://redirector.kotlinlang.org/maven/kotlin-dependencies",
+            "reference": "https://redirector.kotlinlang.org/maven/kotlin-dependencies/",
             "store": true
           },
           {
-            "reference": "https://redirector.kotlinlang.org/maven/bootstrap",
+            "reference": "https://packages.jetbrains.team/maven/p/kt/kotlin-dependencies/",
             "store": true
           },
           {
-            "reference": "https://maven.eazytec-cloud.com/nexus/repository/maven-public",
+            "reference": "https://redirector.kotlinlang.org/maven/bootstrap/",
             "store": true
+          },
+          {
+            "reference": "https://maven.pkg.jetbrains.space/kotlin/p/kotlin/bootstrap/",
+            "store": true,
+            "allowedExtensions": [ ".jar", ".pom", ".xml", ".klib", ".module" ]
           },
           {
             "reference": "https://plugins.gradle.org/m2/",
             "store": true
+          },
+          {
+            "reference": "https://repo.gradle.org/gradle/libs-releases/",
+            "store": true
+          },
+          {
+            "reference": "https://download.jetbrains.com/teamcity-repository/",
+            "store": true
+          },
+          {
+            "reference": "https://www.jetbrains.com/intellij-repository/releases/",
+            "store": true
+          },
+          {
+            "reference": "https://www.jetbrains.com/intellij-repository/snapshots/",
+            "store": true
+          },
+          {
+            "reference": "https://maven.eazytec-cloud.com/nexus/repository/maven-public/",
+            "store": true,
+            "allowedExtensions": [ ".jar", ".pom", ".xml", ".klib", ".module" ]
           }
         ]
       }

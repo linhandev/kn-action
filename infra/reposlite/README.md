@@ -58,6 +58,8 @@ journalctl --user -u reposilite -f   # 看日志
 
 ## 以 launchd 服务安装（macOS）
 
+以下命令请在**仓库根目录**下执行，且步骤 1 和 2 在同一终端中顺序执行（这样 `$(pwd)` 才是 reposlite 目录）。
+
 1. **创建日志目录**（launchd 启动前需存在）：
    ```bash
    cd infra/reposlite
@@ -82,8 +84,10 @@ journalctl --user -u reposilite -f   # 看日志
 launchctl stop com.kmp.reposilite
 launchctl start com.kmp.reposilite
 launchctl list com.kmp.reposilite   # 状态
-# 卸载：launchctl unload ~/Library/LaunchAgents/com.kmp.reposilite.plist
+launchctl unload ~/Library/LaunchAgents/com.kmp.reposilite.plist # 卸载/停用
 ```
+
+**临时用 `./start.sh` 测试时**：`launchctl stop` 可能不会立刻结束进程，8080 仍会被占用。需先执行 **`launchctl unload ...`** 卸掉服务再运行 `./start.sh`；测试完后若要恢复为服务，再 `launchctl load ...`。
 
 日志位置：`workspace/logs/reposilite-stdout.log`、`workspace/logs/reposilite-stderr.log`。
 
@@ -93,4 +97,13 @@ launchctl list com.kmp.reposilite   # 状态
 
 ```shell
 wget http://localhost:8080/releases/org/apache/felix/maven-bundle-plugin/3.5.0/maven-bundle-plugin-3.5.0.pom
+# Kotlin bootstrap（proxied `reference` 必须以 `/` 结尾，否则拼接会变成 …/maven/org/jetbrains/… 而 404）
+wget -S -O /dev/null "http://localhost:8080/releases/org/jetbrains/kotlin/kotlin-stdlib-js/2.2.20-Beta2-71/kotlin-stdlib-js-2.2.20-Beta2-71.klib"
 ```
+
+### Proxied 源 URL 必须以 `/` 结尾
+
+Reposilite 把 artifact 路径拼到 `reference` 后面；若写成 `…/maven/bootstrap`（无末尾 `/`），按 RFC 3986 会**丢掉**最后一段 `bootstrap`，实际请求变成 `…/maven/org/jetbrains/…`，上游 404，而直接 `wget https://redirector.kotlinlang.org/maven/bootstrap/org/jetbrains/…` 仍正常。
+
+- https://maven.pkg.jetbrains.space/kotlin/p/kotlin/bootstrap/ : kotlin默认bootstrap版本
+- https://maven.eazytec-cloud.com/nexus/repository/maven-public/ : cpf版本
