@@ -24,7 +24,7 @@ on:
       clean_build:
         description: 'Discard Gradle/Konan caches and rebuild from scratch'
         required: false
-        default: false
+        default: true
         type: boolean
       use_maven_proxy:
         description: 'Use local maven proxy to speed up build'
@@ -61,6 +61,9 @@ jobs:
           - runner: [self-hosted, linux, X64, kotlin]
           - runner: [self-hosted, Windows, X64, kotlin]
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
@@ -200,7 +203,6 @@ jobs:
           echo "Maven: MAVEN_USER_HOME=$MAVEN_USER_HOME localRepository=$MAVEN_LOCAL_REPO mirror=$MAVEN_PROXY_URL"
 
       - name: Build Kotlin
-        shell: bash
         env:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
           MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
@@ -222,7 +224,6 @@ jobs:
         env:
           CI_CACHE_ROOT: ${{ steps.vars.outputs.ci_cache_root }}
           PERSISTED_CACHE_ROOT: ${{ steps.vars.outputs.persisted_cache_root }}
-        shell: bash
         run: |
           if [ ! -d "$CI_CACHE_ROOT" ]; then
             echo "Clean cache dir not found, skipping promotion."
