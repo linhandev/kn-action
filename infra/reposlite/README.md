@@ -1,31 +1,33 @@
 # ReposLite 本地依赖缓存
 
-所有运行时文件（jar、本地 db、缓存包）都放在 **`workspace/`** 下，便于整目录备份或 rsync；仓库里只提交配置，启动脚本等
+所有运行时文件（jar、本地 db、缓存包）都放在 `**workspace/**` 下，便于整目录备份或 rsync；仓库里只提交配置，启动脚本等
 
 ## 目录说明
 
-| 路径 | 说明 |
-|------|------|
-| `configuration.shared.json` | 共享配置（代理源等），可提交 |
-| `start.sh` | 启动脚本，工作目录固定为 `workspace/` |
-| `workspace/reposilite.jar` | 从 Release 下载后放到这里（勿提交） |
-| `workspace/reposilite.db` | SQLite 库，自动生成或从旧实例拷贝 |
-| `workspace/repositories/` | Maven 缓存，自动生成或从旧实例拷贝 |
-| `com.kmp.reposilite.plist` | macOS launchd 配置模板（见下方 macOS 安装） |
+
+| 路径                          | 说明                               |
+| --------------------------- | -------------------------------- |
+| `configuration.shared.json` | 共享配置（代理源等），可提交                   |
+| `start.sh`                  | 启动脚本，工作目录固定为 `workspace/`        |
+| `workspace/reposilite.jar`  | 从 Release 下载后放到这里（勿提交）           |
+| `workspace/reposilite.db`   | SQLite 库，自动生成或从旧实例拷贝             |
+| `workspace/repositories/`   | Maven 缓存，自动生成或从旧实例拷贝             |
+| `com.kmp.reposilite.plist`  | macOS launchd 配置模板（见下方 macOS 安装） |
+
 
 ## 首次 setup
 
-1. 下载 jar：<https://github.com/dzikoysk/reposilite/releases>
+1. 下载 jar：[https://github.com/dzikoysk/reposilite/releases](https://github.com/dzikoysk/reposilite/releases)
 2. 创建目录并放入 jar：
-   ```bash
+  ```bash
    mkdir -p workspace
    mv reposilite-*.jar workspace/reposilite.jar
-   ```
+  ```
 3. 启动：
-   ```bash
+  ```bash
    chmod +x start.sh
    ./start.sh
-   ```
+  ```
 
 ## 环境变量
 
@@ -61,21 +63,19 @@ journalctl --user -u reposilite -f   # 看日志
 以下命令请在**仓库根目录**下执行，且步骤 1 和 2 在同一终端中顺序执行（这样 `$(pwd)` 才是 reposlite 目录）。
 
 1. **创建日志目录**（launchd 启动前需存在）：
-   ```bash
+  ```bash
    cd infra/reposlite
    mkdir -p workspace/logs
-   ```
-
+  ```
 2. **安装 launchd 用户 agent**（将 `REPOSILITE_DIR` 替换为当前目录的绝对路径）：
-   ```bash
+  ```bash
    sed "s|REPOSILITE_DIR|$(pwd)|g" com.kmp.reposilite.plist > ~/Library/LaunchAgents/com.kmp.reposilite.plist
-   ```
-
+  ```
 3. **加载并启动服务**：
-   ```bash
+  ```bash
    launchctl load ~/Library/LaunchAgents/com.kmp.reposilite.plist
    launchctl start com.kmp.reposilite
-   ```
+  ```
    之后每次**用户登录**会自动加载并启动（plist 中 `RunAtLoad` 已开启），无需再手动操作。
 
 常用命令：
@@ -87,7 +87,7 @@ launchctl list com.kmp.reposilite   # 状态
 launchctl unload ~/Library/LaunchAgents/com.kmp.reposilite.plist # 卸载/停用
 ```
 
-**临时用 `./start.sh` 测试时**：`launchctl stop` 可能不会立刻结束进程，8080 仍会被占用。需先执行 **`launchctl unload ...`** 卸掉服务再运行 `./start.sh`；测试完后若要恢复为服务，再 `launchctl load ...`。
+**临时用 `./start.sh` 测试时**：`launchctl stop` 可能不会立刻结束进程，8080 仍会被占用。需先执行 `**launchctl unload ...`** 卸掉服务再运行 `./start.sh`；测试完后若要恢复为服务，再 `launchctl load ...`。
 
 日志位置：`workspace/logs/reposilite-stdout.log`、`workspace/logs/reposilite-stderr.log`。
 
@@ -105,5 +105,6 @@ wget -S -O /dev/null "http://localhost:8080/releases/org/jetbrains/kotlin/kotlin
 
 Reposilite 把 artifact 路径拼到 `reference` 后面；若写成 `…/maven/bootstrap`（无末尾 `/`），按 RFC 3986 会**丢掉**最后一段 `bootstrap`，实际请求变成 `…/maven/org/jetbrains/…`，上游 404，而直接 `wget https://redirector.kotlinlang.org/maven/bootstrap/org/jetbrains/…` 仍正常。
 
-- https://maven.pkg.jetbrains.space/kotlin/p/kotlin/bootstrap/ : kotlin默认bootstrap版本
-- https://maven.eazytec-cloud.com/nexus/repository/maven-public/ : cpf版本
+- [https://maven.pkg.jetbrains.space/kotlin/p/kotlin/bootstrap/](https://maven.pkg.jetbrains.space/kotlin/p/kotlin/bootstrap/) : kotlin默认bootstrap版本
+- [https://maven.eazytec-cloud.com/nexus/repository/maven-public/](https://maven.eazytec-cloud.com/nexus/repository/maven-public/) : cpf版本
+
