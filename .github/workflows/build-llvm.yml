@@ -30,10 +30,17 @@ env:
   REPO_DIR: ${{ github.workspace }}/bin
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
   OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02
+  # Fast pipeline test: skip the LLVM matrix build and download pre-uploaded llvm-packages by exact filename on the artifact server.
+  # Set SKIP_BUILD to 'false' for full builds. When true, replace HARDCODED_* with real basenames from ~/runner/artifact (or your server).
+  SKIP_BUILD: 'true'
+  HARDCODED_LLVM_PACKAGES_LINUX: llvm-packages-f00b4r5_act-dead666_Linux_X64.tar
+  HARDCODED_LLVM_PACKAGES_MACOS_ARM64: llvm-packages-f00b4r5_act-dead666_macOS_ARM64.tar
+  HARDCODED_LLVM_PACKAGES_MACOS_X64: llvm-packages-f00b4r5_act-dead666_macOS_X64.tar
 
 jobs:
   build:
     name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
+    if: ${{ env.SKIP_BUILD != 'true' }}
     environment: env
     outputs:
       llvm_sha_short: ${{ steps.archive.outputs.llvm_sha_short }}
@@ -234,11 +241,19 @@ jobs:
         with:
           path: ${{ steps.archive.outputs.path }}
 
+  build-stub:
+    name: build skipped (stub)
+    if: ${{ env.SKIP_BUILD == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip LLVM matrix
+        run: echo "SKIP_BUILD=true — LLVM matrix skipped; cross-copy uses HARDCODED_* llvm-packages names from workflow env."
+
   # Merge Linux + both macOS llvm/packages on the artifact server host (mac ARM only). Uses exact names from the build job upload.
   cross-copy:
     name: cross copy on mac arm
-    needs: [build]
-    if: success()
+    needs: [build, build-stub]
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build-stub.result == 'success') }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     defaults:
       run:
@@ -261,21 +276,21 @@ jobs:
         id: dl_linux
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Linux_X64.tar
+          name: ${{ (env.SKIP_BUILD == 'true' && env.HARDCODED_LLVM_PACKAGES_LINUX) || format('llvm-packages-{0}_act-{1}_Linux_X64.tar', needs.build.outputs.llvm_sha_short, needs.build.outputs.action_sha_short) }}
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
       - name: Download macOS ARM64 llvm-packages tar
         id: dl_mac_arm64
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_macOS_ARM64.tar
+          name: ${{ (env.SKIP_BUILD == 'true' && env.HARDCODED_LLVM_PACKAGES_MACOS_ARM64) || format('llvm-packages-{0}_act-{1}_macOS_ARM64.tar', needs.build.outputs.llvm_sha_short, needs.build.outputs.action_sha_short) }}
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
       - name: Download macOS X64 llvm-packages tar
         id: dl_mac_x64
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_macOS_X64.tar
+          name: ${{ (env.SKIP_BUILD == 'true' && env.HARDCODED_LLVM_PACKAGES_MACOS_X64) || format('llvm-packages-{0}_act-{1}_macOS_X64.tar', needs.build.outputs.llvm_sha_short, needs.build.outputs.action_sha_short) }}
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
       - name: Extract outer tars and merge packages (platform_package.sh)
@@ -344,8 +359,9 @@ jobs:
   # Build OHOS aarch64 test programs on each self-hosted runner using the same run's artifacts.
   ohos-test-build:
     name: ${{ format('ohos-test-build ({0})', matrix.platform) }}
-    needs: [cross-copy]
-    if: success()
+    needs: [build, build-stub, cross-copy]
+    # `always()` so this job is not skipped when `build` is skipped (SKIP_BUILD); we only require cross-copy to have succeeded.
+    if: ${{ !cancelled() && always() && needs.cross-copy.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -390,7 +406,7 @@ jobs:
         id: dl_linux_pkg
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Linux_X64.tar
+          name: ${{ (env.SKIP_BUILD == 'true' && env.HARDCODED_LLVM_PACKAGES_LINUX) || format('llvm-packages-{0}_act-{1}_Linux_X64.tar', needs.build.outputs.llvm_sha_short, needs.build.outputs.action_sha_short) }}
           path: ${{ github.workspace }}/ohos-test-work/dl
 
       - name: Download merged Darwin toolchain
@@ -406,7 +422,7 @@ jobs:
         id: dl_linux_sysroot
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Linux_X64.tar
+          name: ${{ (env.SKIP_BUILD == 'true' && env.HARDCODED_LLVM_PACKAGES_LINUX) || format('llvm-packages-{0}_act-{1}_Linux_X64.tar', needs.build.outputs.llvm_sha_short, needs.build.outputs.action_sha_short) }}
           path: ${{ github.workspace }}/ohos-test-work/dl-linux
 
       - name: Layout toolchain and sysroot (Linux host)
@@ -566,7 +582,8 @@ jobs:
           echo "All hdc OHOS smoke checks passed." >> "$GITHUB_STEP_SUMMARY"
 
   actions-timeline:
-    needs: [build, cross-copy, ohos-test-build, hdc-ohos-verify]
+    # Do not list `build` / `build-stub` here: when one is skipped, needs would block this job despite if: always().
+    needs: [cross-copy, ohos-test-build, hdc-ohos-verify]
     if: always()
     runs-on: ubuntu-22.04
     permissions:
