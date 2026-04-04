@@ -236,7 +236,7 @@ jobs:
 
   # Merge Linux + both macOS llvm/packages on the artifact server host (mac ARM only). Uses exact names from the build job upload.
   cross-copy:
-    name: cross-copy (mac ARM, merge OHOS)
+    name: cross copy on mac arm
     needs: [build]
     if: success()
     runs-on: [self-hosted, macOS, ARM64, llvm]
@@ -251,6 +251,8 @@ jobs:
 
       - name: Prepare workspace
         shell: bash
+        # Must not inherit defaults.run.working-directory (cross-copy-work): it does not exist until this step creates it.
+        working-directory: ${{ github.workspace }}
         run: |
           rm -rf "${{ github.workspace }}/cross-copy-work"
           mkdir -p "${{ github.workspace }}/cross-copy-work/downloads"
