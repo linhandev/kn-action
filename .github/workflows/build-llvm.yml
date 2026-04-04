@@ -71,56 +71,25 @@ jobs:
         run: |
           echo C:\Progra~1\Git\bin>>"%GITHUB_PATH%"
 
-      # Prefer the official action when the runner can reach GitHub/python.org; self-hosted hosts often cannot — fallback adds PATH.
-      - name: Set up Python (Windows)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Ensure Python on PATH (Windows self-hosted fallback)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then
-            exit 0
-          fi
-          try_dir() {
-            local d="$1"
-            if [ -x "$d/python.exe" ] || [ -x "$d/python3.exe" ]; then
-              printf '%s\n' "$d" >> "$GITHUB_PATH"
-              echo "Added Python dir: $d"
-              return 0
-            fi
-            return 1
-          }
-          for d in \
-            "$HOME/AppData/Local/Programs/Python/Python312" \
-            "$HOME/AppData/Local/Programs/Python/Python311" \
-            "/c/Python312" "/c/Python311" \
-            "/c/Program Files/Python312" \
-            "/c/Program Files/Python311"; do
-            try_dir "$d" && exit 0
-          done
-          if command -v py >/dev/null 2>&1; then
-            W="$(py -3 -c "import sys, pathlib; print(pathlib.Path(sys.executable).parent)" 2>/dev/null || true)"
-            if [ -n "$W" ] && [ -d "$W" ]; then
-              printf '%s\n' "$W" >> "$GITHUB_PATH"
-              echo "Added Python dir from py launcher: $W"
-              exit 0
-            fi
-          fi
-          echo "::error::Python 3 not found. Install Python 3.11+ or fix network so actions/setup-python can run."
-          exit 1
-
+      # Host has Python 3.12 on PATH; install requests for the repo tool (same as other OS pip steps).
       - name: Prepare Windows tools (git-lfs, pip for repo)
         if: runner.os == 'Windows'
         run: |
           set -euo pipefail
           git lfs install 2>/dev/null || true
-          python -m pip install --user requests 2>/dev/null || python -m pip install requests
+          pip_for_requests() {
+            if command -v python >/dev/null 2>&1; then
+              python -m pip install --user requests 2>/dev/null || python -m pip install requests
+            elif command -v python3 >/dev/null 2>&1; then
+              python3 -m pip install --user requests 2>/dev/null || python3 -m pip install requests
+            elif command -v py >/dev/null 2>&1; then
+              py -3 -m pip install --user requests 2>/dev/null || py -3 -m pip install requests
+            else
+              echo "::error::Python 3 not on PATH (python, python3, or py -3)."
+              exit 1
+            fi
+          }
+          pip_for_requests
 
       - name: Setup environment
         id: vars
@@ -199,7 +168,7 @@ jobs:
             curl -fSL -o "$REPO_BIN" "https://gitee.com/oschina/repo/raw/fork_flow/repo-py3"
             head -c 2 "$REPO_BIN" | grep -q '#!' || { echo "::error::Downloaded repo script invalid (no shebang)"; exit 1; }
             chmod a+x "$REPO_BIN"
-            py=""; for c in python3 python py; do command -v "$c" >/dev/null 2>&1 && py="$c" && break; done
+            py=""; for c in python python3 py; do command -v "$c" >/dev/null 2>&1 && py="$c" && break; done
             if [ -z "$py" ]; then echo "::error::python3 or python not found"; exit 1; fi
             "$py" -m pip install requests || "$py" -m pip install --user requests
           fi
