@@ -563,8 +563,15 @@ jobs:
             OHOS_CXX="$(pick_clangxx "$BIN")"
           fi
           chmod +x "$OHOS_CC" "$OHOS_CXX" 2>/dev/null || true
-          "$OHOS_CC" -O2 -o src/hello_ohos_c src/ohos.c
-          "$OHOS_CXX" -std=c++17 -O2 -o src/hello_ohos_cpp src/ohos.cpp
+          echo "OHOS_CC=$OHOS_CC OHOS_CXX=$OHOS_CXX"
+          set +e
+          CLOG="$("$OHOS_CC" -O2 -o src/hello_ohos_c src/ohos.c 2>&1)"; CRC=$?
+          set -e
+          if [ "$CRC" -ne 0 ]; then echo "::error::C compile failed: $CLOG"; exit 1; fi
+          set +e
+          CXXLOG="$("$OHOS_CXX" -std=c++17 -O2 -o src/hello_ohos_cpp src/ohos.cpp 2>&1)"; CXXRC=$?
+          set -e
+          if [ "$CXXRC" -ne 0 ]; then echo "::error::C++ compile failed: $CXXLOG"; exit 1; fi
           if command -v file >/dev/null 2>&1; then file src/hello_ohos_c src/hello_ohos_cpp; else ls -la src/hello_ohos_c src/hello_ohos_cpp; fi
 
       - name: Pack test binaries
