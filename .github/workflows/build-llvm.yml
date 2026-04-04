@@ -30,6 +30,8 @@ env:
   REPO_DIR: ${{ github.workspace }}/bin
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
   OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02
+  OHOS_SYSROOT_URL: https://maven.eazytec-cloud.com/nexus/repository/file-storage/sysroot-ohos-aarch64-6.0.2.640-02.tar.gz
+  OHOS_SYSROOT_CACHE_DIR: ~/runner/cache
 
 jobs:
   build:
@@ -53,6 +55,9 @@ jobs:
       image: ${{ matrix.container_image }}
       volumes:
         - ${{ github.workspace }}/../../../artifact:/home/runner/runner/artifact
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
@@ -61,7 +66,6 @@ jobs:
 
       - name: Setup environment
         id: vars
-        shell: bash
         run: |
           echo $(realpath ${{ env.ARTIFACT_LOCAL_PATH }})
           CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
@@ -101,7 +105,6 @@ jobs:
           brew_install_quiet pigz python
 
       - name: Setup git
-        shell: bash
         env:
           LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
         run: |
@@ -110,22 +113,7 @@ jobs:
           git config --global user.email &>/dev/null || git config --global user.email "ci@ci.ci"
           git config --global user.name &>/dev/null || git config --global user.name "ci"
 
-      - name: Setup git credentials for GitCode
-        shell: bash
-        env:
-          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-        run: |
-          if [ -z "${GITCODE_TOKEN}" ]; then
-            echo "::error::GITCODE_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (GitCode token with read access)."
-            exit 1
-          fi
-          git config --global credential.helper ''
-          git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
-          git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
-          git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
-
       - name: Setup repo tool
-        shell: bash
         run: |
           REPO_DIR="$GITHUB_WORKSPACE/bin"
           REPO_BIN="$REPO_DIR/repo"
@@ -140,8 +128,20 @@ jobs:
           export PATH="$REPO_DIR:$PATH"
           repo --version
 
+      - name: Setup git credentials for GitCode
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          if [ -z "${GITCODE_TOKEN}" ]; then
+            echo "::error::GITCODE_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (GitCode token with read access)."
+            exit 1
+          fi
+          git config --global credential.helper ''
+          git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
+          git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
+          git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
+
       - name: Init repo manifest
-        shell: bash
         env:
           LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
         run: |
@@ -156,34 +156,31 @@ jobs:
             repo init -u "${{ env.MANIFEST_URL }}" -m "${{ env.MANIFEST_FILE }}" $REFERENCE_FLAG
           fi
 
-      - name: Sync source (repo sync)
-        shell: bash
+      - name: Sync source
         env:
           GIT_TERMINAL_PROMPT: 0
         run: |
           export PATH="$GITHUB_WORKSPACE/bin:$PATH"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo sync -c -v -j 16
-
-      - name: Sync source (git LFS)
-        shell: bash
-        env:
-          GIT_TERMINAL_PROMPT: 0
-        run: |
-          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
-          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo forall -c 'git lfs pull'
-          echo "git lfs pull finished."
+
+      - name: Restore git config (remove GitCode credentials)
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          if [ -n "${GITCODE_TOKEN}" ]; then
+            git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
+          fi
+          git config --global --unset credential.helper 2>/dev/null || true
 
       - name: Prepare build environment
         if: steps.vars.outputs.need_env_prepare == 'true'
-        shell: bash
         run: |
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
 
       - name: Build LLVM
-        shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             export CCACHE_DIR="${{ github.workspace }}/.ccache"
@@ -193,28 +190,10 @@ jobs:
             echo "Disk/memory before build:" && df -h && free -m || true
           fi
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
-          BUILD_SCRIPT="toolchain/llvm-project/llvm-build/build.sh"
-          MINGW_PY="toolchain/llvm-project/llvm-build/mingw.py"
-          if [ "${{ steps.vars.outputs.clean_build }}" != "true" ]; then
-            if [ "$RUNNER_OS" = "Linux" ]; then
-              sed -i 's|rm -rf ${WORK_DIR}/out|# rm -rf ${WORK_DIR}/out  # skipped for incremental build|' "$BUILD_SCRIPT"
-            else
-              sed -i '' 's|rm -rf ${WORK_DIR}/out|# rm -rf ${WORK_DIR}/out  # skipped for incremental build|' "$BUILD_SCRIPT"
-            fi
-            # Upstream robustness: mingw.py uses os.makedirs(target_dir) without exist_ok. Dir may exist from a prior run (incremental) or from another code path in the same run; patch so makedirs is idempotent.
-            if [ -f "$MINGW_PY" ]; then
-              if [ "$RUNNER_OS" = "Linux" ]; then
-                sed -i 's/os\.makedirs(target_dir)/os.makedirs(target_dir, exist_ok=True)/' "$MINGW_PY"
-              else
-                sed -i '' 's/os\.makedirs(target_dir)/os.makedirs(target_dir, exist_ok=True)/' "$MINGW_PY"
-              fi
-            fi
-          fi
-          bash "$BUILD_SCRIPT"
+          bash toolchain/llvm-project/llvm-build/build.sh
 
       - name: Archive llvm/packages
         id: archive
-        shell: bash
         env:
           ARTIFACT_LOCAL_PATH: ${{ env.ARTIFACT_LOCAL_PATH }}
           LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
@@ -261,57 +240,43 @@ jobs:
           path: kn-action
 
       - name: Prepare workspace
-        shell: bash
         # Must not inherit defaults.run.working-directory (cross-copy-work): it does not exist until this step creates it.
         working-directory: ${{ github.workspace }}
         run: |
           rm -rf "${{ github.workspace }}/cross-copy-work"
           mkdir -p "${{ github.workspace }}/cross-copy-work/downloads"
 
-      - name: Download Linux X64 llvm-packages tar
-        id: dl_linux
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Linux_X64.tar
-          path: ${{ github.workspace }}/cross-copy-work/downloads
-
-      - name: Download macOS ARM64 llvm-packages tar
-        id: dl_mac_arm64
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_macOS_ARM64.tar
-          path: ${{ github.workspace }}/cross-copy-work/downloads
-
-      - name: Download macOS X64 llvm-packages tar
-        id: dl_mac_x64
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_macOS_X64.tar
-          path: ${{ github.workspace }}/cross-copy-work/downloads
+      - name: Download llvm-packages tars (build matrix)
+        run: |
+          set -euo pipefail
+          DL="$(pwd)/downloads"
+          SCRIPT="$GITHUB_WORKSPACE/kn-action/.github/actions/download-artifact-local/download.sh"
+          export INPUT_SERVER_URL="${INPUT_SERVER_URL:-http://192.168.3.5:8765}"
+          export INPUT_CACHE_DIR="${INPUT_CACHE_DIR:-~/runner/artifact}"
+          for suf in Linux_X64 macOS_ARM64 macOS_X64; do
+            export INPUT_NAME="llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_${suf}.tar"
+            export INPUT_PATH="$DL"
+            bash "$SCRIPT"
+          done
 
       - name: Extract outer tars and merge packages (platform_package.sh)
         id: merge
-        shell: bash
         env:
           CLANG_RESOURCE_VERSION: '19'
         run: |
           set -euo pipefail
           WORK="$(pwd)"
+          DL="$(pwd)/downloads"
+          P="llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}"
           mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 staging
-          tar -xf "${{ steps.dl_linux.outputs.path }}" -C extract-linux
-          tar -xf "${{ steps.dl_mac_arm64.outputs.path }}" -C extract-mac-arm64
-          tar -xf "${{ steps.dl_mac_x64.outputs.path }}" -C extract-mac-x64
+          tar -xf "$DL/${P}_Linux_X64.tar" -C extract-linux
+          tar -xf "$DL/${P}_macOS_ARM64.tar" -C extract-mac-arm64
+          tar -xf "$DL/${P}_macOS_X64.tar" -C extract-mac-x64
           cp -f extract-linux/packages/*.tar.gz staging/
           cp -f extract-mac-arm64/packages/clang-dev-darwin-arm64.tar.gz staging/
           cp -f extract-mac-x64/packages/clang-dev-darwin-x86_64.tar.gz staging/
-          chmod +x "$GITHUB_WORKSPACE/kn-action/.github/scripts/platform_package.sh"
           ( cd staging && bash "$GITHUB_WORKSPACE/kn-action/.github/scripts/platform_package.sh" )
-          if [ -f staging/ohos-sysroot-dev.tar.gz ]; then
-            tar -xzf staging/ohos-sysroot-dev.tar.gz -C "$WORK"
-          else
-            echo "::error::staging/ohos-sysroot-dev.tar.gz missing after merge"
-            exit 1
-          fi
+          # OHOS sysroot for tests comes from Maven in ohos-test jobs, not build-produced ohos-sysroot-dev.tar.gz.
           for p in clang_darwin-arm64 clang_darwin-x86_64; do
             D="$(find staging -maxdepth 1 -type d -name "${p}-*" | head -1)"
             if [ -z "$D" ] || [ ! -d "$D" ]; then
@@ -322,27 +287,8 @@ jobs:
             echo "Merged $p -> $D"
           done
 
-      - name: Pack Linux host OHOS toolchain (clang + sysroot for Linux CI)
-        id: pack_linux_host
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p linux-host-layout
-          tar -xzf extract-linux/packages/clang-dev-linux-x86_64.tar.gz -C linux-host-layout
-          tar -xzf extract-linux/packages/ohos-sysroot-dev.tar.gz -C linux-host-layout
-          NAME="llvm-ohos-linux-host-${{ github.run_id }}.tar.gz"
-          tar -czf "$NAME" -C linux-host-layout .
-          echo "archive=$NAME" >> "$GITHUB_OUTPUT"
-          echo "Linux host bundle: $NAME (clang-dev + sysroot)" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload Linux host OHOS toolchain
-        uses: ./kn-action/.github/actions/upload-artifact-local
-        with:
-          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_linux_host.outputs.archive }}
-
       - name: Pack merged Darwin ARM64 toolchain
         id: pack_arm64
-        shell: bash
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-arm64-*' | head -1)"
@@ -352,7 +298,6 @@ jobs:
 
       - name: Pack merged Darwin x86_64 toolchain
         id: pack_x64
-        shell: bash
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-x86_64-*' | head -1)"
@@ -409,19 +354,18 @@ jobs:
           path: kn-action
 
       - name: Prepare workspace
-        shell: bash
         # Must not inherit defaults.run.working-directory (ohos-test-work): it does not exist until this step creates it.
         working-directory: ${{ github.workspace }}
         run: |
           rm -rf "${{ github.workspace }}/ohos-test-work"
           mkdir -p "${{ github.workspace }}/ohos-test-work"
 
-      - name: Download Linux host OHOS toolchain (from cross-copy)
+      - name: Download llvm-packages (Linux X64, same artifact as build matrix)
         if: matrix.toolchain_kind == 'linux-packages'
         id: dl_linux_pkg
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-ohos-linux-host-${{ github.run_id }}.tar.gz
+          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Linux_X64.tar
           path: ${{ github.workspace }}/ohos-test-work/dl
 
       - name: Download merged Darwin toolchain
@@ -432,20 +376,20 @@ jobs:
           name: llvm-merged-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
           path: ${{ github.workspace }}/ohos-test-work/dl
 
-      - name: Download Linux packages tar (sysroot for Darwin OHOS link)
-        if: matrix.toolchain_kind == 'merged-darwin'
-        id: dl_linux_sysroot
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Linux_X64.tar
-          path: ${{ github.workspace }}/ohos-test-work/dl-linux
-
       - name: Layout toolchain and sysroot (Linux host)
         if: matrix.toolchain_kind == 'linux-packages'
-        shell: bash
         run: |
           set -euo pipefail
-          tar -xzf "${{ steps.dl_linux_pkg.outputs.path }}" -C .
+          mkdir -p outer
+          tar -xf "${{ steps.dl_linux_pkg.outputs.path }}" -C outer
+          tar -xzf outer/packages/clang-dev-linux-x86_64.tar.gz -C .
+          CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-~/runner/cache}"
+          CACHE_BASE="${CACHE_BASE/#\~/$HOME}"
+          mkdir -p "$CACHE_BASE"
+          ARCHIVE="$CACHE_BASE/${OHOS_SYSROOT}.tar.gz"
+          if [ ! -f "$ARCHIVE" ]; then curl -fsSL -o "$ARCHIVE" "$OHOS_SYSROOT_URL"; fi
+          if [ ! -d "$CACHE_BASE/${OHOS_SYSROOT}" ]; then tar -xzf "$ARCHIVE" -C "$CACHE_BASE"; fi
+          ln -sfn "$CACHE_BASE/${OHOS_SYSROOT}" "$(pwd)/sysroot"
           test -d sysroot
           if [ ! -d clang-dev ] && [ ! -d clang ]; then
             echo "::error::Expected clang-dev/ or clang/ next to sysroot"; ls -la
@@ -458,19 +402,21 @@ jobs:
 
       - name: Layout merged toolchain + sysroot (Darwin host)
         if: matrix.toolchain_kind == 'merged-darwin'
-        shell: bash
         run: |
           set -euo pipefail
           W="${{ github.workspace }}/ohos-test-work"
           tar -xzf "${{ steps.dl_merged.outputs.path }}" -C "$W"
-          mkdir -p "$W/extract-linux"
-          tar -xf "${{ steps.dl_linux_sysroot.outputs.path }}" -C "$W/extract-linux"
-          tar -xzf "$W/extract-linux/packages/ohos-sysroot-dev.tar.gz" -C "$W"
+          CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-~/runner/cache}"
+          CACHE_BASE="${CACHE_BASE/#\~/$HOME}"
+          mkdir -p "$CACHE_BASE"
+          ARCHIVE="$CACHE_BASE/${OHOS_SYSROOT}.tar.gz"
+          if [ ! -f "$ARCHIVE" ]; then curl -fsSL -o "$ARCHIVE" "$OHOS_SYSROOT_URL"; fi
+          if [ ! -d "$CACHE_BASE/${OHOS_SYSROOT}" ]; then tar -xzf "$ARCHIVE" -C "$CACHE_BASE"; fi
+          ln -sfn "$CACHE_BASE/${OHOS_SYSROOT}" "$W/sysroot"
           test -d "$(find "$W" -maxdepth 1 -type d -name 'clang_darwin-*' | head -1)"
           test -d "$W/sysroot"
 
       - name: Write OHOS test sources
-        shell: bash
         run: |
           SUF="${{ matrix.host_suffix }}"
           mkdir -p src
@@ -490,7 +436,6 @@ jobs:
           EOF
 
       - name: Cross-compile OHOS aarch64 (C and C++)
-        shell: bash
         run: |
           set -euo pipefail
           # Use real cwd (defaults.run.working-directory is ohos-test-work). Do not join github.workspace — in container jobs it can differ from Layout extract path (/__w/... vs host path).
@@ -581,7 +526,6 @@ jobs:
 
       - name: Pack test binaries
         id: test_pack
-        shell: bash
         run: |
           set -euo pipefail
           NAME="test-binaries-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz"
@@ -598,6 +542,9 @@ jobs:
     needs: [ohos-test-build]
     if: ${{ needs['ohos-test-build'].result == 'success' }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
@@ -626,7 +573,6 @@ jobs:
           path: ${{ github.workspace }}/hdc-verify/dl
 
       - name: Require exactly one hdc target
-        shell: bash
         run: |
           set -euo pipefail
           HDC_BIN="${HDC:-}"
@@ -648,7 +594,6 @@ jobs:
           echo "hdc target: $($HDC_BIN list targets 2>/dev/null | sed '/^\s*$/d' | head -1)"
 
       - name: Extract and run OHOS ELFs
-        shell: bash
         run: |
           set -euo pipefail
           HDC="${HDC_BIN:-hdc}"
@@ -677,8 +622,8 @@ jobs:
           echo "All hdc OHOS smoke checks passed." >> "$GITHUB_STEP_SUMMARY"
 
   actions-timeline:
-    # Omit `build`: if it is skipped/failed, jobs that need it block dependents; timeline uses if: always() to still run.
-    needs: [cross-copy, ohos-test-build, hdc-ohos-verify]
+    # Depends only on the pipeline sink; if: always() so it runs when hdc is skipped.
+    needs: [hdc-ohos-verify]
     if: always()
     runs-on: ubuntu-22.04
     permissions:
