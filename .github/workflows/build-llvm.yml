@@ -113,21 +113,6 @@ jobs:
           git config --global user.email &>/dev/null || git config --global user.email "ci@ci.ci"
           git config --global user.name &>/dev/null || git config --global user.name "ci"
 
-      - name: Setup repo tool
-        run: |
-          REPO_DIR="$GITHUB_WORKSPACE/bin"
-          REPO_BIN="$REPO_DIR/repo"
-          mkdir -p "$REPO_DIR"
-          if [ ! -x "$REPO_BIN" ]; then
-            curl -fSL -o "$REPO_BIN" "https://gitee.com/oschina/repo/raw/fork_flow/repo-py3"
-            head -c 2 "$REPO_BIN" | grep -q '#!' || { echo "::error::Downloaded repo script invalid (no shebang)"; exit 1; }
-            chmod a+x "$REPO_BIN"
-            python -m pip install requests || pip3 install requests || pip install requests
-          fi
-          echo "$REPO_DIR" >> "$GITHUB_PATH"
-          export PATH="$REPO_DIR:$PATH"
-          repo --version
-
       - name: Setup git credentials for GitCode
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
@@ -140,6 +125,23 @@ jobs:
           git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
           git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
+
+      - name: Setup repo tool
+        run: |
+          REPO_DIR="$GITHUB_WORKSPACE/bin"
+          REPO_BIN="$REPO_DIR/repo"
+          mkdir -p "$REPO_DIR"
+          if [ ! -x "$REPO_BIN" ]; then
+            curl -fSL -o "$REPO_BIN" "https://gitee.com/oschina/repo/raw/fork_flow/repo-py3"
+            head -c 2 "$REPO_BIN" | grep -q '#!' || { echo "::error::Downloaded repo script invalid (no shebang)"; exit 1; }
+            chmod a+x "$REPO_BIN"
+            py=""; for c in python3 python; do command -v "$c" >/dev/null 2>&1 && py="$c" && break; done
+            if [ -z "$py" ]; then echo "::error::python3 or python not found"; exit 1; fi
+            "$py" -m pip install requests || "$py" -m pip install --user requests
+          fi
+          echo "$REPO_DIR" >> "$GITHUB_PATH"
+          export PATH="$REPO_DIR:$PATH"
+          repo --version
 
       - name: Init repo manifest
         env:
