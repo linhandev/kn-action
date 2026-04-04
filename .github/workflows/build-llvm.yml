@@ -243,6 +243,11 @@ jobs:
         with:
           path: kn-action
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       # Git for Windows is often not on PATH; avoid PowerShell here (many hosts block .ps1 via execution policy).
       - name: Add Git bin to PATH
         shell: cmd
