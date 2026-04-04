@@ -71,7 +71,40 @@ jobs:
         run: |
           echo C:\Progra~1\Git\bin>>"%GITHUB_PATH%"
 
-      # Host has Python 3.12 on PATH; install requests for the repo tool (same as other OS pip steps).
+      # Git Bash often does not inherit the same PATH as cmd; resolve python.exe and add its directory.
+      - name: Expose Python for Git Bash (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          add_python_dir() {
+            local exe="$1"
+            [ -n "$exe" ] || return 1
+            [ -e "$exe" ] || return 1
+            local d
+            d="$(dirname "$exe")"
+            printf '%s\n' "$d" >> "$GITHUB_PATH"
+            echo "Added Python directory to PATH: $d"
+            return 0
+          }
+          line="$(cmd //c "where python 2>nul" | head -1 | tr -d '\r')"
+          if [ -n "$line" ] && add_python_dir "$line"; then exit 0; fi
+          line="$(cmd //c "where py 2>nul" | head -1 | tr -d '\r')"
+          if [ -n "$line" ] && add_python_dir "$line"; then exit 0; fi
+          for d in \
+            "$HOME/AppData/Local/Programs/Python/Python312" \
+            "/c/Program Files/Python312" \
+            "/c/Python312"; do
+            if [ -x "$d/python.exe" ]; then
+              printf '%s\n' "$d" >> "$GITHUB_PATH"
+              echo "Added Python directory (fallback): $d"
+              exit 0
+            fi
+          done
+          echo "::error::Could not locate python.exe (where python / where py / common install dirs)."
+          exit 1
+
+      # Host has Python 3.12; install requests for the repo tool (same as other OS pip steps).
       - name: Prepare Windows tools (git-lfs, pip for repo)
         if: runner.os == 'Windows'
         run: |
