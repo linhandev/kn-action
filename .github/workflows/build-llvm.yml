@@ -156,7 +156,7 @@ jobs:
             repo init -u "${{ env.MANIFEST_URL }}" -m "${{ env.MANIFEST_FILE }}" $REFERENCE_FLAG
           fi
 
-      - name: Sync source
+      - name: Sync source (repo sync)
         shell: bash
         env:
           GIT_TERMINAL_PROMPT: 0
@@ -164,7 +164,16 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/bin:$PATH"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo sync -c -v -j 16
+
+      - name: Sync source (git LFS)
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: 0
+        run: |
+          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo forall -c 'git lfs pull'
+          echo "git lfs pull finished."
 
       - name: Prepare build environment
         if: steps.vars.outputs.need_env_prepare == 'true'
@@ -179,6 +188,9 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then
             export CCACHE_DIR="${{ github.workspace }}/.ccache"
             export CCACHE_MAXSIZE=5G
+            # Cap parallelism to reduce OOM kills in Docker (silent failure with no step logs).
+            export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
+            echo "Disk/memory before build:" && df -h && free -m || true
           fi
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           BUILD_SCRIPT="toolchain/llvm-project/llvm-build/build.sh"
@@ -205,6 +217,7 @@ jobs:
         shell: bash
         env:
           ARTIFACT_LOCAL_PATH: ${{ env.ARTIFACT_LOCAL_PATH }}
+          LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
         run: |
           ARTIFACT_LOCAL_PATH="$(echo "$ARTIFACT_LOCAL_PATH" | sed "s|^~|$HOME|")"
           mkdir -p "$ARTIFACT_LOCAL_PATH"
