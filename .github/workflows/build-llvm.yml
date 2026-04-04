@@ -18,10 +18,6 @@ on:
         description: 'Custom title for this run (shown in Actions UI)'
         required: false
         type: string
-      full_llvm_build:
-        description: 'Run full LLVM matrix on self-hosted runners. Uncheck for fast stub + HARDCODED_* artifact path.'
-        default: true
-        type: boolean
   push:
     paths:
       - '.github/workflows/build-llvm.yml'
@@ -34,16 +30,16 @@ env:
   REPO_DIR: ${{ github.workspace }}/bin
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
   OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02
-  # Fast path (default on push): full LLVM is off unless repo var FULL_LLVM_BUILD=true. Then cross-copy uses these basenames on the artifact server.
+  # TEMP: LLVM matrix job is disabled (`build` if: false). cross-copy / ohos-test use these exact basenames on the artifact server.
   HARDCODED_LLVM_PACKAGES_LINUX: llvm-packages-f00b4r5_act-dead666_Linux_X64.tar
   HARDCODED_LLVM_PACKAGES_MACOS_ARM64: llvm-packages-f00b4r5_act-dead666_macOS_ARM64.tar
   HARDCODED_LLVM_PACKAGES_MACOS_X64: llvm-packages-f00b4r5_act-dead666_macOS_X64.tar
 
-# Job-level `if` cannot use `env`. Full LLVM matrix runs when: workflow_dispatch with full_llvm_build (default true), OR push with repo variable FULL_LLVM_BUILD=true. Otherwise stub + HARDCODED_* downloads.
+# Re-enable LLVM matrix: set `build` job `if` back to `success()` (or a vars/inputs gate) and restore dynamic artifact names below.
 jobs:
   build:
     name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.full_llvm_build) || (github.event_name != 'workflow_dispatch' && vars.FULL_LLVM_BUILD == 'true') }}
+    if: false
     environment: env
     outputs:
       llvm_sha_short: ${{ steps.archive.outputs.llvm_sha_short }}
@@ -246,11 +242,10 @@ jobs:
 
   build-stub:
     name: build skipped (stub)
-    if: ${{ !((github.event_name == 'workflow_dispatch' && inputs.full_llvm_build) || (github.event_name != 'workflow_dispatch' && vars.FULL_LLVM_BUILD == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Skip LLVM matrix
-        run: echo "LLVM matrix skipped (fast path). Set repo variable FULL_LLVM_BUILD=true for full matrix on push, or workflow_dispatch with full_llvm_build."
+        run: echo "LLVM matrix temporarily disabled (build job if:false); using HARDCODED_* llvm-packages names."
 
   # Merge Linux + both macOS llvm/packages on the artifact server host (mac ARM only). Uses exact names from the build job upload.
   cross-copy:
@@ -279,21 +274,21 @@ jobs:
         id: dl_linux
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: ${{ (!((github.event_name == 'workflow_dispatch' && inputs.full_llvm_build) || (github.event_name != 'workflow_dispatch' && vars.FULL_LLVM_BUILD == 'true'))) && env.HARDCODED_LLVM_PACKAGES_LINUX || format('llvm-packages-{0}_act-{1}_Linux_X64.tar', needs.build.outputs.llvm_sha_short, needs.build.outputs.action_sha_short) }}
+          name: ${{ env.HARDCODED_LLVM_PACKAGES_LINUX }}
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
       - name: Download macOS ARM64 llvm-packages tar
         id: dl_mac_arm64
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: ${{ (!((github.event_name == 'workflow_dispatch' && inputs.full_llvm_build) || (github.event_name != 'workflow_dispatch' && vars.FULL_LLVM_BUILD == 'true'))) && env.HARDCODED_LLVM_PACKAGES_MACOS_ARM64 || format('llvm-packages-{0}_act-{1}_macOS_ARM64.tar', needs.build.outputs.llvm_sha_short, needs.build.outputs.action_sha_short) }}
+          name: ${{ env.HARDCODED_LLVM_PACKAGES_MACOS_ARM64 }}
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
       - name: Download macOS X64 llvm-packages tar
         id: dl_mac_x64
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: ${{ (!((github.event_name == 'workflow_dispatch' && inputs.full_llvm_build) || (github.event_name != 'workflow_dispatch' && vars.FULL_LLVM_BUILD == 'true'))) && env.HARDCODED_LLVM_PACKAGES_MACOS_X64 || format('llvm-packages-{0}_act-{1}_macOS_X64.tar', needs.build.outputs.llvm_sha_short, needs.build.outputs.action_sha_short) }}
+          name: ${{ env.HARDCODED_LLVM_PACKAGES_MACOS_X64 }}
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
       - name: Extract outer tars and merge packages (platform_package.sh)
@@ -409,7 +404,7 @@ jobs:
         id: dl_linux_pkg
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: ${{ (!((github.event_name == 'workflow_dispatch' && inputs.full_llvm_build) || (github.event_name != 'workflow_dispatch' && vars.FULL_LLVM_BUILD == 'true'))) && env.HARDCODED_LLVM_PACKAGES_LINUX || format('llvm-packages-{0}_act-{1}_Linux_X64.tar', needs.build.outputs.llvm_sha_short, needs.build.outputs.action_sha_short) }}
+          name: ${{ env.HARDCODED_LLVM_PACKAGES_LINUX }}
           path: ${{ github.workspace }}/ohos-test-work/dl
 
       - name: Download merged Darwin toolchain
@@ -425,7 +420,7 @@ jobs:
         id: dl_linux_sysroot
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: ${{ (!((github.event_name == 'workflow_dispatch' && inputs.full_llvm_build) || (github.event_name != 'workflow_dispatch' && vars.FULL_LLVM_BUILD == 'true'))) && env.HARDCODED_LLVM_PACKAGES_LINUX || format('llvm-packages-{0}_act-{1}_Linux_X64.tar', needs.build.outputs.llvm_sha_short, needs.build.outputs.action_sha_short) }}
+          name: ${{ env.HARDCODED_LLVM_PACKAGES_LINUX }}
           path: ${{ github.workspace }}/ohos-test-work/dl-linux
 
       - name: Layout toolchain and sysroot (Linux host)
