@@ -455,6 +455,10 @@ jobs:
             echo "::error::Expected clang-dev/ or clang/ next to sysroot"; ls -la
             exit 1
           fi
+          if [ -z "$(find . -maxdepth 20 \( -type f -o -type l \) \( -iname '*ohos*clang' -o -iname '*linux*ohos*clang' \) 2>/dev/null | grep -vi clang++ | head -1)" ]; then
+            echo "::error::No OHOS clang driver in Linux bundle after extract"; find . -maxdepth 6 | head -120
+            exit 1
+          fi
 
       - name: Layout merged toolchain + sysroot (Darwin host)
         if: matrix.toolchain_kind == 'merged-darwin'
@@ -496,12 +500,27 @@ jobs:
           W="${{ github.workspace }}/ohos-test-work"
           cd "$W"
           if [ "${{ matrix.toolchain_kind }}" = "linux-packages" ]; then
-            F="$(find "$W" -maxdepth 10 -type f \( -name 'aarch64-linux-ohos-clang' -o -name 'aarch64-unknown-linux-ohos-clang' \) 2>/dev/null | head -1)"
+            F="$(find "$W" -maxdepth 25 \( -type f -o -type l \) \( -iname '*linux*ohos*clang' -o -iname '*unknown*linux*ohos*clang' -o -iname 'aarch64-linux-ohos-clang' -o -iname 'aarch64-unknown-linux-ohos-clang' \) 2>/dev/null | grep -vi clang++ | head -1)"
             if [ -z "$F" ]; then
-              echo "::error::No aarch64 OHOS clang under $W"; find "$W" -maxdepth 6 \( -type d -o -type f \) | head -60
+              F="$(find "$W" -maxdepth 25 \( -type f -o -type l \) -iname '*ohos*clang' 2>/dev/null | grep -vi clang++ | head -1)"
+            fi
+            if [ -z "$F" ]; then
+              echo "::error::No aarch64 OHOS clang under $W"; find "$W" -maxdepth 10 2>/dev/null | head -100
               exit 1
             fi
             BIN="$(dirname "$F")"
+            OHOS_CC="$F"
+            XX="$(find "$BIN" -maxdepth 1 \( -type f -o -type l \) -iname '*ohos*clang++' 2>/dev/null | head -1)"
+            if [ -z "$XX" ]; then
+              for c in aarch64-linux-ohos-clang++ aarch64-unknown-linux-ohos-clang++; do
+                if [ -e "$BIN/$c" ]; then XX="$BIN/$c"; break; fi
+              done
+            fi
+            if [ -z "$XX" ]; then
+              echo "::error::No OHOS clang++ next to $OHOS_CC"; ls -la "$BIN" || true
+              exit 1
+            fi
+            OHOS_CXX="$XX"
           else
             case "${{ matrix.platform }}" in
               macos-arm64) PAT='clang_darwin-arm64-*' ;;
@@ -539,8 +558,11 @@ jobs:
             echo "::error::No aarch64 OHOS clang++ in $b"; ls -la "$b" || true
             exit 1
           }
-          OHOS_CC="$(pick_clang "$BIN")"
-          OHOS_CXX="$(pick_clangxx "$BIN")"
+          if [ "${{ matrix.toolchain_kind }}" != "linux-packages" ]; then
+            OHOS_CC="$(pick_clang "$BIN")"
+            OHOS_CXX="$(pick_clangxx "$BIN")"
+          fi
+          chmod +x "$OHOS_CC" "$OHOS_CXX" 2>/dev/null || true
           "$OHOS_CC" -O2 -o src/hello_ohos_c src/ohos.c
           "$OHOS_CXX" -std=c++17 -O2 -o src/hello_ohos_cpp src/ohos.cpp
           file src/hello_ohos_c src/hello_ohos_cpp
