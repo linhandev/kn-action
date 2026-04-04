@@ -243,23 +243,11 @@ jobs:
         with:
           path: kn-action
 
-      # Windows job steps use `shell: bash`; Git for Windows is often not on PATH for the runner service.
-      - name: Ensure Git Bash on PATH
-        shell: powershell
+      # Git for Windows is often not on PATH; avoid PowerShell here (many hosts block .ps1 via execution policy).
+      - name: Add Git bin to PATH
+        shell: cmd
         run: |
-          $candidates = @(
-            (Join-Path $env:ProgramFiles 'Git\bin'),
-            (Join-Path ${env:ProgramFiles(x86)} 'Git\bin'),
-            'C:\Program Files\Git\bin'
-          )
-          $bash = $null
-          foreach ($d in $candidates) {
-            $b = Join-Path $d 'bash.exe'
-            if (Test-Path $b) { $bash = $b; $gitBin = $d; break }
-          }
-          if (-not $bash) { Write-Error 'Git for Windows bash.exe not found'; exit 1 }
-          Add-Content -Path $env:GITHUB_PATH -Value $gitBin
-          Write-Host "GITHUB_PATH += $gitBin"
+          echo C:\Progra~1\Git\bin>>"%GITHUB_PATH%"
 
       - name: Setup environment
         id: vars
