@@ -489,15 +489,51 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          W="${{ github.workspace }}/ohos-test-work"
+          cd "$W"
           if [ "${{ matrix.toolchain_kind }}" = "linux-packages" ]; then
-            export PATH="${{ github.workspace }}/ohos-test-work/clang-dev/bin:$PATH"
+            BIN="$W/clang-dev/bin"
           else
-            TC="$(find "${{ github.workspace }}/ohos-test-work" -maxdepth 1 -type d -name 'clang_darwin-*' | head -1)"
-            export PATH="$TC/bin:$PATH"
+            case "${{ matrix.platform }}" in
+              macos-arm64) PAT='clang_darwin-arm64-*' ;;
+              macos-x64)   PAT='clang_darwin-x86_64-*' ;;
+              *) echo "::error::unexpected platform ${{ matrix.platform }}"; exit 1 ;;
+            esac
+            TC="$(find "$W" -maxdepth 1 -type d -name "$PAT" | head -1)"
+            if [ -z "$TC" ] || [ ! -d "$TC/bin" ]; then
+              echo "::error::No merged Darwin toolchain ($PAT) under $W"; ls -la "$W" || true
+              exit 1
+            fi
+            BIN="$TC/bin"
           fi
-          cd "${{ github.workspace }}/ohos-test-work"
-          aarch64-unknown-linux-ohos-clang -O2 -o src/hello_ohos_c src/ohos.c
-          aarch64-unknown-linux-ohos-clang++ -std=c++17 -O2 -o src/hello_ohos_cpp src/ohos.cpp
+          pick_clang() {
+            local b="$1"
+            local c x
+            for c in aarch64-unknown-linux-ohos-clang aarch64-linux-ohos-clang; do
+              if [ -x "$b/$c" ]; then echo "$b/$c"; return 0; fi
+            done
+            for x in "$b"/*ohos*clang; do
+              [ -e "$x" ] || continue
+              case "$x" in *++*|*++.*) continue ;; esac
+              [ -x "$x" ] && echo "$x" && return 0
+            done
+            echo "::error::No aarch64 OHOS clang driver in $b"; ls -la "$b" || true
+            exit 1
+          }
+          pick_clangxx() {
+            local b="$1" c
+            for c in aarch64-unknown-linux-ohos-clang++ aarch64-linux-ohos-clang++; do
+              if [ -x "$b/$c" ]; then echo "$b/$c"; return 0; fi
+            done
+            c=$(find "$b" -maxdepth 1 -type f -name '*ohos*clang++' 2>/dev/null | head -1)
+            if [ -n "$c" ] && [ -x "$c" ]; then echo "$c"; return 0; fi
+            echo "::error::No aarch64 OHOS clang++ in $b"; ls -la "$b" || true
+            exit 1
+          }
+          OHOS_CC="$(pick_clang "$BIN")"
+          OHOS_CXX="$(pick_clangxx "$BIN")"
+          "$OHOS_CC" -O2 -o src/hello_ohos_c src/ohos.c
+          "$OHOS_CXX" -std=c++17 -O2 -o src/hello_ohos_cpp src/ohos.cpp
           file src/hello_ohos_c src/hello_ohos_cpp
 
       - name: Pack test binaries
