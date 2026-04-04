@@ -503,13 +503,13 @@ jobs:
             F=""
             for d in "$W/clang-dev/bin" "$W/clang/bin"; do
               [ -d "$d" ] || continue
-              F="$(find "$d" -maxdepth 1 \( -type f -o -type l \) \( -iname '*ohos*clang' -o -iname 'aarch64*clang' -o -iname 'aarch64-linux-ohos*' \) 2>/dev/null | grep -Fv 'clang++' | head -1)"
+              F="$(find "$d" -maxdepth 1 \( -type f -o -type l \) \( -iname 'aarch64-unknown-linux-ohos-clang' -o -iname 'aarch64-linux-ohos-clang' -o -iname 'aarch64*linux*ohos*clang' \) 2>/dev/null | grep -Fv 'clang++' | head -1)"
               [ -n "$F" ] && break
             done
             if [ -z "$F" ]; then
               for d in "$W/clang-dev/bin" "$W/clang/bin"; do
                 [ -d "$d" ] || continue
-                F="$(find "$d" -maxdepth 1 \( -type f -o -type l \) -iname 'clang' 2>/dev/null | head -1)"
+                F="$(find "$d" -maxdepth 1 \( -type f -o -type l \) -iname '*aarch64*ohos*clang' 2>/dev/null | grep -Fv 'clang++' | head -1)"
                 [ -n "$F" ] && break
               done
             fi
@@ -519,9 +519,9 @@ jobs:
             fi
             BIN="$(dirname "$F")"
             OHOS_CC="$F"
-            XX="$(find "$BIN" -maxdepth 1 \( -type f -o -type l \) \( -iname '*ohos*clang++' -o -iname 'aarch64*clang++' \) 2>/dev/null | head -1)"
+            XX="$(find "$BIN" -maxdepth 1 \( -type f -o -type l \) \( -iname 'aarch64-unknown-linux-ohos-clang++' -o -iname 'aarch64-linux-ohos-clang++' -o -iname '*aarch64*ohos*clang++' \) 2>/dev/null | head -1)"
             if [ -z "$XX" ]; then
-              for c in aarch64-linux-ohos-clang++ aarch64-unknown-linux-ohos-clang++ clang++; do
+              for c in aarch64-linux-ohos-clang++ aarch64-unknown-linux-ohos-clang++; do
                 if [ -e "$BIN/$c" ]; then XX="$BIN/$c"; break; fi
               done
             fi
