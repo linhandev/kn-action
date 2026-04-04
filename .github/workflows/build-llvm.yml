@@ -243,16 +243,44 @@ jobs:
         with:
           path: kn-action
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       # Git for Windows is often not on PATH; avoid PowerShell here (many hosts block .ps1 via execution policy).
       - name: Add Git bin to PATH
         shell: cmd
         run: |
           echo C:\Progra~1\Git\bin>>"%GITHUB_PATH%"
+
+      # Self-hosted runners may be offline from GitHub; do not use actions/setup-python (downloads). Use host Python.
+      - name: Add Python to PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          try_dir() {
+            local d="$1"
+            if [ -x "$d/python.exe" ] || [ -x "$d/python3.exe" ]; then
+              printf '%s\n' "$d" >> "$GITHUB_PATH"
+              echo "Added Python dir: $d"
+              return 0
+            fi
+            return 1
+          }
+          for d in \
+            "$HOME/AppData/Local/Programs/Python/Python312" \
+            "$HOME/AppData/Local/Programs/Python/Python311" \
+            "/c/Python312" "/c/Python311" \
+            "/c/Program Files/Python312" \
+            "/c/Program Files/Python311"; do
+            try_dir "$d" && exit 0
+          done
+          if command -v py >/dev/null 2>&1; then
+            W="$(py -3 -c "import sys, pathlib; print(pathlib.Path(sys.executable).parent)" 2>/dev/null || true)"
+            if [ -n "$W" ] && [ -d "$W" ]; then
+              printf '%s\n' "$W" >> "$GITHUB_PATH"
+              echo "Added Python dir from py launcher: $W"
+              exit 0
+            fi
+          fi
+          echo "::error::Python 3 not found. Install Python 3.11+ under %LocalAppData%\\Programs\\Python or add python.exe to PATH."
+          exit 1
 
       - name: Setup environment
         id: vars
