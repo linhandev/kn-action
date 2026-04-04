@@ -497,8 +497,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          W="${{ github.workspace }}/ohos-test-work"
-          cd "$W"
+          # Use real cwd (defaults.run.working-directory is ohos-test-work). Do not join github.workspace — in container jobs it can differ from Layout extract path (/__w/... vs host path).
+          W="$(pwd)"
           if [ "${{ matrix.toolchain_kind }}" = "linux-packages" ]; then
             F=""
             for d in "$W/clang-dev/bin" "$W/clang/bin"; do
