@@ -228,9 +228,176 @@ jobs:
         with:
           path: ${{ steps.archive.outputs.path }}
 
+  # Windows self-hosted: job-level `container:` is not supported on Windows runners, so this is a
+  # separate job (same steps as `build` without Docker/volumes). Requires Git Bash + build deps on the runner.
+  build-windows:
+    name: build (Windows-X64)
+    environment: env
+    runs-on: [self-hosted, Windows, X64, llvm]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Setup environment
+        id: vars
+        run: |
+          AP="${{ env.ARTIFACT_LOCAL_PATH }}"
+          AP="${AP/#\~/$HOME}"
+          if command -v realpath >/dev/null 2>&1; then
+            echo "$(realpath "$AP" 2>/dev/null || echo "$AP")"
+          else
+            echo "$AP"
+          fi
+          CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
+
+          if [ "$CLEAN_BUILD" = "true" ]; then
+            rm -rf "$LLVM_WORKSPACE"
+          fi
+          mkdir -p "$LLVM_WORKSPACE"
+
+          NEED_ENV_PREPARE="false"
+          if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
+            NEED_ENV_PREPARE="true"
+          fi
+
+          {
+            echo "LLVM_WORKSPACE=$LLVM_WORKSPACE"
+            echo "clean_build=$CLEAN_BUILD"
+            echo "need_env_prepare=$NEED_ENV_PREPARE"
+            echo "repo_dir=$REPO_DIR"
+          } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare Windows tools (git-lfs, pip for repo)
+        run: |
+          set -euo pipefail
+          git lfs install 2>/dev/null || true
+          py=""; for c in python3 python py; do command -v "$c" >/dev/null 2>&1 && py="$c" && break; done
+          if [ -n "$py" ]; then "$py" -m pip install --user requests 2>/dev/null || "$py" -m pip install requests; fi
+
+      - name: Setup git
+        env:
+          LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
+        run: |
+          git config --global --add safe.directory "$LLVM_WORKSPACE/build"
+          git config --global --add safe.directory "$LLVM_WORKSPACE/third_party/musl"
+          git config --global user.email &>/dev/null || git config --global user.email "ci@ci.ci"
+          git config --global user.name &>/dev/null || git config --global user.name "ci"
+
+      - name: Setup git credentials for GitCode
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          if [ -z "${GITCODE_TOKEN}" ]; then
+            echo "::error::GITCODE_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (GitCode token with read access)."
+            exit 1
+          fi
+          git config --global credential.helper ''
+          git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
+          git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
+          git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
+
+      - name: Setup repo tool
+        run: |
+          REPO_DIR="$GITHUB_WORKSPACE/bin"
+          REPO_BIN="$REPO_DIR/repo"
+          mkdir -p "$REPO_DIR"
+          if [ ! -x "$REPO_BIN" ]; then
+            curl -fSL -o "$REPO_BIN" "https://gitee.com/oschina/repo/raw/fork_flow/repo-py3"
+            head -c 2 "$REPO_BIN" | grep -q '#!' || { echo "::error::Downloaded repo script invalid (no shebang)"; exit 1; }
+            chmod a+x "$REPO_BIN"
+            py=""; for c in python3 python py; do command -v "$c" >/dev/null 2>&1 && py="$c" && break; done
+            if [ -z "$py" ]; then echo "::error::python3 or python not found"; exit 1; fi
+            "$py" -m pip install requests || "$py" -m pip install --user requests
+          fi
+          echo "$REPO_DIR" >> "$GITHUB_PATH"
+          export PATH="$REPO_DIR:$PATH"
+          repo --version
+
+      - name: Init repo manifest
+        env:
+          LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
+        run: |
+          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
+          if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
+            cd "$LLVM_WORKSPACE"
+            REFERENCE_FLAG=""
+            if [ -d "${{ env.LOCAL_REFERENCE_DIR }}" ]; then
+              REFERENCE_FLAG="--reference=${{ env.LOCAL_REFERENCE_DIR }}"
+            fi
+            repo init -u "${{ env.MANIFEST_URL }}" -m "${{ env.MANIFEST_FILE }}" $REFERENCE_FLAG
+          fi
+
+      - name: Sync source
+        env:
+          GIT_TERMINAL_PROMPT: 0
+        run: |
+          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
+          repo sync -c -v -j 16
+          repo forall -c 'git lfs pull'
+
+      - name: Restore git config (remove GitCode credentials)
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          if [ -n "${GITCODE_TOKEN}" ]; then
+            git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
+          fi
+          git config --global --unset credential.helper 2>/dev/null || true
+
+      - name: Prepare build environment
+        if: steps.vars.outputs.need_env_prepare == 'true'
+        run: |
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
+          bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
+
+      - name: Build LLVM
+        run: |
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
+          bash toolchain/llvm-project/llvm-build/build.sh
+
+      - name: Archive llvm/packages
+        id: archive
+        env:
+          ARTIFACT_LOCAL_PATH: ${{ env.ARTIFACT_LOCAL_PATH }}
+          LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
+        run: |
+          ARTIFACT_LOCAL_PATH="$(echo "$ARTIFACT_LOCAL_PATH" | sed "s|^~|$HOME|")"
+          mkdir -p "$ARTIFACT_LOCAL_PATH"
+
+          LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
+          LLVM_SHA="$(git -C "$LLVM_PROJECT_DIR" rev-parse HEAD)"
+          LLVM_SHA_SHORT="${LLVM_SHA:0:7}"
+          GITHUB_SHA_SHORT="${GITHUB_SHA:0:7}"
+
+          PACKAGES_DIR="$LLVM_WORKSPACE/packages"
+          if [ ! -d "$PACKAGES_DIR" ] || [ -z "$(ls -A "$PACKAGES_DIR" 2>/dev/null)" ]; then
+            echo "::error::Expected non-empty directory at $PACKAGES_DIR (e.g. .../llvm/packages on the runner)."
+            exit 1
+          fi
+
+          ARCHIVE_NAME="llvm-packages-${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar"
+          OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
+          tar -cf "$OUT_PATH" -C "$LLVM_WORKSPACE" packages
+          echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
+          echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+          echo "llvm_sha_short=$LLVM_SHA_SHORT" >> "$GITHUB_OUTPUT"
+          echo "action_sha_short=$GITHUB_SHA_SHORT" >> "$GITHUB_OUTPUT"
+          echo "Uploaded artifact: $OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload llvm/packages to local server
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ steps.archive.outputs.path }}
+
   cross-copy:
     name: cross copy on mac arm
-    needs: [build]
+    needs: [build, build-windows]
     runs-on: [self-hosted, macOS, ARM64, llvm]
     defaults:
       run:
