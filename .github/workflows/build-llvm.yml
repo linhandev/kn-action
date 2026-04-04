@@ -450,7 +450,11 @@ jobs:
         run: |
           set -euo pipefail
           tar -xzf "${{ steps.dl_linux_pkg.outputs.path }}" -C .
-          test -d clang-dev && test -d sysroot
+          test -d sysroot
+          if [ ! -d clang-dev ] && [ ! -d clang ]; then
+            echo "::error::Expected clang-dev/ or clang/ next to sysroot"; ls -la
+            exit 1
+          fi
 
       - name: Layout merged toolchain + sysroot (Darwin host)
         if: matrix.toolchain_kind == 'merged-darwin'
@@ -492,7 +496,12 @@ jobs:
           W="${{ github.workspace }}/ohos-test-work"
           cd "$W"
           if [ "${{ matrix.toolchain_kind }}" = "linux-packages" ]; then
-            BIN="$W/clang-dev/bin"
+            F="$(find "$W" -maxdepth 10 -type f \( -name 'aarch64-linux-ohos-clang' -o -name 'aarch64-unknown-linux-ohos-clang' \) 2>/dev/null | head -1)"
+            if [ -z "$F" ]; then
+              echo "::error::No aarch64 OHOS clang under $W"; find "$W" -maxdepth 6 \( -type d -o -type f \) | head -60
+              exit 1
+            fi
+            BIN="$(dirname "$F")"
           else
             case "${{ matrix.platform }}" in
               macos-arm64) PAT='clang_darwin-arm64-*' ;;
