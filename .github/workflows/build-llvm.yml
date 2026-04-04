@@ -325,6 +325,24 @@ jobs:
             echo "Merged $p -> $D"
           done
 
+      - name: Pack Linux host OHOS toolchain (clang + sysroot for Linux CI)
+        id: pack_linux_host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p linux-host-layout
+          tar -xzf extract-linux/packages/clang-dev-linux-x86_64.tar.gz -C linux-host-layout
+          tar -xzf extract-linux/packages/ohos-sysroot-dev.tar.gz -C linux-host-layout
+          NAME="llvm-ohos-linux-host-${{ github.run_id }}.tar.gz"
+          tar -czf "$NAME" -C linux-host-layout .
+          echo "archive=$NAME" >> "$GITHUB_OUTPUT"
+          echo "Linux host bundle: $NAME (clang-dev + sysroot)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Linux host OHOS toolchain
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_linux_host.outputs.archive }}
+
       - name: Pack merged Darwin ARM64 toolchain
         id: pack_arm64
         shell: bash
@@ -402,12 +420,12 @@ jobs:
           rm -rf "${{ github.workspace }}/ohos-test-work"
           mkdir -p "${{ github.workspace }}/ohos-test-work"
 
-      - name: Download Linux packages tar (native OHOS clang)
+      - name: Download Linux host OHOS toolchain (from cross-copy)
         if: matrix.toolchain_kind == 'linux-packages'
         id: dl_linux_pkg
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: ${{ env.HARDCODED_LLVM_PACKAGES_LINUX }}
+          name: llvm-ohos-linux-host-${{ github.run_id }}.tar.gz
           path: ${{ github.workspace }}/ohos-test-work/dl
 
       - name: Download merged Darwin toolchain
@@ -431,10 +449,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p extract
-          tar -xf "${{ steps.dl_linux_pkg.outputs.path }}" -C extract
-          tar -xzf extract/packages/clang-dev-linux-x86_64.tar.gz -C .
-          tar -xzf extract/packages/ohos-sysroot-dev.tar.gz -C .
+          tar -xzf "${{ steps.dl_linux_pkg.outputs.path }}" -C .
           test -d clang-dev && test -d sysroot
 
       - name: Layout merged toolchain + sysroot (Darwin host)
