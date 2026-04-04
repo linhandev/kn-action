@@ -396,6 +396,8 @@ jobs:
 
       - name: Prepare workspace
         shell: bash
+        # Must not inherit defaults.run.working-directory (ohos-test-work): it does not exist until this step creates it.
+        working-directory: ${{ github.workspace }}
         run: |
           rm -rf "${{ github.workspace }}/ohos-test-work"
           mkdir -p "${{ github.workspace }}/ohos-test-work"
