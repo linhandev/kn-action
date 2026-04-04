@@ -455,8 +455,8 @@ jobs:
             echo "::error::Expected clang-dev/ or clang/ next to sysroot"; ls -la
             exit 1
           fi
-          if [ -z "$(find . -maxdepth 20 \( -type f -o -type l \) \( -iname '*ohos*clang' -o -iname '*linux*ohos*clang' \) 2>/dev/null | grep -vi clang++ | head -1)" ]; then
-            echo "::error::No OHOS clang driver in Linux bundle after extract"; find . -maxdepth 6 | head -120
+          if [ ! -d clang-dev/bin ] && [ ! -d clang/bin ]; then
+            echo "::error::Expected clang-dev/bin or clang/bin"; find . -maxdepth 5 | head -80
             exit 1
           fi
 
@@ -500,24 +500,33 @@ jobs:
           W="${{ github.workspace }}/ohos-test-work"
           cd "$W"
           if [ "${{ matrix.toolchain_kind }}" = "linux-packages" ]; then
-            F="$(find "$W" -maxdepth 25 \( -type f -o -type l \) \( -iname '*linux*ohos*clang' -o -iname '*unknown*linux*ohos*clang' -o -iname 'aarch64-linux-ohos-clang' -o -iname 'aarch64-unknown-linux-ohos-clang' \) 2>/dev/null | grep -vi clang++ | head -1)"
+            F=""
+            for d in "$W/clang-dev/bin" "$W/clang/bin"; do
+              [ -d "$d" ] || continue
+              F="$(find "$d" -maxdepth 1 \( -type f -o -type l \) \( -iname '*ohos*clang' -o -iname 'aarch64*clang' -o -iname 'aarch64-linux-ohos*' \) 2>/dev/null | grep -Fv 'clang++' | head -1)"
+              [ -n "$F" ] && break
+            done
             if [ -z "$F" ]; then
-              F="$(find "$W" -maxdepth 25 \( -type f -o -type l \) -iname '*ohos*clang' 2>/dev/null | grep -vi clang++ | head -1)"
+              for d in "$W/clang-dev/bin" "$W/clang/bin"; do
+                [ -d "$d" ] || continue
+                F="$(find "$d" -maxdepth 1 \( -type f -o -type l \) -iname 'clang' 2>/dev/null | head -1)"
+                [ -n "$F" ] && break
+              done
             fi
             if [ -z "$F" ]; then
-              echo "::error::No aarch64 OHOS clang under $W"; find "$W" -maxdepth 10 2>/dev/null | head -100
+              echo "::error::No clang driver under clang-dev/bin or clang/bin"; find "$W" -maxdepth 5 | head -100
               exit 1
             fi
             BIN="$(dirname "$F")"
             OHOS_CC="$F"
-            XX="$(find "$BIN" -maxdepth 1 \( -type f -o -type l \) -iname '*ohos*clang++' 2>/dev/null | head -1)"
+            XX="$(find "$BIN" -maxdepth 1 \( -type f -o -type l \) \( -iname '*ohos*clang++' -o -iname 'aarch64*clang++' \) 2>/dev/null | head -1)"
             if [ -z "$XX" ]; then
-              for c in aarch64-linux-ohos-clang++ aarch64-unknown-linux-ohos-clang++; do
+              for c in aarch64-linux-ohos-clang++ aarch64-unknown-linux-ohos-clang++ clang++; do
                 if [ -e "$BIN/$c" ]; then XX="$BIN/$c"; break; fi
               done
             fi
             if [ -z "$XX" ]; then
-              echo "::error::No OHOS clang++ next to $OHOS_CC"; ls -la "$BIN" || true
+              echo "::error::No clang++ next to $OHOS_CC"; ls -la "$BIN" || true
               exit 1
             fi
             OHOS_CXX="$XX"
