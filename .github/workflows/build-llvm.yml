@@ -31,9 +31,10 @@ env:
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
   OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02
   # TEMP: LLVM matrix job is disabled (`build` if: false). cross-copy / ohos-test use these exact basenames on the artifact server.
-  HARDCODED_LLVM_PACKAGES_LINUX: llvm-packages-f00b4r5_act-dead666_Linux_X64.tar
-  HARDCODED_LLVM_PACKAGES_MACOS_ARM64: llvm-packages-f00b4r5_act-dead666_macOS_ARM64.tar
-  HARDCODED_LLVM_PACKAGES_MACOS_X64: llvm-packages-f00b4r5_act-dead666_macOS_X64.tar
+  # From last full matrix run that uploaded to the artifact server (run 23968674307); update if those files are removed.
+  HARDCODED_LLVM_PACKAGES_LINUX: llvm-packages-495f8da_act-b7d9e73_Linux_X64.tar
+  HARDCODED_LLVM_PACKAGES_MACOS_ARM64: llvm-packages-495f8da_act-b7d9e73_macOS_ARM64.tar
+  HARDCODED_LLVM_PACKAGES_MACOS_X64: llvm-packages-495f8da_act-b7d9e73_macOS_X64.tar
 
 # Re-enable LLVM matrix: set `build` job `if` back to `success()` (or a vars/inputs gate) and restore dynamic artifact names below.
 jobs:
