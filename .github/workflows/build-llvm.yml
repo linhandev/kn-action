@@ -565,7 +565,7 @@ jobs:
           chmod +x "$OHOS_CC" "$OHOS_CXX" 2>/dev/null || true
           "$OHOS_CC" -O2 -o src/hello_ohos_c src/ohos.c
           "$OHOS_CXX" -std=c++17 -O2 -o src/hello_ohos_cpp src/ohos.cpp
-          file src/hello_ohos_c src/hello_ohos_cpp
+          if command -v file >/dev/null 2>&1; then file src/hello_ohos_c src/hello_ohos_cpp; else ls -la src/hello_ohos_c src/hello_ohos_cpp; fi
 
       - name: Pack test binaries
         id: test_pack
