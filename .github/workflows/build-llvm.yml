@@ -225,9 +225,9 @@ jobs:
             exit 1
           fi
 
-          ARCHIVE_NAME="llvm-packages-${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
+          ARCHIVE_NAME="llvm-packages-${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar"
           OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
-          tar -cf - -C "$LLVM_WORKSPACE" packages | pigz -9 > "$OUT_PATH"
+          tar -cf "$OUT_PATH" -C "$LLVM_WORKSPACE" packages
           echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
           echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
           echo "llvm_sha_short=$LLVM_SHA_SHORT" >> "$GITHUB_OUTPUT"
