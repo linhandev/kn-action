@@ -205,7 +205,7 @@ jobs:
           fi
           bash "$BUILD_SCRIPT"
 
-      - name: Archive build output
+      - name: Archive llvm/packages
         id: archive
         shell: bash
         env:
@@ -218,27 +218,32 @@ jobs:
           LLVM_SHA="$(git -C "$LLVM_PROJECT_DIR" rev-parse HEAD)"
           LLVM_SHA_SHORT="${LLVM_SHA:0:7}"
           GITHUB_SHA_SHORT="${GITHUB_SHA:0:7}"
-          ARCHIVE_NAME="llvm-${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
 
+          PACKAGES_DIR="$LLVM_WORKSPACE/packages"
+          if [ ! -d "$PACKAGES_DIR" ] || [ -z "$(ls -A "$PACKAGES_DIR" 2>/dev/null)" ]; then
+            echo "::error::Expected non-empty directory at $PACKAGES_DIR (e.g. .../llvm/packages on the runner)."
+            exit 1
+          fi
+
+          ARCHIVE_NAME="llvm-packages-${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
           OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
-          # Pipe through pigz so it works on both GNU tar (Linux) and BSD tar (macOS)
-          tar -cf - -C "$LLVM_WORKSPACE" out/llvm-install | pigz -9 > "$OUT_PATH"
+          tar -cf - -C "$LLVM_WORKSPACE" packages | pigz -9 > "$OUT_PATH"
           echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
           echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
           echo "llvm_sha_short=$LLVM_SHA_SHORT" >> "$GITHUB_OUTPUT"
           echo "action_sha_short=$GITHUB_SHA_SHORT" >> "$GITHUB_OUTPUT"
-          echo "path=$OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
+          echo "Uploaded artifact: $OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload artifact to local server
+      - name: Upload llvm/packages to local server
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ steps.archive.outputs.path }}
 
-  # Post step: merge Linux x64 artifact into host toolchain, then build/run tests
+  # Disabled: requires full out/llvm-install tarballs from the build job; this workflow only uploads llvm/packages.
   cross-copy:
     name: ${{ format('cross-copy ({0})', matrix.platform) }}
     needs: [build]
-    if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    if: false
     env:
       HOST_SUFFIX: ${{ matrix.host_suffix }}
     strategy:
@@ -419,7 +424,7 @@ jobs:
           path: ${{ github.workspace }}/${{ steps.test_binaries.outputs.archive_name }}
 
   actions-timeline:
-    needs: [cross-copy]
+    needs: [build]
     if: always()
     runs-on: ubuntu-22.04
     permissions:
