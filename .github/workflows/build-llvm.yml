@@ -14,10 +14,6 @@ on:
         description: 'Wipe workspace and build from scratch'
         default: false
         type: boolean
-      skip_build:
-        description: 'Skip build job, start from cross-copy. Uses latest artifacts from previous runs'
-        default: false
-        type: boolean
       run_name:
         description: 'Custom title for this run (shown in Actions UI)'
         required: false
@@ -38,7 +34,6 @@ env:
 jobs:
   build:
     name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
-    if: github.event.inputs.skip_build != 'true'
     environment: env
     outputs:
       llvm_sha_short: ${{ steps.archive.outputs.llvm_sha_short }}
@@ -239,192 +234,337 @@ jobs:
         with:
           path: ${{ steps.archive.outputs.path }}
 
-  # Disabled: requires full out/llvm-install tarballs from the build job; this workflow only uploads llvm/packages.
+  # Merge Linux + both macOS llvm/packages on the artifact server host (mac ARM only). Uses exact names from the build job upload.
   cross-copy:
-    name: ${{ format('cross-copy ({0})', matrix.platform) }}
+    name: cross-copy (mac ARM, merge OHOS)
     needs: [build]
-    if: false
-    env:
-      HOST_SUFFIX: ${{ matrix.host_suffix }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-arm64
-            runner: [self-hosted, macOS, ARM64, llvm]
-            host_suffix: macOS_ARM64
-          - platform: macos-x64
-            runner: [self-hosted, macOS, X64, llvm]
-            host_suffix: macOS_X64
-    runs-on: ${{ matrix.runner }}
+    if: success()
+    runs-on: [self-hosted, macOS, ARM64, llvm]
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/cross-copy-work
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
         with:
           path: kn-action
 
-      # When skip_build false: use exact artifact names from build job (llvm + action commit). When true: use pattern for latest.
-      - name: Set artifact names or patterns
-        id: artifacts
+      - name: Prepare workspace
+        shell: bash
+        run: |
+          rm -rf "${{ github.workspace }}/cross-copy-work"
+          mkdir -p "${{ github.workspace }}/cross-copy-work/downloads"
+
+      - name: Download Linux X64 llvm-packages tar (exact name from build)
+        id: dl_linux
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Linux_X64.tar
+          path: ${{ github.workspace }}/cross-copy-work/downloads
+
+      - name: Download macOS ARM64 llvm-packages tar
+        id: dl_mac_arm64
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_macOS_ARM64.tar
+          path: ${{ github.workspace }}/cross-copy-work/downloads
+
+      - name: Download macOS X64 llvm-packages tar
+        id: dl_mac_x64
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_macOS_X64.tar
+          path: ${{ github.workspace }}/cross-copy-work/downloads
+
+      - name: Extract outer tars and merge packages (platform_package.sh)
+        id: merge
+        shell: bash
         env:
-          SKIP_BUILD: ${{ github.event.inputs.skip_build }}
-          LLVM_SHA: ${{ needs.build.outputs.llvm_sha_short }}
-          ACTION_SHA: ${{ needs.build.outputs.action_sha_short }}
+          CLANG_RESOURCE_VERSION: '19'
         run: |
-          if [ "$SKIP_BUILD" = "true" ]; then
-            echo "linux_pattern=llvm-.*_Linux_X64\.tar\.gz" >> "$GITHUB_OUTPUT"
-            echo "host_pattern=llvm-.*_${HOST_SUFFIX}\\.tar\\.gz" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          WORK="$(pwd)"
+          mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 staging
+          tar -xf "${{ steps.dl_linux.outputs.path }}" -C extract-linux
+          tar -xf "${{ steps.dl_mac_arm64.outputs.path }}" -C extract-mac-arm64
+          tar -xf "${{ steps.dl_mac_x64.outputs.path }}" -C extract-mac-x64
+          cp -f extract-linux/packages/*.tar.gz staging/
+          cp -f extract-mac-arm64/packages/clang-dev-darwin-arm64.tar.gz staging/
+          cp -f extract-mac-x64/packages/clang-dev-darwin-x86_64.tar.gz staging/
+          chmod +x "$GITHUB_WORKSPACE/kn-action/.github/scripts/platform_package.sh"
+          ( cd staging && bash "$GITHUB_WORKSPACE/kn-action/.github/scripts/platform_package.sh" )
+          if [ -f staging/ohos-sysroot-dev.tar.gz ]; then
+            tar -xzf staging/ohos-sysroot-dev.tar.gz -C "$WORK"
           else
-            echo "linux_artifact_name=llvm-${LLVM_SHA}_act-${ACTION_SHA}_Linux_X64.tar.gz" >> "$GITHUB_OUTPUT"
-            echo "host_artifact_name=llvm-${LLVM_SHA}_act-${ACTION_SHA}_${HOST_SUFFIX}.tar.gz" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download Linux X64 artifact
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: ${{ steps.artifacts.outputs.linux_artifact_name }}
-          pattern: ${{ steps.artifacts.outputs.linux_pattern }}
-          path: ${{ github.workspace }}/artifacts-in
-
-      - name: Download host artifact
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: ${{ steps.artifacts.outputs.host_artifact_name }}
-          pattern: ${{ steps.artifacts.outputs.host_pattern }}
-          path: ${{ github.workspace }}/artifacts-in
-
-      - name: Extract artifacts
-        id: extract
-        run: |
-          echo "artifacts-in: $(ls artifacts-in)"
-          mkdir -p linux_llvm host_llvm
-          TAR_LINUX="$(find artifacts-in -name '*.tar.gz' -path '*Linux*X64*' -print -quit)"
-          TAR_HOST="$(find artifacts-in -name '*.tar.gz' -path "*${HOST_SUFFIX}*" -print -quit)"
-          if [ -z "$TAR_LINUX" ] || [ ! -f "$TAR_LINUX" ]; then
-            echo "::error::Linux X64 artifact not found under artifacts-in. Contents:"
-            find artifacts-in -type f 2>/dev/null || true
+            echo "::error::staging/ohos-sysroot-dev.tar.gz missing after merge"
             exit 1
           fi
-          if [ -z "$TAR_HOST" ] || [ ! -f "$TAR_HOST" ]; then
-            echo "::error::Host artifact ($HOST_SUFFIX) not found under artifacts-in. Contents:"
-            find artifacts-in -type f 2>/dev/null || true
-            exit 1
-          fi
-          echo "host_tar_basename=$(basename "$TAR_HOST")" >> "$GITHUB_OUTPUT"
-          tar -xzf "$TAR_LINUX" -C linux_llvm
-          # Suppress macOS xattr extended-header warning (LIBARCHIVE.xattr.com.apple.provenance)
-          tar -xzf "$TAR_HOST" -C host_llvm 2>/dev/null
+          for p in clang_darwin-arm64 clang_darwin-x86_64; do
+            D="$(find staging -maxdepth 1 -type d -name "${p}-*" | head -1)"
+            if [ -z "$D" ] || [ ! -d "$D" ]; then
+              echo "::error::Missing merged $p tree under staging"
+              ls -la staging
+              exit 1
+            fi
+            echo "Merged $p -> $D"
+          done
 
-      - name: Cross-copy Linux bits into host toolchain (dereference symlinks)
+      - name: Pack merged Darwin ARM64 toolchain
+        id: pack_arm64
+        shell: bash
         run: |
-          clang_linux_x86_64="$(pwd)/linux_llvm/out/llvm-install"
-          clang_host="$(pwd)/host_llvm/out/llvm-install"
+          set -euo pipefail
+          TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-arm64-*' | head -1)"
+          NAME="llvm-merged-ohos-macOS_ARM64-${{ github.run_id }}.tar.gz"
+          tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
+          echo "archive=$NAME" >> "$GITHUB_OUTPUT"
 
-          # make sure target folder exists to get consistent copy behavior
-          mkdir -p "${clang_host}/include"
-
-          cp -Lrf "${clang_linux_x86_64}/lib/aarch64-linux-ohos" "${clang_host}/lib"
-          cp -Lrf "${clang_linux_x86_64}/include/libcxx-ohos" "${clang_host}/include"
-          cp -Lrf "${clang_linux_x86_64}/lib/x86_64-linux-ohos" "${clang_host}/lib"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/bin" "${clang_host}/lib/clang/19"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/profile" "${clang_host}/lib/clang/19/include"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/fuzzer" "${clang_host}/lib/clang/19/include"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/share" "${clang_host}/lib/clang/19"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/include/sanitizer" "${clang_host}/lib/clang/19/include"
-          cp -Lrf "${clang_linux_x86_64}/lib/clang/19/lib" "${clang_host}/lib/clang/19"
-
-      - name: Create test source
+      - name: Pack merged Darwin x86_64 toolchain
+        id: pack_x64
+        shell: bash
         run: |
-          mkdir -p test-build
-          cat > test-build/main.c << 'EOF'
+          set -euo pipefail
+          TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-x86_64-*' | head -1)"
+          NAME="llvm-merged-ohos-macOS_X64-${{ github.run_id }}.tar.gz"
+          tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
+          echo "archive=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload merged macOS ARM64 OHOS toolchain
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_arm64.outputs.archive }}
+
+      - name: Upload merged macOS X64 OHOS toolchain
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_x64.outputs.archive }}
+
+  # Build OHOS aarch64 test programs on each self-hosted runner using the same run's artifacts.
+  ohos-test-build:
+    name: ${{ format('ohos-test-build ({0})', matrix.platform) }}
+    needs: [cross-copy]
+    if: success()
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: [self-hosted, linux, X64, llvm]
+            container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:cd720ae
+            host_suffix: Linux_X64
+            toolchain_kind: linux-packages
+          - platform: macos-arm64
+            runner: [self-hosted, macOS, ARM64, llvm]
+            container_image: ''
+            host_suffix: macOS_ARM64
+            toolchain_kind: merged-darwin
+          - platform: macos-x64
+            runner: [self-hosted, macOS, X64, llvm]
+            container_image: ''
+            host_suffix: macOS_X64
+            toolchain_kind: merged-darwin
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.container_image }}
+      volumes:
+        - ${{ github.workspace }}/../../../artifact:/home/runner/runner/artifact
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/ohos-test-work
+    steps:
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Prepare workspace
+        shell: bash
+        run: |
+          rm -rf "${{ github.workspace }}/ohos-test-work"
+          mkdir -p "${{ github.workspace }}/ohos-test-work"
+
+      - name: Download Linux packages tar (native OHOS clang)
+        if: matrix.toolchain_kind == 'linux-packages'
+        id: dl_linux_pkg
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Linux_X64.tar
+          path: ${{ github.workspace }}/ohos-test-work/dl
+
+      - name: Download merged Darwin toolchain
+        if: matrix.toolchain_kind == 'merged-darwin'
+        id: dl_merged
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-merged-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
+          path: ${{ github.workspace }}/ohos-test-work/dl
+
+      - name: Download Linux packages tar (sysroot for Darwin OHOS link)
+        if: matrix.toolchain_kind == 'merged-darwin'
+        id: dl_linux_sysroot
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Linux_X64.tar
+          path: ${{ github.workspace }}/ohos-test-work/dl-linux
+
+      - name: Layout toolchain and sysroot (Linux host)
+        if: matrix.toolchain_kind == 'linux-packages'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p extract
+          tar -xf "${{ steps.dl_linux_pkg.outputs.path }}" -C extract
+          tar -xzf extract/packages/clang-dev-linux-x86_64.tar.gz -C .
+          tar -xzf extract/packages/ohos-sysroot-dev.tar.gz -C .
+          test -d clang-dev && test -d sysroot
+
+      - name: Layout merged toolchain + sysroot (Darwin host)
+        if: matrix.toolchain_kind == 'merged-darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          W="${{ github.workspace }}/ohos-test-work"
+          tar -xzf "${{ steps.dl_merged.outputs.path }}" -C "$W"
+          mkdir -p "$W/extract-linux"
+          tar -xf "${{ steps.dl_linux_sysroot.outputs.path }}" -C "$W/extract-linux"
+          tar -xzf "$W/extract-linux/packages/ohos-sysroot-dev.tar.gz" -C "$W"
+          test -d "$(find "$W" -maxdepth 1 -type d -name 'clang_darwin-*' | head -1)"
+          test -d "$W/sysroot"
+
+      - name: Write OHOS test sources
+        shell: bash
+        run: |
+          SUF="${{ matrix.host_suffix }}"
+          mkdir -p src
+          cat > src/ohos.c << EOF
           #include <stdio.h>
           int main(void) {
-            printf("ok\n");
+            printf("ok_ohos_c_${SUF}\\n");
             return 0;
           }
           EOF
-          cat > test-build/main.cpp << 'EOF'
-          int main() { return 0; }
+          cat > src/ohos.cpp << EOF
+          #include <iostream>
+          int main() {
+            std::cout << "ok_ohos_cpp_${SUF}\\n";
+            return 0;
+          }
           EOF
 
-      - name: Build and run host test exe
+      - name: Cross-compile OHOS aarch64 (C and C++)
+        shell: bash
         run: |
-          TC="$(pwd)/host_llvm/out/llvm-install"
-          export PATH="$TC/bin:$PATH"
-          # Use host platform SDK so toolchain clang gets proper libc (e.g. macOS: xcrun --show-sdk-path)
-          SDK="$(xcrun --show-sdk-path)"
-          clang -isysroot "$SDK" test-build/main.c -o test-build/test-host
-          OUT="$(./test-build/test-host)"
-          if [ "$OUT" != "ok" ]; then
-            echo "::error::Expected output 'ok', got: $OUT"
-            exit 1
-          fi
-
-      - name: Download OHOS sysroot (on demand)
-        env:
-          CLEAN_BUILD: ${{ github.event.inputs.clean_build }}
-        run: |
-          SYSROOT_DIR="$(pwd)/sysroot-ohos-aarch64"
-          SYSROOT_TOP="$OHOS_SYSROOT"
-          SYSROOT_URL="https://maven.eazytec-cloud.com/nexus/repository/file-storage/${SYSROOT_TOP}.tar.gz"
-          if [ "$CLEAN_BUILD" = "true" ]; then
-            echo "Clean build: removing existing sysroot to re-download"
-            rm -rf "$SYSROOT_DIR"
-          fi
-          if [ ! -d "$SYSROOT_DIR/$SYSROOT_TOP" ]; then
-            echo "Downloading OHOS aarch64 sysroot..."
-            mkdir -p "$SYSROOT_DIR"
-            curl -sSL "$SYSROOT_URL" | tar -xzf - -C "$SYSROOT_DIR"
-            echo "Sysroot at $SYSROOT_DIR/$SYSROOT_TOP"
-            ls -la "$SYSROOT_DIR"
+          set -euo pipefail
+          if [ "${{ matrix.toolchain_kind }}" = "linux-packages" ]; then
+            export PATH="${{ github.workspace }}/ohos-test-work/clang-dev/bin:$PATH"
           else
-            echo "Using existing sysroot at $SYSROOT_DIR/$SYSROOT_TOP"
+            TC="$(find "${{ github.workspace }}/ohos-test-work" -maxdepth 1 -type d -name 'clang_darwin-*' | head -1)"
+            export PATH="$TC/bin:$PATH"
           fi
-
-      - name: Build OHOS test program
-        run: |
-          TC="$(pwd)/host_llvm/out/llvm-install"
-          export PATH="$TC/bin:$PATH"
-          RESOURCE_DIR="$TC/lib/clang/19"
-          SYSROOT="$(pwd)/sysroot-ohos-aarch64/$OHOS_SYSROOT"
-          clang++ -std=c++17 test-build/main.cpp \
-            -target aarch64-linux-ohos \
-            --sysroot "$SYSROOT" \
-            -resource-dir "$RESOURCE_DIR" \
-            -L"$TC/lib/aarch64-linux-ohos" \
-            -o test-build/test-ohos-aarch64
-          file test-build/test-ohos-aarch64
-
-      - name: Re-pack and upload host artifact with Linux cross
-        run: |
-          HOST_BASENAME="${{ steps.extract.outputs.host_tar_basename }}"
-          ARCHIVE_NAME="${HOST_BASENAME%.tar.gz}-full.tar.gz"
-          tar -cf - -C host_llvm out/llvm-install | pigz -9 > "$ARCHIVE_NAME"
-          echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
-        id: repack
-
-      - name: Upload merged artifact
-        uses: ./kn-action/.github/actions/upload-artifact-local
-        with:
-          path: ${{ github.workspace }}/${{ steps.repack.outputs.archive_name }}
+          cd "${{ github.workspace }}/ohos-test-work"
+          aarch64-unknown-linux-ohos-clang -O2 -o src/hello_ohos_c src/ohos.c
+          aarch64-unknown-linux-ohos-clang++ -std=c++17 -O2 -o src/hello_ohos_cpp src/ohos.cpp
+          file src/hello_ohos_c src/hello_ohos_cpp
 
       - name: Pack test binaries
-        id: test_binaries
-        env:
-          HOST_TAR_BASENAME: ${{ steps.extract.outputs.host_tar_basename }}
+        id: test_pack
+        shell: bash
         run: |
-          # Derive name from host LLVM artifact (works when build was skipped)
-          TEST_ARCHIVE="test-binaries_${HOST_TAR_BASENAME}"
-          tar -cf - -C test-build test-host test-ohos-aarch64 | pigz -9 > "$TEST_ARCHIVE"
-          echo "archive_name=$TEST_ARCHIVE" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          NAME="test-binaries-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz"
+          tar -czf "$NAME" -C src hello_ohos_c hello_ohos_cpp
+          echo "archive_name=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Upload test binaries artifact
+      - name: Upload test binaries
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
-          path: ${{ github.workspace }}/${{ steps.test_binaries.outputs.archive_name }}
+          path: ${{ github.workspace }}/ohos-test-work/${{ steps.test_pack.outputs.archive_name }}
+
+  hdc-ohos-verify:
+    name: hdc OHOS verify (mac ARM)
+    needs: [ohos-test-build]
+    if: success()
+    runs-on: [self-hosted, macOS, ARM64, llvm]
+    steps:
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Download test binaries (Linux X64)
+        id: dl_test_linux
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: test-binaries-ohos-Linux_X64-${{ github.run_id }}.tar.gz
+          path: ${{ github.workspace }}/hdc-verify/dl
+
+      - name: Download test binaries (macOS ARM64)
+        id: dl_test_arm64
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: test-binaries-ohos-macOS_ARM64-${{ github.run_id }}.tar.gz
+          path: ${{ github.workspace }}/hdc-verify/dl
+
+      - name: Download test binaries (macOS X64)
+        id: dl_test_x64
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: test-binaries-ohos-macOS_X64-${{ github.run_id }}.tar.gz
+          path: ${{ github.workspace }}/hdc-verify/dl
+
+      - name: Require exactly one hdc target
+        shell: bash
+        run: |
+          set -euo pipefail
+          HDC_BIN="${HDC:-}"
+          if [ -z "$HDC_BIN" ] && [ -x "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc" ]; then
+            HDC_BIN="/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc"
+          fi
+          HDC_BIN="${HDC_BIN:-$(command -v hdc || true)}"
+          if [ -z "$HDC_BIN" ] || [ ! -x "$HDC_BIN" ]; then
+            echo "::error::hdc not found; set HDC or install DevEco toolchains"
+            exit 1
+          fi
+          echo "HDC_BIN=$HDC_BIN" >> "$GITHUB_ENV"
+          n="$("$HDC_BIN" list targets 2>/dev/null | sed '/^\s*$/d' | wc -l | tr -d ' ')"
+          if [ "$n" != "1" ]; then
+            echo "::error::Expected exactly one hdc target (found ${n:-0}). Disconnect extra devices."
+            "$HDC_BIN" list targets || true
+            exit 1
+          fi
+          echo "hdc target: $($HDC_BIN list targets 2>/dev/null | sed '/^\s*$/d' | head -1)"
+
+      - name: Extract and run OHOS ELFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          HDC="${HDC_BIN:-hdc}"
+          ROOT="${{ github.workspace }}/hdc-verify"
+          mkdir -p "$ROOT/run/linux" "$ROOT/run/arm64" "$ROOT/run/x64"
+          tar -xzf "${{ steps.dl_test_linux.outputs.path }}" -C "$ROOT/run/linux"
+          tar -xzf "${{ steps.dl_test_arm64.outputs.path }}" -C "$ROOT/run/arm64"
+          tar -xzf "${{ steps.dl_test_x64.outputs.path }}" -C "$ROOT/run/x64"
+          REMOTE_BASE=/data/local/tmp/llvm-ci-${{ github.run_id }}
+          "$HDC" shell mkdir -p "$REMOTE_BASE"
+          run_one() {
+            local dir="$1" suf="$2"
+            for kind in c cpp; do
+              if [ "$kind" = c ]; then b=hello_ohos_c; exp="ok_ohos_c_${suf}"; else b=hello_ohos_cpp; exp="ok_ohos_cpp_${suf}"; fi
+              RPATH="$REMOTE_BASE/${suf}_${kind}"
+              "$HDC" file send "$dir/$b" "$RPATH"
+              "$HDC" shell chmod 755 "$RPATH"
+              OUT="$("$HDC" shell "$RPATH" 2>&1)" || true
+              echo "output ($suf $kind): $OUT"
+              echo "$OUT" | grep -q "$exp" || { echo "::error::Expected '$exp' in output"; exit 1; }
+            done
+          }
+          run_one "$ROOT/run/linux" Linux_X64
+          run_one "$ROOT/run/arm64" macOS_ARM64
+          run_one "$ROOT/run/x64" macOS_X64
+          echo "All hdc OHOS smoke checks passed." >> "$GITHUB_STEP_SUMMARY"
 
   actions-timeline:
-    needs: [build]
+    needs: [build, cross-copy, ohos-test-build, hdc-ohos-verify]
     if: always()
     runs-on: ubuntu-22.04
     permissions:
