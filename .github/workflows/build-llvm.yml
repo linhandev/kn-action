@@ -22,6 +22,7 @@ on:
     paths:
       - '.github/workflows/build-llvm.yml'
       - 'scripts/setup-repo-tool.sh'
+      - 'scripts/platform_package.sh'
 
 env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
@@ -284,38 +285,62 @@ jobs:
           rm -rf "${{ github.workspace }}/cross-copy-work"
           mkdir -p "${{ github.workspace }}/cross-copy-work/downloads"
 
-      - name: Download llvm-packages tars (build matrix)
-        run: |
-          set -euo pipefail
-          DL="$(pwd)/downloads"
-          SCRIPT="$GITHUB_WORKSPACE/kn-action/.github/actions/download-artifact-local/download.sh"
-          export INPUT_SERVER_URL="${INPUT_SERVER_URL:-http://192.168.3.5:8765}"
-          export INPUT_CACHE_DIR="${INPUT_CACHE_DIR:-~/runner/artifact}"
-          for suf in Linux_X64 macOS_ARM64 macOS_X64; do
-            export INPUT_NAME="llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_${suf}.tar"
-            export INPUT_PATH="$DL"
-            bash "$SCRIPT"
-          done
+      - name: Download llvm-packages (Linux X64)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Linux_X64.tar
+          path: ${{ github.workspace }}/cross-copy-work/downloads
 
-      - name: Extract outer tars and merge packages (platform_package.sh)
+      - name: Download llvm-packages (macOS ARM64)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_macOS_ARM64.tar
+          path: ${{ github.workspace }}/cross-copy-work/downloads
+
+      - name: Download llvm-packages (macOS X64)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_macOS_X64.tar
+          path: ${{ github.workspace }}/cross-copy-work/downloads
+
+      - name: Download llvm-packages (Windows X64)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Windows_X64.tar
+          path: ${{ github.workspace }}/cross-copy-work/downloads
+
+      - name: Extract outer tars and merge packages (scripts/platform_package.sh)
         id: merge
         env:
           CLANG_RESOURCE_VERSION: '19'
         run: |
           set -euo pipefail
-          WORK="$(pwd)"
           DL="$(pwd)/downloads"
           P="llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}"
-          mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 staging
+          mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 extract-windows staging
           tar -xf "$DL/${P}_Linux_X64.tar" -C extract-linux
           tar -xf "$DL/${P}_macOS_ARM64.tar" -C extract-mac-arm64
           tar -xf "$DL/${P}_macOS_X64.tar" -C extract-mac-x64
+          tar -xf "$DL/${P}_Windows_X64.tar" -C extract-windows
           cp -f extract-linux/packages/*.tar.gz staging/
           cp -f extract-mac-arm64/packages/clang-dev-darwin-arm64.tar.gz staging/
           cp -f extract-mac-x64/packages/clang-dev-darwin-x86_64.tar.gz staging/
-          ( cd staging && bash "$GITHUB_WORKSPACE/kn-action/.github/scripts/platform_package.sh" )
+          w=""
+          shopt -s nullglob
+          for f in extract-windows/packages/clang-dev-windows*.tar.gz extract-windows/packages/clang-dev-mingw*.tar.gz; do
+            w="$f"
+            break
+          done
+          shopt -u nullglob
+          if [ -z "$w" ] || [ ! -f "$w" ]; then
+            echo "::error::No Windows clang-dev tarball (clang-dev-windows* or clang-dev-mingw*) under extract-windows/packages"
+            ls -la extract-windows/packages || true
+            exit 1
+          fi
+          cp -f "$w" staging/clang-dev-windows-x86_64.tar.gz
+          ( cd staging && bash "$GITHUB_WORKSPACE/kn-action/scripts/platform_package.sh" )
           # OHOS sysroot for tests comes from Maven in ohos-test jobs, not build-produced ohos-sysroot-dev.tar.gz.
-          for p in clang_darwin-arm64 clang_darwin-x86_64; do
+          for p in clang_darwin-arm64 clang_darwin-x86_64 clang_windows-x86_64; do
             D="$(find staging -maxdepth 1 -type d -name "${p}-*" | head -1)"
             if [ -z "$D" ] || [ ! -d "$D" ]; then
               echo "::error::Missing merged $p tree under staging"
@@ -343,6 +368,15 @@ jobs:
           tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
           echo "archive=$NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Pack merged Windows x86_64 toolchain
+        id: pack_win
+        run: |
+          set -euo pipefail
+          TC="$(find staging -maxdepth 1 -type d -name 'clang_windows-x86_64-*' | head -1)"
+          NAME="llvm-merged-ohos-Windows_X64-${{ github.run_id }}.tar.gz"
+          tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
+          echo "archive=$NAME" >> "$GITHUB_OUTPUT"
+
       - name: Upload merged macOS ARM64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
@@ -352,6 +386,11 @@ jobs:
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_x64.outputs.archive }}
+
+      - name: Upload merged Windows X64 OHOS toolchain
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_win.outputs.archive }}
 
   # Build OHOS aarch64 test programs on each self-hosted runner using the same run's artifacts.
   ohos-test-build:
