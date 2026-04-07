@@ -40,6 +40,18 @@ if [[ -d "$LOCAL_REFERENCE_DIR" ]] && command -v realpath &>/dev/null; then
 fi
 REFERENCE_REPO="${LOCAL_REFERENCE_DIR}/${REPO_NAME}"
 
+# Windows: failed runs can leave paths git clean cannot fix; drop the tree and use fresh clone below.
+if [[ -d "$WORKSPACE_DIR/.git" ]]; then
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+      if ! git -C "$WORKSPACE_DIR" clean -dfx; then
+        echo "prepare-repo: git clean failed in reused workspace; recloning: $WORKSPACE_DIR" >&2
+        rm -rf "$WORKSPACE_DIR"
+      fi
+      ;;
+  esac
+fi
+
 if [[ -d "$WORKSPACE_DIR/.git" ]]; then
   # Reuse existing clone: fetch and force to desired ref
   cd "$WORKSPACE_DIR"
@@ -64,6 +76,11 @@ fi
 git merge --abort 2>/dev/null || true
 git rebase --abort 2>/dev/null || true
 git cherry-pick --abort 2>/dev/null || true
+
+# Reused workspaces often accumulate gitignored untracked trees (.idea/, local tooling). Plain
+# `git clean -df` skips ignored files, so `git checkout` / `checkout -B` can fail with
+# "untracked working tree files would be overwritten by checkout" (seen on Windows kotlin runners).
+git clean -ffdx
 
 if [[ -n "$COMMIT" ]]; then
   git fetch origin "$COMMIT"
