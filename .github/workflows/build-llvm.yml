@@ -51,7 +51,8 @@ env:
 jobs:
   build:
     name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
-    if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.skip_build == true) }}
+    # gh/API often pass booleans as the string "true"; accept both.
+    if: ${{ !(github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true')) }}
     environment: env
     outputs:
       llvm_sha_short: ${{ steps.archive.outputs.llvm_sha_short }}
@@ -254,7 +255,7 @@ jobs:
   # When workflow_dispatch skip_build: pick newest llvm-packages-*_Linux_X64.tar under ~/runner/artifact matching ERE, parse SHAs, require macOS sibling tars.
   resolve-packages-from-disk:
     name: resolve llvm-packages (skip_build)
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_build == true }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     outputs:
       llvm_sha_short: ${{ steps.resolve.outputs.llvm_sha_short }}
