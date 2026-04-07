@@ -567,9 +567,12 @@ jobs:
           ARCHIVE="$CACHE_BASE/${OHOS_SYSROOT}.tar.gz"
           if [ ! -f "$ARCHIVE" ]; then curl -fsSL -o "$ARCHIVE" "$OHOS_SYSROOT_URL"; fi
           if [ ! -d "$CACHE_BASE/${OHOS_SYSROOT}" ]; then tar -xzf "$ARCHIVE" -C "$CACHE_BASE"; fi
-          # OHOS clang resolves sysroot relative to the merged install (same level as clang-dev / clang_darwin-*).
-          ln -sfn "$CACHE_BASE/${OHOS_SYSROOT}" "$ROOT/sysroot"
-          test -d "$ROOT/sysroot"
+          SYSROOT="$CACHE_BASE/${OHOS_SYSROOT}"
+          if [ ! -d "$SYSROOT" ]; then
+            echo "::error::Missing sysroot directory $SYSROOT"
+            exit 1
+          fi
+          echo "OHOS_SYSROOT_PATH=$SYSROOT" >> "$GITHUB_ENV"
           if [ "${{ matrix.platform }}" = "linux-x64" ]; then
             if [ ! -d "$ROOT/clang-dev" ] && [ ! -d "$ROOT/clang" ]; then
               echo "::error::Expected clang-dev/ or clang/ under $ROOT"; ls -la "$ROOT"
@@ -634,13 +637,21 @@ jobs:
           [ -x "$OHOS_CXX" ] || OHOS_CXX="$BIN/aarch64-linux-ohos-clang++"
           [ -x "$OHOS_CXX" ] || { echo "::error::No aarch64 OHOS clang++ in $BIN"; ls -la "$BIN"; exit 1; }
           chmod +x "$OHOS_CC" "$OHOS_CXX" 2>/dev/null || true
-          echo "OHOS_CC=$OHOS_CC OHOS_CXX=$OHOS_CXX"
+          SR="${OHOS_SYSROOT_PATH:?}"
+          OHOS_FLAGS=(--sysroot="$SR")
+          [ -d "$SR/usr/include" ] && OHOS_FLAGS+=(-I"$SR/usr/include")
+          [ -d "$SR/usr/lib" ] && OHOS_FLAGS+=(-L"$SR/usr/lib")
+          for triple in aarch64-unknown-linux-ohos aarch64-linux-ohos; do
+            [ -d "$SR/usr/include/$triple" ] && OHOS_FLAGS+=(-I"$SR/usr/include/$triple")
+            [ -d "$SR/usr/lib/$triple" ] && OHOS_FLAGS+=(-L"$SR/usr/lib/$triple")
+          done
+          echo "OHOS_CC=$OHOS_CC OHOS_CXX=$OHOS_CXX SYSROOT=$SR"
           set +e
-          CLOG="$("$OHOS_CC" -O2 -o src/hello_ohos_c src/test.c 2>&1)"; CRC=$?
+          CLOG="$("$OHOS_CC" "${OHOS_FLAGS[@]}" -O2 -o src/hello_ohos_c src/test.c 2>&1)"; CRC=$?
           set -e
           if [ "$CRC" -ne 0 ]; then echo "::error::C compile failed: $CLOG"; exit 1; fi
           set +e
-          CXXLOG="$("$OHOS_CXX" -std=c++17 -O2 -o src/hello_ohos_cpp src/test.cpp 2>&1)"; CXXRC=$?
+          CXXLOG="$("$OHOS_CXX" "${OHOS_FLAGS[@]}" -std=c++17 -O2 -o src/hello_ohos_cpp src/test.cpp 2>&1)"; CXXRC=$?
           set -e
           if [ "$CXXRC" -ne 0 ]; then echo "::error::C++ compile failed: $CXXLOG"; exit 1; fi
           if command -v file >/dev/null 2>&1; then file src/hello_ohos_c src/hello_ohos_cpp; else ls -la src/hello_ohos_c src/hello_ohos_cpp; fi
