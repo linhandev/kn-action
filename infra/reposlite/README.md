@@ -102,17 +102,19 @@ launchctl bootstrap "gui/$UIDN" ~/Library/LaunchAgents/com.kmp.reposilite.plist 
 wget http://localhost:8080/releases/org/apache/felix/maven-bundle-plugin/3.5.0/maven-bundle-plugin-3.5.0.pom
 # Kotlin bootstrap（proxied `reference` 必须以 `/` 结尾，否则拼接会变成 …/maven/org/jetbrains/… 而 404）
 wget -S -O /dev/null "http://localhost:8080/releases/org/jetbrains/kotlin/kotlin-stdlib-js/2.2.20-Beta2-71/kotlin-stdlib-js-2.2.20-Beta2-71.klib"
-# Gradle distribution（wrapper：`http://<host>:8080/gradle-distributions/<文件名>`，与官方 `…/distributions/<文件名>` 一致）
+# Gradle distribution（路径必须是「文件名」这一层，不要再加 `distributions/`，否则会和 `downloads.gradle.org/distributions/` 拼成双重路径 404）
 wget -S -O /dev/null "http://localhost:8080/gradle-distributions/gradle-8.5-bin.zip"
 wget -S -O /dev/null "http://localhost:8080/gradle-distributions/gradle-8.5-bin.zip.sha256"
 ```
 
 ### `releases` 与 `gradle-distributions`
 
-- **`releases`**：聚合 Maven 上游，供 `maven-proxy.init.gradle` 等使用（`/releases/...`）。
-- **`gradle-distributions`**：`.zip` 优先 `https://mirrors.cloud.tencent.com/gradle/`（大文件更稳；部分环境对 `downloads.gradle.org` 会出现 TLS 握手失败或读超时）；`.sha256` / `.sha512` / `.asc` 用 `https://downloads.gradle.org/distributions/`（Reposilite 会跳过不允许这些后缀的 mirror）。路径：`/gradle-distributions/gradle-8.5-bin.zip`。不用 `services.gradle.org` 拉 zip（307 到 GitHub release，Reposilite 常 `Cannot get`）。
+- `**releases**`：聚合 Maven 上游，供 `maven-proxy.init.gradle` 等使用（`/releases/...`）。
+- `**gradle-distributions`**：上游顺序为 `https://downloads.gradle.org/distributions/` 再 `https://mirrors.cloud.tencent.com/gradle/`；**不写 `allowedExtensions`**（避免多段后缀名与过滤逻辑纠缠）。本地 URL：`/gradle-distributions/gradle-8.5-bin.zip`（对应上游 `…/distributions/gradle-8.5-bin.zip` 与 `…/gradle/gradle-8.5-bin.zip`）。不要用 `…/gradle-distributions/distributions/gradle-8.5-bin.zip`。不用 `services.gradle.org` 拉 zip（307 到 GitHub release，Reposilite 常失败）。
 
 启动成功后日志中应出现 `+ releases (public)` 与 `+ gradle-distributions (public)`。若只有默认的 `snapshots` / `private`，说明未读到 `configuration.shared.json`（例如旧版 `start.sh` 在 `cd workspace` 后把相对路径指错；当前 `start.sh` 已用绝对路径传 `--shared-configuration`）。
+
+**wget 仍 404 时**：先看启动段是否列出 `gradle-distributions`；再在跑 Reposilite 的机器上执行 `curl -sSIL https://downloads.gradle.org/distributions/gradle-8.5-bin.zip | head` 与 `curl -sSIL https://mirrors.cloud.tencent.com/gradle/gradle-8.5-bin.zip | head`，确认 JVM/网络能访问至少一条上游。改完 `configuration.shared.json` 后需重启 Reposilite（例如 `launchctl kickstart -k "gui/$(id -u)/com.kmp.reposilite"`）。
 
 ### Proxied 源 URL 必须以 `/` 结尾
 

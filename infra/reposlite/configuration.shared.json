@@ -94,21 +94,12 @@
         "redeployment": false,
         "proxied": [
           {
-            "reference": "https://mirrors.cloud.tencent.com/gradle/",
-            "store": true,
-            "allowedExtensions": [
-              ".zip"
-            ]
+            "reference": "https://downloads.gradle.org/distributions/",
+            "store": true
           },
           {
-            "reference": "https://downloads.gradle.org/distributions/",
-            "store": true,
-            "allowedExtensions": [
-              ".zip",
-              ".sha256",
-              ".sha512",
-              ".asc"
-            ]
+            "reference": "https://mirrors.cloud.tencent.com/gradle/",
+            "store": true
           }
         ]
       }
