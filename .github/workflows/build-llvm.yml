@@ -46,12 +46,16 @@ jobs:
         include:
           - runner: [self-hosted, macOS, ARM64, llvm]
             container_image: ''
+            shell: bash
           - runner: [self-hosted, macOS, X64, llvm]
             container_image: ''
+            shell: bash
           - runner: [self-hosted, linux, X64, llvm]
             container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:cd720ae
+            shell: bash
           - runner: [self-hosted, Windows, X64, llvm]
             container_image: ''
+            shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -e -o pipefail {0}'
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ matrix.container_image }}
@@ -59,7 +63,7 @@ jobs:
         - ${{ github.workspace }}/../../../artifact:/home/runner/runner/artifact
     defaults:
       run:
-        shell: bash
+        shell: ${{ matrix.shell }}
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
