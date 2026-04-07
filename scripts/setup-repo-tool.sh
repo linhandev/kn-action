@@ -24,8 +24,8 @@ if [ ! -f "$REPO_SCRIPT" ]; then
   }
 fi
 
-# Pick Python 3 with pip (repo.py needs `requests`). Prefer `python` before `python3` so Linux
-# skips /usr/bin/python without pip; Windows PATH step in CI should put a real python before Store stubs.
+# Pick Python 3 with pip (repo.py needs `requests`). CI uses actions/setup-python (Unix) or PATH (Windows).
+# Prefer `python` before `python3` so Linux skips /usr/bin/python without pip; avoid Windows Store stubs.
 pick_py() {
   local c="$1"
   if command -v "$c" >/dev/null 2>&1 && "$c" --version >/dev/null 2>&1 && "$c" -m pip --version >/dev/null 2>&1; then
