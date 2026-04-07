@@ -45,6 +45,57 @@ This avoids slow “push → wait for Actions → read logs” cycles when the f
 
 ---
 
+## Build LLVM — required runner environment
+
+Checklist for self-hosted **`llvm`** runners so [`.github/workflows/build-llvm.yml`](.github/workflows/build-llvm.yml) can clone, `repo` sync, build, and drop **`llvm/packages`** into **`~/runner/artifact`**.
+
+### GitHub repository configuration
+
+| Item | Required |
+|------|----------|
+| **Environment** named **`env`** (workflow `environment: env`) | Yes |
+| **Secret** **`GITCODE_TOKEN`** on that environment | Yes — GitCode PAT with read access; used for HTTPS `git` / `repo` against `gitcode.com` (workflow rewrites URLs in git config). |
+
+### Every `llvm` host (macOS / Linux / Windows)
+
+| Item | Notes |
+|------|--------|
+| **`~/runner/artifact`**, **`~/runner/cache`**, **`~/runner/llvm`** | Workflow assumes `ARTIFACT_LOCAL_PATH` `~/runner/artifact` and caches under `~/runner/cache`; persistent LLVM tree lives next to the job workspace under the llvm runner’s `_work`. |
+| **Network** | **gitcode.com** (manifest + `repo` sync), **gitee.com** (default `repo.py` download in `setup-repo-tool.sh`), and **GitHub** ( **`actions/checkout`** fetches the action bundle from `api.github.com` — TLS/proxy issues show up as “Set up job” / checkout failures). |
+| **Optional `repo init --reference`** | Workflow env **`LOCAL_REFERENCE_DIR`** defaults to **`~/git/ci/llvm-project-kmp`** (tilde expanded per job). If that directory exists on the runner, `repo init` uses **`--reference=`** to save bandwidth. |
+
+### macOS (`llvm`)
+
+| Item | Notes |
+|------|--------|
+| **Homebrew** | Workflow installs **`swig`**, **`git-lfs`**, **`java`**, **`coreutils`**, **`wget`**, **`pigz`**, **`python`** (Python 3 + pip for Google **`repo`** and **`requests`**). |
+| **Xcode / CLT** | Must satisfy OH LLVM build scripts (same as local OH dev expectations). |
+| **`git-lfs`** | Used after **`repo sync`** (`repo forall -c 'git lfs pull'`). |
+
+### Linux (`llvm`, Docker job)
+
+| Item | Notes |
+|------|--------|
+| **Image** | **`ghcr.io/<repo-owner>/kn-action-linux-llvm-builder:<tag>`** — pin matches workflow `container_image`. |
+| **Volume** | Host **`${{ github.workspace }}/../../../artifact`** mounted at **`/home/runner/runner/artifact`** so the container can write the same artifact layout as other OSes. |
+| **Tools in image** | **bash**, **git**, **git-lfs**, **curl**; **Python 3 with `pip`** — `scripts/setup-repo-tool.sh` picks an interpreter that passes **`python -m pip`** (images that only have **`/usr/bin/python`** without pip must expose **`python3`** + pip). |
+
+### Windows (`llvm`)
+
+| Item | Notes |
+|------|--------|
+| **Shell** | Workflow **`defaults.run.shell`**: **`C:\PROGRA~1\Git\bin\bash.exe`** with **`--noprofile --norc -e -o pipefail`**. **Git for Windows** must be installed there (or adjust the workflow path). |
+| **Python 3.12+** | Must be usable with **`python -m pip`** for **`requests`**. The workflow prepends to **`GITHUB_PATH`**, in order: **`%LOCALAPPDATA%\Programs\Python\Python{314..310}`**, **`%ProgramFiles%\Python*`**, then **`/c/Users/lin/AppData/Local/Programs/Python/Python*`** — the last is **host-specific** for the current **win-llvm** machine; change the username in the workflow if your install user differs. |
+| **Service account vs interactive user** | The Actions listener often runs as **Network Service**; **`LOCALAPPDATA`** may **not** point at the user who installed Python — use a per-machine PATH probe (as above), **all-users** Python install, or run the service as a user account that has Python on PATH. |
+| **Symlinks / Developer Mode** | **`repo`** and **git** expect to create symlinks under **`.repo`**. Turn on **Settings → System → For developers → Developer Mode**. Confirm **`AllowDevelopmentWithoutDevLicense`** = **`1`** under **`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock`**, or verify **`New-Item -ItemType SymbolicLink`** works without elevation. Without this, **`repo init` / `repo sync`** fails with symlink errors. |
+| **Stale `.repo` after policy changes** | If symlink mode or `repo` layout changed, remove **`…/llvm/.repo`** once on the runner or run **`workflow_dispatch`** with **`clean_build`**. |
+
+### Kotlin `kotlin` runners (short pointer)
+
+**Build Kotlin** does **not** use **`GITCODE_TOKEN`** in the workflow file; runners need **SSH keys** on the host for **GitCode** as documented in **`build-kotlin.yml`** / design specs below.
+
+---
+
 ## Key workflows (overview)
 
 | Workflow | File | Purpose |
@@ -84,7 +135,7 @@ Abstract goals the workflow should keep satisfying:
 3. **Incremental by default** — **`LLVM_WORKSPACE`** under the job workspace persists across runs; **`clean_build`** workflow input wipes it when a full rebuild is required.
 4. **Conditional env prepare** — Run `env_prepare.sh` only when **`prebuilts/cmake`** (or equivalent marker) is missing — skip when incremental tree is already bootstrapped.
 5. **Repo / GitCode** — **`scripts/setup-repo-tool.sh`** installs **repo** with a **wrapper** so Windows Git Bash does not rely on `#!/usr/bin/env python` alone. Sync uses **`GITCODE_TOKEN`** (repository environment **`env`**); URL rewrites in git config for GitCode HTTPS.
-6. **Windows shell** — Use a Git Bash invocation that survives self-hosted Windows (e.g. **`C:\PROGRA~1\Git\bin\bash.exe`** with `pipefail`) — avoid quoted `Program Files` paths that break runner/OpenSSH command parsing.
+6. **Windows shell** — Use a Git Bash invocation that survives self-hosted Windows (e.g. **`C:\PROGRA~1\Git\bin\bash.exe`** with `pipefail`) — avoid quoted `Program Files` paths that break runner/OpenSSH command parsing. **Windows** also needs **Developer Mode** (or equivalent) so **`repo`/git symlinks** work; see **Build LLVM — required runner environment** above.
 7. **OH sysroot** — Download/cache sysroot tarball under **`~/runner/cache`**; symlink into build layout as the workflow defines.
 8. **Artifacts** — Archive **`llvm/packages`** (and naming/metadata) consistent with downstream **cross-copy** / **ohos-test-build** jobs in the same file; upload via local server action where configured.
 9. **Fail-soft matrix** — **`fail-fast: false`** so one OS failure does not cancel others; fix and iterate per OS.
