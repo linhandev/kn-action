@@ -464,6 +464,10 @@ jobs:
             host_suffix: macOS_X64
             shell: bash
     runs-on: ${{ matrix.runner }}
+    # Ephemeral path avoids a reused workspace/kn-action tree with root-owned files (e.g. .cursor)
+    # that breaks actions/checkout (index.lock / rmdir EACCES on self-hosted runners).
+    env:
+      KN_ACTION_CHECKOUT: gha-kn-action-${{ github.run_id }}-${{ matrix.platform }}
     defaults:
       run:
         working-directory: ${{ github.workspace }}/ohos-test-work
@@ -472,7 +476,7 @@ jobs:
       - name: Checkout kn-action
         uses: actions/checkout@v6
         with:
-          path: kn-action
+          path: ${{ env.KN_ACTION_CHECKOUT }}
 
       - name: Prepare workspace
         # Must not inherit defaults.run.working-directory (ohos-test-work): it does not exist until this step creates it.
@@ -483,7 +487,7 @@ jobs:
 
       - name: Download llvm-final OHOS toolchain
         id: dl_final
-        uses: ./kn-action/.github/actions/download-artifact-local
+        uses: ./${{ env.KN_ACTION_CHECKOUT }}/.github/actions/download-artifact-local
         with:
           name: llvm-final-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
           path: ${{ github.workspace }}/ohos-test-work/dl
@@ -584,7 +588,7 @@ jobs:
           echo "archive_name=$NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload test binaries
-        uses: ./kn-action/.github/actions/upload-artifact-local
+        uses: ./${{ env.KN_ACTION_CHECKOUT }}/.github/actions/upload-artifact-local
         with:
           path: ${{ github.workspace }}/ohos-test-work/${{ steps.test_pack.outputs.archive_name }}
 
@@ -609,14 +613,16 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      KN_ACTION_CHECKOUT: gha-kn-action-${{ github.run_id }}-${{ matrix.host_suffix }}
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
         with:
-          path: kn-action
+          path: ${{ env.KN_ACTION_CHECKOUT }}
 
       - name: Download test binaries
-        uses: ./kn-action/.github/actions/download-artifact-local
+        uses: ./${{ env.KN_ACTION_CHECKOUT }}/.github/actions/download-artifact-local
         with:
           name: test-binaries-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
           path: ${{ github.workspace }}/hdc-verify/dl
