@@ -1,5 +1,6 @@
 # Build LLVM toolchain for OpenHarmony using repo-managed multi-repo checkout.
-# macOS / Windows: runs on host. Linux: runs inside OpenHarmony build env Docker image (empty `container.image` skips Docker; see actions/runner#265).
+# Linux (Docker) + macOS (ARM64/X64) on self-hosted runners. Windows matrix is disabled until upstream Windows host build is restored.
+# Linux: runs inside OpenHarmony build env Docker image (empty `container.image` skips Docker; see actions/runner#265).
 # Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
 # Requires: environment "env" with secret GITCODE_TOKEN (GitCode PAT with read access) for repo sync from gitcode.com.
 
@@ -23,8 +24,9 @@ on:
       - '.github/workflows/build-llvm.yml'
       - 'scripts/setup-repo-tool.sh'
       - 'scripts/platform_package.sh'
-      - 'scripts/ohos-env-prepare-windows.sh'
-      - 'scripts/ohos-build-llvm-windows.sh'
+      # Windows LLVM scripts (not in active matrix):
+      # - 'scripts/ohos-env-prepare-windows.sh'
+      # - 'scripts/ohos-build-llvm-windows.sh'
 
 env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
@@ -57,9 +59,10 @@ jobs:
           - runner: [self-hosted, linux, X64, llvm]
             container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:bc3de27
             shell: bash
-          - runner: [self-hosted, Windows, X64, llvm]
-            container_image: ''
-            shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
+          # Windows LLVM build disabled (upstream build.py host prebuilts / CI cost).
+          # - runner: [self-hosted, Windows, X64, llvm]
+          #   container_image: ''
+          #   shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ matrix.container_image }}
@@ -93,11 +96,6 @@ jobs:
 
           NEED_ENV_PREPARE="false"
           if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
-            NEED_ENV_PREPARE="true"
-          fi
-          # Windows: ohos-env-prepare-windows.sh caches tarballs under download_packages/; deleting that folder
-          # must re-run prepare even when prebuilts/cmake already exists (need_env_prepare would stay false otherwise).
-          if [ "$RUNNER_OS" = "Windows" ] && [ "$NEED_ENV_PREPARE" != "true" ] && [ ! -d "$LLVM_WORKSPACE/download_packages" ]; then
             NEED_ENV_PREPARE="true"
           fi
 
@@ -142,42 +140,6 @@ jobs:
           git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
-      # Self-hosted Windows runners often execute as a service account (LOCALAPPDATA ≠ the interactive user
-      # that installed Python). Probe typical install locations including a fixed path for win-llvm.
-      - name: Prepend Python to PATH (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          set -euo pipefail
-          try_dir() {
-            local d="$1"
-            if [ -f "$d/python.exe" ]; then
-              echo "$d" >> "$GITHUB_PATH"
-              return 0
-            fi
-            return 1
-          }
-          for v in 314 313 312 311 310; do
-            try_dir "${LOCALAPPDATA}/Programs/Python/Python${v}" && exit 0
-            try_dir "${PROGRAMFILES}/Python${v}" && exit 0
-          done
-          # Service accounts often lack the interactive user's LOCALAPPDATA; scan /c/Users/*/AppData/Local/Programs/Python.
-          for v in 314 313 312 311 310; do
-            for d in /c/Users/*; do
-              [ -d "$d" ] || continue
-              try_dir "$d/AppData/Local/Programs/Python/Python${v}" && exit 0
-            done
-          done
-          echo "::warning::No Python under LOCALAPPDATA, Program Files, or /c/Users/*/AppData/Local/Programs/Python; relying on PATH"
-
-      # repo forall -c runs under cmd.exe on Windows; single-quoted 'git lfs pull' becomes a bogus executable name — use bash -lc for LFS and put git-lfs on PATH (Git/usr/bin).
-      - name: Prepend Git LFS to PATH (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          set -euo pipefail
-          for d in "/c/PROGRA~1/Git/usr/bin" "/c/PROGRA~1/Git/mingw64/bin" "/c/Program Files/Git/usr/bin" "/c/Program Files/Git/mingw64/bin"; do
-            if [ -d "$d" ]; then echo "$d" >> "$GITHUB_PATH"; fi
-          done
-
       - name: Setup repo tool
         run: bash "$GITHUB_WORKSPACE/kn-action/scripts/setup-repo-tool.sh"
 
@@ -205,8 +167,7 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/bin:$PATH"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo sync -c -v -j 16
-          # Do not quote: -c git lfs pull must be three argv words. -c 'git lfs pull' is one token with spaces →
-          # repo forall uses subprocess with shell=True on Windows and cmd breaks. See .repo/repo/subcmds/forall.py.
+          # Do not quote: -c git lfs pull must be three argv words (Windows/cmd caveat when Windows matrix is enabled).
           repo forall -c git lfs pull
 
       - name: Restore git config (remove GitCode credentials)
@@ -219,16 +180,10 @@ jobs:
           git config --global --unset credential.helper 2>/dev/null || true
 
       - name: Prepare build environment (Linux / macOS)
-        if: steps.vars.outputs.need_env_prepare == 'true' && runner.os != 'Windows'
+        if: steps.vars.outputs.need_env_prepare == 'true'
         run: |
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
-
-      - name: Prepare build environment (Windows / Git Bash)
-        if: steps.vars.outputs.need_env_prepare == 'true' && runner.os == 'Windows'
-        run: |
-          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
-          bash -x "$GITHUB_WORKSPACE/kn-action/scripts/ohos-env-prepare-windows.sh"
 
       - name: Build LLVM
         run: |
@@ -240,11 +195,7 @@ jobs:
             # echo "Disk/memory before build:" && df -h && free -m || true
           fi
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            bash "$GITHUB_WORKSPACE/kn-action/scripts/ohos-build-llvm-windows.sh"
-          else
-            bash toolchain/llvm-project/llvm-build/build.sh
-          fi
+          bash toolchain/llvm-project/llvm-build/build.sh
 
       - name: Archive llvm/packages
         id: archive
@@ -318,44 +269,25 @@ jobs:
           name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_macOS_X64.tar
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
-      - name: Download llvm-packages (Windows X64)
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}_Windows_X64.tar
-          path: ${{ github.workspace }}/cross-copy-work/downloads
-
       - name: Extract outer tars and merge packages (scripts/platform_package.sh)
         id: merge
         env:
           CLANG_RESOURCE_VERSION: '19'
+          KN_ACTION_SKIP_WINDOWS_HOST: '1'
         run: |
           set -euo pipefail
           DL="$(pwd)/downloads"
           P="llvm-packages-${{ needs.build.outputs.llvm_sha_short }}_act-${{ needs.build.outputs.action_sha_short }}"
-          mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 extract-windows staging
+          mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 staging
           tar -xf "$DL/${P}_Linux_X64.tar" -C extract-linux
           tar -xf "$DL/${P}_macOS_ARM64.tar" -C extract-mac-arm64
           tar -xf "$DL/${P}_macOS_X64.tar" -C extract-mac-x64
-          tar -xf "$DL/${P}_Windows_X64.tar" -C extract-windows
           cp -f extract-linux/packages/*.tar.gz staging/
           cp -f extract-mac-arm64/packages/clang-dev-darwin-arm64.tar.gz staging/
           cp -f extract-mac-x64/packages/clang-dev-darwin-x86_64.tar.gz staging/
-          w=""
-          shopt -s nullglob
-          for f in extract-windows/packages/clang-dev-windows*.tar.gz extract-windows/packages/clang-dev-mingw*.tar.gz; do
-            w="$f"
-            break
-          done
-          shopt -u nullglob
-          if [ -z "$w" ] || [ ! -f "$w" ]; then
-            echo "::error::No Windows clang-dev tarball (clang-dev-windows* or clang-dev-mingw*) under extract-windows/packages"
-            ls -la extract-windows/packages || true
-            exit 1
-          fi
-          cp -f "$w" staging/clang-dev-windows-x86_64.tar.gz
           ( cd staging && bash "$GITHUB_WORKSPACE/kn-action/scripts/platform_package.sh" )
           # OHOS sysroot for tests comes from Maven in ohos-test jobs, not build-produced ohos-sysroot-dev.tar.gz.
-          for p in clang_darwin-arm64 clang_darwin-x86_64 clang_windows-x86_64; do
+          for p in clang_darwin-arm64 clang_darwin-x86_64; do
             D="$(find staging -maxdepth 1 -type d -name "${p}-*" | head -1)"
             if [ -z "$D" ] || [ ! -d "$D" ]; then
               echo "::error::Missing merged $p tree under staging"
@@ -383,15 +315,6 @@ jobs:
           tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
           echo "archive=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Pack merged Windows x86_64 toolchain
-        id: pack_win
-        run: |
-          set -euo pipefail
-          TC="$(find staging -maxdepth 1 -type d -name 'clang_windows-x86_64-*' | head -1)"
-          NAME="llvm-merged-ohos-Windows_X64-${{ github.run_id }}.tar.gz"
-          tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
-          echo "archive=$NAME" >> "$GITHUB_OUTPUT"
-
       - name: Upload merged macOS ARM64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
@@ -401,11 +324,6 @@ jobs:
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_x64.outputs.archive }}
-
-      - name: Upload merged Windows X64 OHOS toolchain
-        uses: ./kn-action/.github/actions/upload-artifact-local
-        with:
-          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_win.outputs.archive }}
 
   # Build OHOS aarch64 test programs on each self-hosted runner using the same run's artifacts.
   ohos-test-build:
@@ -422,12 +340,7 @@ jobs:
             host_suffix: Linux_X64
             toolchain_kind: host-llvm-tar
             shell: bash
-          - platform: windows-x64
-            runner: [self-hosted, Windows, X64, llvm]
-            container_image: ''
-            host_suffix: Windows_X64
-            toolchain_kind: host-llvm-tar
-            shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
+          # Windows host tar tests disabled while Windows LLVM build matrix is off.
           - platform: macos-arm64
             runner: [self-hosted, macOS, ARM64, llvm]
             container_image: ''
@@ -478,36 +391,14 @@ jobs:
           name: llvm-merged-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
           path: ${{ github.workspace }}/ohos-test-work/dl
 
-      # Linux uses a fixed OH package name; Windows uses whatever clang-dev-*.tar.gz the Windows build emitted (exclude darwin).
-      - name: Layout toolchain and sysroot (Linux / Windows host tar)
+      # Linux host tar: fixed OH package name clang-dev-linux-x86_64.tar.gz inside outer/packages.
+      - name: Layout toolchain and sysroot (Linux host tar)
         if: matrix.toolchain_kind == 'host-llvm-tar'
         run: |
           set -euo pipefail
           mkdir -p outer
           tar -xf "${{ steps.dl_linux_pkg.outputs.path }}" -C outer
-          if [ "${{ matrix.platform }}" = "linux-x64" ]; then
-            tar -xzf outer/packages/clang-dev-linux-x86_64.tar.gz -C .
-          else
-            pkg=""
-            shopt -s nullglob
-            for f in outer/packages/clang-dev-windows*.tar.gz outer/packages/clang-dev-mingw*.tar.gz outer/packages/clang-dev-msvc*.tar.gz; do
-              if [ -f "$f" ]; then pkg="$f"; break; fi
-            done
-            if [ -z "$pkg" ]; then
-              for f in outer/packages/clang-dev-*.tar.gz; do
-                case "$f" in *darwin*) continue ;; esac
-                pkg="$f"
-                break
-              done
-            fi
-            shopt -u nullglob
-            if [ -z "${pkg:-}" ] || [ ! -f "$pkg" ]; then
-              echo "::error::No clang-dev host tarball under outer/packages"; ls -la outer/packages || true
-              exit 1
-            fi
-            echo "Extracting toolchain package: $pkg"
-            tar -xzf "$pkg" -C .
-          fi
+          tar -xzf outer/packages/clang-dev-linux-x86_64.tar.gz -C .
           CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-~/runner/cache}"
           CACHE_BASE="${CACHE_BASE/#\~/$HOME}"
           mkdir -p "$CACHE_BASE"
@@ -560,7 +451,7 @@ jobs:
           }
           EOF
 
-      # Merged Darwin trees live under clang_darwin-*/bin; Linux/Windows host tars unpack to clang-dev/bin (same OHOS driver names from upstream).
+      # Merged Darwin trees live under clang_darwin-*/bin; Linux host tar unpacks to clang-dev/bin (same OHOS driver names from upstream).
       - name: Cross-compile OHOS aarch64 (C and C++)
         run: |
           set -euo pipefail
@@ -635,7 +526,7 @@ jobs:
           export INPUT_SERVER_URL="${INPUT_SERVER_URL:-http://192.168.3.5:8765}"
           export INPUT_CACHE_DIR="${INPUT_CACHE_DIR:-~/runner/artifact}"
           RID="${{ github.run_id }}"
-          for suf in Linux_X64 Windows_X64 macOS_ARM64 macOS_X64; do
+          for suf in Linux_X64 macOS_ARM64 macOS_X64; do
             export INPUT_NAME="test-binaries-ohos-${suf}-${RID}.tar.gz"
             export INPUT_PATH="${{ github.workspace }}/hdc-verify/dl"
             bash "$SCRIPT"
@@ -692,9 +583,8 @@ jobs:
           ROOT="${{ github.workspace }}/hdc-verify"
           DL="$ROOT/dl"
           RID="${{ github.run_id }}"
-          mkdir -p "$ROOT/run/linux" "$ROOT/run/windows" "$ROOT/run/arm64" "$ROOT/run/x64"
+          mkdir -p "$ROOT/run/linux" "$ROOT/run/arm64" "$ROOT/run/x64"
           tar -xzf "$DL/test-binaries-ohos-Linux_X64-${RID}.tar.gz" -C "$ROOT/run/linux"
-          tar -xzf "$DL/test-binaries-ohos-Windows_X64-${RID}.tar.gz" -C "$ROOT/run/windows"
           tar -xzf "$DL/test-binaries-ohos-macOS_ARM64-${RID}.tar.gz" -C "$ROOT/run/arm64"
           tar -xzf "$DL/test-binaries-ohos-macOS_X64-${RID}.tar.gz" -C "$ROOT/run/x64"
           REMOTE_BASE=/data/local/tmp/llvm-ci-${{ github.run_id }}
@@ -713,7 +603,6 @@ jobs:
             done
           }
           run_one "$ROOT/run/linux" Linux_X64
-          run_one "$ROOT/run/windows" Windows_X64
           run_one "$ROOT/run/arm64" macOS_ARM64
           run_one "$ROOT/run/x64" macOS_X64
           echo "All hdc OHOS smoke checks passed." >> "$GITHUB_STEP_SUMMARY"

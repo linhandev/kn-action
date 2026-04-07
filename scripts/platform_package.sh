@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Merge Linux x86_64 OHOS bits into Darwin and Windows clang installs.
+# Merge Linux x86_64 OHOS bits into Darwin (and optionally Windows) clang installs.
 # Expects *.tar.gz blobs in cwd (staging). CLANG_RESOURCE_VERSION must match lib/clang/<ver> (e.g. 19).
+# Set KN_ACTION_SKIP_WINDOWS_HOST=1 when no Windows clang-dev tarball is present (Linux + macOS-only CI).
 
 set -euo pipefail
 
 : "${CLANG_RESOURCE_VERSION:=19}"
+: "${KN_ACTION_SKIP_WINDOWS_HOST:=0}"
 
 commit_id=""
 date="$(date '+%Y-%m-%dT%H:%M:%S')"
@@ -41,7 +43,11 @@ libcxx_ndk_darwin_arm64="libcxx-ndk_darwin-arm64-${commit_id}-${date}"
 libcxx_ndk_ohos_arm64="libcxx_ndk_ohos-arm64-${commit_id}-${date}"
 libcxx_ndk_linux_aarch64="libcxx-ndk_linux-aarch64-${commit_id}-${date}"
 libcxx_ndk_windows_x86_64="libcxx-ndk_windows-x86_64-${commit_id}-${date}"
-llvm_list=($clang_linux_x86_64 $clang_darwin_arm64 $clang_darwin_x86_64 $clang_windows_x86_64 $libcxx_ndk_linux_x86_64 $libcxx_ndk_darwin_x86_64 $libcxx_ndk_darwin_arm64 $libcxx_ndk_ohos_arm64 $libcxx_ndk_linux_aarch64 $libcxx_ndk_windows_x86_64)
+if [ "$KN_ACTION_SKIP_WINDOWS_HOST" = 1 ]; then
+	llvm_list=($clang_linux_x86_64 $clang_darwin_arm64 $clang_darwin_x86_64 $libcxx_ndk_linux_x86_64 $libcxx_ndk_darwin_x86_64 $libcxx_ndk_darwin_arm64 $libcxx_ndk_ohos_arm64 $libcxx_ndk_linux_aarch64)
+else
+	llvm_list=($clang_linux_x86_64 $clang_darwin_arm64 $clang_darwin_x86_64 $clang_windows_x86_64 $libcxx_ndk_linux_x86_64 $libcxx_ndk_darwin_x86_64 $libcxx_ndk_darwin_arm64 $libcxx_ndk_ohos_arm64 $libcxx_ndk_linux_aarch64 $libcxx_ndk_windows_x86_64)
+fi
 
 V="${CLANG_RESOURCE_VERSION}"
 
@@ -52,8 +58,10 @@ tar -xf ${clang_darwin_arm64_tar}
 mv clang-dev ${clang_darwin_arm64}
 tar -xf ${clang_darwin_x86_64_tar}
 mv clang-dev ${clang_darwin_x86_64}
-tar -xf ${clang_windows_x86_64_tar}
-mv clang-dev ${clang_windows_x86_64}
+if [ "$KN_ACTION_SKIP_WINDOWS_HOST" != 1 ]; then
+	tar -xf ${clang_windows_x86_64_tar}
+	mv clang-dev ${clang_windows_x86_64}
+fi
 tar -xf ${libcxx_ndk_linux_x86_64_tar}
 mv libcxx-ndk ${libcxx_ndk_linux_x86_64}
 tar -xf ${libcxx_ndk_darwin_x86_64_tar}
@@ -63,7 +71,9 @@ mv libcxx-ndk ${libcxx_ndk_darwin_arm64}
 cp -a ${libcxx_ndk_linux_x86_64} ${libcxx_ndk_ohos_arm64}
 tar -xf ${libcxx_ndk_linux_aarch64_tar}
 mv libcxx-ndk ${libcxx_ndk_linux_aarch64}
-cp -a ${libcxx_ndk_linux_x86_64} ${libcxx_ndk_windows_x86_64}
+if [ "$KN_ACTION_SKIP_WINDOWS_HOST" != 1 ]; then
+	cp -a ${libcxx_ndk_linux_x86_64} ${libcxx_ndk_windows_x86_64}
+fi
 
 #clang-dev-darwin-arm64
 cp -rf ${clang_linux_x86_64}/lib/aarch64-linux-ohos ${clang_darwin_arm64}/lib
@@ -97,21 +107,23 @@ cp -rf ${clang_linux_x86_64}/lib/clang/${V}/include/fuzzer ${clang_darwin_x86_64
 cp -rf ${clang_linux_x86_64}/lib/clang/${V}/include/sanitizer ${clang_darwin_x86_64}/lib/clang/${V}/include
 cp -rf ${clang_linux_x86_64}/include/libcxx-ohos ${clang_darwin_x86_64}/include
 
-#clang-dev-windows-x86_64 (same OHOS payload merge as Darwin x86_64 host)
-cp -rf ${clang_linux_x86_64}/lib/aarch64-linux-ohos ${clang_windows_x86_64}/lib
-cp -rf ${clang_linux_x86_64}/lib/arm-liteos-ohos ${clang_windows_x86_64}/lib
-cp -rf ${clang_linux_x86_64}/lib/arm-linux-ohos ${clang_windows_x86_64}/lib
-cp -rf ${clang_linux_x86_64}/lib/x86_64-linux-ohos ${clang_windows_x86_64}/lib
-if [ -d "${clang_linux_x86_64}/lib/loongarch64-linux-ohos" ]; then
-	cp -rf ${clang_linux_x86_64}/lib/loongarch64-linux-ohos ${clang_windows_x86_64}/lib
+if [ "$KN_ACTION_SKIP_WINDOWS_HOST" != 1 ]; then
+	#clang-dev-windows-x86_64 (same OHOS payload merge as Darwin x86_64 host)
+	cp -rf ${clang_linux_x86_64}/lib/aarch64-linux-ohos ${clang_windows_x86_64}/lib
+	cp -rf ${clang_linux_x86_64}/lib/arm-liteos-ohos ${clang_windows_x86_64}/lib
+	cp -rf ${clang_linux_x86_64}/lib/arm-linux-ohos ${clang_windows_x86_64}/lib
+	cp -rf ${clang_linux_x86_64}/lib/x86_64-linux-ohos ${clang_windows_x86_64}/lib
+	if [ -d "${clang_linux_x86_64}/lib/loongarch64-linux-ohos" ]; then
+		cp -rf ${clang_linux_x86_64}/lib/loongarch64-linux-ohos ${clang_windows_x86_64}/lib
+	fi
+	cp -rf ${clang_linux_x86_64}/lib/clang/${V}/bin ${clang_windows_x86_64}/lib/clang/${V}
+	cp -rf ${clang_linux_x86_64}/lib/clang/${V}/share ${clang_windows_x86_64}/lib/clang/${V}
+	cp -rf ${clang_linux_x86_64}/lib/clang/${V}/lib ${clang_windows_x86_64}/lib/clang/${V}
+	cp -rf ${clang_linux_x86_64}/lib/clang/${V}/include/profile ${clang_windows_x86_64}/lib/clang/${V}/include
+	cp -rf ${clang_linux_x86_64}/lib/clang/${V}/include/fuzzer ${clang_windows_x86_64}/lib/clang/${V}/include
+	cp -rf ${clang_linux_x86_64}/lib/clang/${V}/include/sanitizer ${clang_windows_x86_64}/lib/clang/${V}/include
+	cp -rf ${clang_linux_x86_64}/include/libcxx-ohos ${clang_windows_x86_64}/include
 fi
-cp -rf ${clang_linux_x86_64}/lib/clang/${V}/bin ${clang_windows_x86_64}/lib/clang/${V}
-cp -rf ${clang_linux_x86_64}/lib/clang/${V}/share ${clang_windows_x86_64}/lib/clang/${V}
-cp -rf ${clang_linux_x86_64}/lib/clang/${V}/lib ${clang_windows_x86_64}/lib/clang/${V}
-cp -rf ${clang_linux_x86_64}/lib/clang/${V}/include/profile ${clang_windows_x86_64}/lib/clang/${V}/include
-cp -rf ${clang_linux_x86_64}/lib/clang/${V}/include/fuzzer ${clang_windows_x86_64}/lib/clang/${V}/include
-cp -rf ${clang_linux_x86_64}/lib/clang/${V}/include/sanitizer ${clang_windows_x86_64}/lib/clang/${V}/include
-cp -rf ${clang_linux_x86_64}/include/libcxx-ohos ${clang_windows_x86_64}/include
 
 #archive
 mkdir target_location
