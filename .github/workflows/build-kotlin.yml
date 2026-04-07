@@ -62,13 +62,18 @@ jobs:
       matrix:
         include:
           - runner: [self-hosted, macOS, ARM64, kotlin]
+            shell: bash
           - runner: [self-hosted, macOS, X64, kotlin]
+            shell: bash
           - runner: [self-hosted, linux, X64, kotlin]
+            shell: bash
+          # Self-hosted Windows: `shell: bash` is not on PATH; use Git for Windows bash (see build-llvm.yml).
           - runner: [self-hosted, Windows, X64, kotlin]
+            shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
-        shell: bash
+        shell: ${{ matrix.shell }}
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
