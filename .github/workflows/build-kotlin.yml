@@ -315,6 +315,10 @@ jobs:
 
       - name: Build Kotlin
         env:
+          # Gradle publishToMavenLocal uses JVM user.home (from HOME), while Maven uses MAVEN_OPTS -Duser.home.
+          # If they differ, OH artifacts land in the runner's real ~/.m2 but Maven (and archetype IT subprocesses)
+          # use the isolated localRepository — resolution falls through to the LAN mirror and fails. Align HOME.
+          HOME: ${{ steps.vars.outputs.maven_user_home }}
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
           MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
           MAVEN_PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}

@@ -2,7 +2,8 @@
 # Run Kotlin scripts/build-ohos.sh with the same Reposilite-oriented setup as CI (build-kotlin.yml):
 # - Gradle wrapper zip from <REPOSLITE_BASE>/gradle-distributions/ (via rewrite-gradle-wrapper-reposlite.sh)
 # - Maven + Gradle artifact repos via maven-proxy.init.gradle + settings.xml mirror → <REPOSLITE_BASE>/releases
-# - Isolated HOME, GRADLE_USER_HOME, MAVEN_USER_HOME, KONAN_DATA_DIR (build-ohos.sh cleans $HOME/.m2 — use fake HOME)
+# - HOME must equal MAVEN_USER_HOME so Gradle publishToMavenLocal and Maven share the same ~/.m2/repository
+#   (build-ohos may clean $HOME/.m2; that stays inside the isolated tree).
 # - cache-redirector disabled; CN mirror init script off so resolution stays on the proxy
 #
 # Usage:
@@ -32,14 +33,12 @@ if [[ "$BUILD_OHOS_CLEAN_CACHE" == "1" ]]; then
   rm -rf "$BUILD_OHOS_CACHE_ROOT"
 fi
 
-export HOME="$BUILD_OHOS_CACHE_ROOT/fakehome"
-mkdir -p "$HOME"
-
 export GRADLE_USER_HOME="$BUILD_OHOS_CACHE_ROOT/gradle"
 mkdir -p "$GRADLE_USER_HOME/init.d"
 cp "$KN_ACTION_ROOT/scripts/maven-proxy.init.gradle" "$GRADLE_USER_HOME/init.d/"
 
 export MAVEN_USER_HOME="$BUILD_OHOS_CACHE_ROOT/maven"
+export HOME="$MAVEN_USER_HOME"
 mkdir -p "$MAVEN_USER_HOME/.m2"
 export MAVEN_OPTS="-Duser.home=$MAVEN_USER_HOME"
 export MAVEN_PROXY_URL
