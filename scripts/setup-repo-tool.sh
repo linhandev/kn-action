@@ -47,12 +47,17 @@ if [ -z "$PY_EXEC" ]; then
   exit 1
 fi
 
+# Homebrew / PEP 668 "externally managed" Python may reject plain pip install; last resort for CI.
 case "$PY_EXEC" in
   "py -3")
-    py -3 -m pip install requests || py -3 -m pip install --user requests
+    py -3 -m pip install requests \
+      || py -3 -m pip install --user requests \
+      || py -3 -m pip install --break-system-packages requests
     ;;
   *)
-    "$PY_EXEC" -m pip install requests || "$PY_EXEC" -m pip install --user requests
+    "$PY_EXEC" -m pip install requests \
+      || "$PY_EXEC" -m pip install --user requests \
+      || "$PY_EXEC" -m pip install --break-system-packages requests
     ;;
 esac
 
