@@ -89,7 +89,7 @@
         ]
       },
       {
-        "id": "gradle-distributions",
+        "id": "distributions",
         "visibility": "PUBLIC",
         "redeployment": false,
         "proxied": [

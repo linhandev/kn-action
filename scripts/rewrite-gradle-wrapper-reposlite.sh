@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# Point Gradle wrapper at Reposilite maven repo "gradle-distributions" (same host as /releases).
-# Args: <kotlin-repo-root> <gradle-distributions-base-url>
-# Example: ./rewrite-gradle-wrapper-reposlite.sh ../ci-workspace http://192.168.3.5:8080/gradle-distributions
-#
-# Pure bash (no Python): Windows kotlin jobs run as Network Service and often have no python on PATH.
+# Point Gradle wrapper at LAN mirror with the same /distributions/… layout as services.gradle.org.
+# Args: <kotlin-repo-root> <mirror-base>   e.g. http://192.168.3.5:8080/distributions
+# Uses sed only (no Python): Windows kotlin jobs often have no python on PATH.
 set -euo pipefail
 ROOT="${1:?kotlin repo root}"
-BASE="${2:?gradle-distributions base URL}"
+BASE="${2:?mirror base URL (…/distributions, no trailing slash)}"
 BASE="${BASE%/}"
 PROP="$ROOT/gradle/wrapper/gradle-wrapper.properties"
 if [[ ! -f "$PROP" ]]; then
@@ -14,48 +12,20 @@ if [[ ! -f "$PROP" ]]; then
   exit 1
 fi
 
-tmp="${PROP}.kn-action.tmp"
-rm -f "$tmp"
-found_dist=0
-found_validate=0
-new_url=""
-while IFS= read -r line || [[ -n "$line" ]]; do
-  line="${line%$'\r'}"
-  if [[ "$line" =~ ^distributionUrl=(.+)$ ]]; then
-    raw_val="${BASH_REMATCH[1]}"
-    logical="${raw_val//\\/}"
-    if [[ "$logical" != *"/"* ]] || [[ "$logical" != *".zip"* ]]; then
-      echo "ERROR: unexpected distributionUrl value: ${raw_val}" >&2
-      rm -f "$tmp"
-      exit 1
-    fi
-    zip_name="${logical##*/}"
-    if [[ ! "$zip_name" =~ ^gradle-[a-zA-Z0-9_.-]+\.zip$ ]]; then
-      echo "ERROR: unexpected distribution zip name: ${zip_name}" >&2
-      rm -f "$tmp"
-      exit 1
-    fi
-    new_url="${BASE}/${zip_name}"
-    escaped="${new_url//:/\\:}"
-    printf '%s\n' "distributionUrl=${escaped}" >> "$tmp"
-    found_dist=1
-  elif [[ "$line" =~ ^validateDistributionUrl= ]]; then
-    printf '%s\n' "validateDistributionUrl=false" >> "$tmp"
-    found_validate=1
-  else
-    printf '%s\n' "$line" >> "$tmp"
-  fi
-done < "$PROP"
-
-if [[ "$found_dist" -eq 0 ]]; then
-  echo "ERROR: no distributionUrl= line in gradle-wrapper.properties" >&2
-  rm -f "$tmp"
+ZIP=$(sed -nE 's/^distributionUrl=.*\/(gradle-[a-zA-Z0-9_.-]+\.zip).*/\1/p' "$PROP" | tr -d '\r\n')
+if [[ ! "$ZIP" =~ ^gradle-.*\.zip$ ]]; then
+  echo "ERROR: could not parse gradle zip from distributionUrl in $PROP" >&2
   exit 1
 fi
 
-if [[ "$found_validate" -eq 0 ]]; then
-  printf '%s\n' "validateDistributionUrl=false" >> "$tmp"
+NEW="distributionUrl=${BASE}/${ZIP}"
+tmp="${PROP}.kn-action.tmp"
+sed -E "s#^distributionUrl=.*#${NEW}#" "$PROP" > "$tmp"
+if grep -qE '^validateDistributionUrl=' "$tmp"; then
+  sed -E 's/^validateDistributionUrl=.*/validateDistributionUrl=false/' "$tmp" > "${tmp}.2"
+  mv "${tmp}.2" "$tmp"
+else
+  echo 'validateDistributionUrl=false' >> "$tmp"
 fi
-
 mv "$tmp" "$PROP"
-echo "gradle-wrapper: distributionUrl -> $new_url"
+echo "gradle-wrapper: distributionUrl -> ${BASE}/${ZIP}"

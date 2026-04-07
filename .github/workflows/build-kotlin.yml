@@ -38,7 +38,6 @@ on:
       - 'scripts/maven-proxy.init.gradle'
       - 'scripts/nodejs-dist-mirror.init.gradle'
       - 'scripts/rewrite-gradle-wrapper-reposlite.sh'
-      - 'scripts/run-build-ohos-with-reposlite-proxy.sh'
       - 'patches/kotlin-js-tests-npmSetRegistry.patch'
 
 # default or global config
@@ -47,7 +46,7 @@ env:
   DEFAULT_CLEAN_BUILD: false
   DEFAULT_MAVEN_PROXY_URL: http://192.168.3.5:8080/releases
   # Same Reposilite host as DEFAULT_MAVEN_PROXY_URL; used when maven proxy URL is not …/releases
-  DEFAULT_GRADLE_DISTRIBUTIONS_URL: http://192.168.3.5:8080/gradle-distributions
+  DEFAULT_GRADLE_DISTRIBUTIONS_URL: http://192.168.3.5:8080/distributions
   REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
   WORKSPACE_DIR: ci-workspace
   LOCAL_REFERENCE_DIR: ~/git/ci/
@@ -320,20 +319,20 @@ jobs:
           # repo/gradle-settings-conventions/cache-redirector/.../cache-redirector.settings.gradle.kts).
           echo "ORG_GRADLE_PROJECT_cacheRedirectorEnabled=false" >> "$GITHUB_ENV"
 
-      - name: Point Gradle wrapper at Reposilite (gradle-distributions)
+      - name: Point Gradle wrapper at Reposilite (distributions)
         if: steps.vars.outputs.maven_proxy_url != ''
         run: |
           set -euo pipefail
           MP="${{ steps.vars.outputs.maven_proxy_url }}"
           if [[ "$MP" == */releases ]]; then
-            GRADLE_DIST_BASE="${MP%/releases}/gradle-distributions"
+            GRADLE_DIST_BASE="${MP%/releases}/distributions"
           else
             GRADLE_DIST_BASE="${{ env.DEFAULT_GRADLE_DISTRIBUTIONS_URL }}"
           fi
           "$BASH" "$GITHUB_WORKSPACE/kn-action/scripts/rewrite-gradle-wrapper-reposlite.sh" \
             "$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}" \
             "$GRADLE_DIST_BASE"
-          echo "Gradle wrapper → Reposilite \`$GRADLE_DIST_BASE\` (same host as Maven proxy)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Gradle wrapper → Reposilite \`$GRADLE_DIST_BASE\` (same /distributions/ layout as services.gradle.org)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build Kotlin
         env:
