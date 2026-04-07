@@ -136,7 +136,7 @@ Goals the workflow should keep satisfying (details live in the workflow and scri
 
 1. **Multi-platform matrix** — Same logical OH Kotlin build on **macOS ARM64, macOS X64, Linux X64, Windows X64** with **`self-hosted`** + **`kotlin`** labels and the usual OS/arch split.
 2. **Per-leg toolchain** — Keep Java versions and Windows job shell behavior aligned with what each matrix leg needs; treat any consolidation across legs as a full-matrix change.
-3. **Incremental vs clean** — Support **clean** runs (throwaway cache roots with optional promotion into **`~/runner/cache`** after success) and **incremental** runs (persistent caches under **`~/runner/cache`**). Scheduled or documented inputs may force clean.
+3. **Incremental vs clean** — **Incremental** uses **`~/runner/cache`** as the Gradle/Konan/Maven root for the whole job (**Setup environment** in [`build-kotlin.yml`](.github/workflows/build-kotlin.yml)). **Clean** (workflow input or **schedule**) uses a tree under **`RUNNER_TEMP`** for the build; on **success**, **Promote clean build cache to persisted Gradle home** **replaces** **`~/runner/cache`** with it (`rm -rf` on the persisted root, then `mv` from the clean tree). That promotion is part of the clean path, not an optional knob—the step only no-ops if the ephemeral cache directory is missing.
 4. **Maven / Gradle mirroring** — When a LAN Maven mirror is available, use it; when not, continue without it. Never break `file:` or other local repos. When mirroring is on, keep Gradle distribution fetches consistent with that mirror story.
 5. **GitCode via SSH** — Clone from GitCode using host SSH identity only (no SSH secrets in the workflow). Windows **`kotlin`** runners follow the **NetworkService** **`~/.ssh`** layout described above.
 6. **Source selection** — Build a specific **commit**, **branch**, or **branch + merge request** via `prepare-repo` (see the action README).
@@ -146,14 +146,14 @@ Goals the workflow should keep satisfying (details live in the workflow and scri
 
 ---
 
-## Design specs — Build LLVM (`build-llvm.yml`)
+## Design targets — Build LLVM (`build-llvm.yml`)
 
-Abstract goals the workflow should keep satisfying:
+Goals the workflow should keep satisfying (details live in the workflow and scripts):
 
 1. **Multi-platform LLVM builds** — Produce OH-oriented LLVM/packages on **macOS ARM64, macOS X64, Linux X64 (inside fixed Docker image), Windows X64**, labels **`llvm`**.
 2. **Linux isolation** — Linux job runs in **`container.image`** from `ghcr.io/<owner>/kn-action-linux-llvm-builder:…` with a **volume** into the host artifact area (`…/artifact` → `/home/runner/runner/artifact`) so Linux matches the same local-artifact contract as other OSes.
-3. **Incremental by default** — **`LLVM_WORKSPACE`** under the job workspace persists across runs; **`clean_build`** workflow input wipes it when a full rebuild is required. Incremental build should be really incremental. Verify by going thru build log and inspecting build time. Subsequent builds with no code change should be sustentially faster.
-4. **Conditional env prepare** — Run `env_prepare.sh` only when **`prebuilts/cmake`** (or equivalent marker) is missing — skip when incremental tree is already bootstrapped.
+3. **Incremental vs clean** — **`LLVM_WORKSPACE`** is the **`llvm`** directory alongside the checked-out **`kn-action`** job workspace (see **`LLVM_WORKSPACE`** in [`build-llvm.yml`](.github/workflows/build-llvm.yml)). On self-hosted runners it is reused across runs because the Actions work directory persists. There is **no** Kotlin-style promotion of the LLVM tree into **`~/runner/cache`**; **`~/runner/cache`** is for things like the OH sysroot tarball, not the main LLVM checkout. **`clean_build`** **`rm -rf`s the parent of `GITHUB_WORKSPACE`** (entire job work root), rechecks out **`kn-action`**, and **`repo init`** runs when **`.repo`** is missing or clean is set—see **Setup environment**, **Re-checkout kn-action after clean workspace wipe**, and **Init repo manifest**. Expect much faster runs when the tree is unchanged and clean is off.
+4. **Conditional env prepare** — Run **`env_prepare`** only when the workspace lacks the usual bootstrap marker (e.g. **`prebuilts/cmake`**); skip when the tree is already prepared.
 5. **Repo / GitCode** — **`scripts/setup-repo-tool.sh`** installs **repo** with a **wrapper** so Windows Git Bash does not rely on `#!/usr/bin/env python` alone. Sync uses **`GITCODE_TOKEN`** (repository environment **`env`**); URL rewrites in git config for GitCode HTTPS.
 6. **Windows shell** — Use a Git Bash invocation that survives self-hosted Windows (e.g. **`C:\PROGRA~1\Git\bin\bash.exe`** with `pipefail`) — avoid quoted `Program Files` paths that break runner/OpenSSH command parsing. **Windows** also needs **Developer Mode** (or equivalent) so **`repo`/git symlinks** work; see **Build LLVM — required runner environment** above.
 7. **OH sysroot** — Download/cache sysroot tarball under **`~/runner/cache`**; symlink into build layout as the workflow defines.
@@ -172,9 +172,9 @@ Abstract goals the workflow should keep satisfying:
 ## Conventions for agents
 
 1. **Prefer SSH verification** on `win` / `linux` / `mini` / this host before large workflow rewrites touching paths, shells, or Docker.
-2. **Keep design targets / specs** in this file aligned when you change **`build-kotlin.yml`** or **`build-llvm.yml`** in ways that affect goals above.
+2. **Keep design targets** in this file aligned when you change **`build-kotlin.yml`** or **`build-llvm.yml`** in ways that affect goals above or adds new goals.
 3. **Push path filters** — Build LLVM triggers on `build-llvm.yml` and `scripts/setup-repo-tool.sh`; Build Kotlin on its workflow, `prepare-repo`, and `maven-proxy.init.gradle`. If you add new shared scripts, extend `paths` when appropriate.
-4. **End-to-end** — After substantive workflow changes, push to **`develop`** and poll the relevant run until green or a clear external failure (TLS, runner offline, etc.).
+4. **End-to-end** — After substantive workflow changes, push to **`develop`** and poll the relevant run until green or a enviromental issue you can't resolve, like runner offline.
 
 ---
 
