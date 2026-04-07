@@ -6,7 +6,7 @@
 # Required: REPO_URL. For branch or branch+PR: BRANCH.
 # Optional: WORKSPACE_DIR (default ci-workspace), LOCAL_REFERENCE_DIR (default $HOME/git/ci/),
 #           COMMIT, PR_NUMBER, MR_REF_TEMPLATE (see below).
-# Resolution: COMMIT set -> checkout commit; BRANCH+PR_NUMBER set -> fetch MR ref, merge into branch; else -> checkout BRANCH.
+# Resolution: COMMIT set -> checkout + hard reset to commit; BRANCH+PR_NUMBER -> hard reset to origin/BRANCH then merge MR; else -> branch + hard reset.
 # Local reference: reference path = LOCAL_REFERENCE_DIR / basename(REPO_URL without .git).
 # MR ref: when PR_NUMBER is set, fetch uses MR_REF_TEMPLATE (default refs/merge-requests/%s/head for GitLab/GitCode).
 #         For GitHub use MR_REF_TEMPLATE='refs/pull/%s/head'.
@@ -54,13 +54,23 @@ else
   cd "$WORKSPACE_DIR"
 fi
 
+# Drop stale merge/rebase state from a previous failed run (self-hosted reuse).
+git merge --abort 2>/dev/null || true
+git rebase --abort 2>/dev/null || true
+git cherry-pick --abort 2>/dev/null || true
+
 if [[ -n "$COMMIT" ]]; then
   git fetch origin "$COMMIT"
   git checkout "$COMMIT"
+  git reset --hard "$COMMIT"
+  git clean -dfx
 elif [[ -n "$PR_NUMBER" && -n "$BRANCH" ]]; then
   MR_REF=$(printf "$MR_REF_TEMPLATE" "$PR_NUMBER")
   git fetch origin "$BRANCH"
   git checkout -B _ci_branch "origin/$BRANCH"
+  # checkout -B can leave local edits when HEAD already matches the remote; merge then conflicts.
+  git reset --hard "origin/$BRANCH"
+  git clean -dfx
   git fetch origin "+${MR_REF}:pr_${PR_NUMBER}"
   git config user.email "ci@localhost"
   git config user.name "CI"
@@ -69,6 +79,8 @@ else
   [[ -z "$BRANCH" ]] && { echo "BRANCH required for branch build" >&2; exit 1; }
   git fetch origin "$BRANCH"
   git checkout -B _ci_branch "origin/$BRANCH"
+  git reset --hard "origin/$BRANCH"
+  git clean -dfx
 fi
 
 # Force working tree to match HEAD (runner does not clean workspace between runs)
