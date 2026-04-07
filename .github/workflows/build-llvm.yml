@@ -45,16 +45,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # TEMP: Windows-only matrix for debugging; restore macOS/Linux when done.
-          # - runner: [self-hosted, macOS, ARM64, llvm]
-          #   container_image: ''
-          #   shell: bash
-          # - runner: [self-hosted, macOS, X64, llvm]
-          #   container_image: ''
-          #   shell: bash
-          # - runner: [self-hosted, linux, X64, llvm]
-          #   container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:cd720ae
-          #   shell: bash
+          - runner: [self-hosted, macOS, ARM64, llvm]
+            container_image: ''
+            shell: bash
+          - runner: [self-hosted, macOS, X64, llvm]
+            container_image: ''
+            shell: bash
+          - runner: [self-hosted, linux, X64, llvm]
+            container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:cd720ae
+            shell: bash
           - runner: [self-hosted, Windows, X64, llvm]
             container_image: ''
             shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
@@ -253,7 +252,6 @@ jobs:
 
   cross-copy:
     name: cross copy on mac arm
-    if: false # TEMP: needs Linux + macOS build artifacts; re-enable with full matrix
     needs: build
     runs-on: [self-hosted, macOS, ARM64, llvm]
     defaults:
@@ -344,9 +342,8 @@ jobs:
   # Build OHOS aarch64 test programs on each self-hosted runner using the same run's artifacts.
   ohos-test-build:
     name: ${{ format('ohos-test-build ({0})', matrix.platform) }}
-    if: false # TEMP: depends on cross-copy; re-enable with full matrix
     needs: [build, cross-copy]
-    # if: ${{ !cancelled() && needs['cross-copy'].result == 'success' }}
+    if: ${{ !cancelled() && needs['cross-copy'].result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -566,9 +563,8 @@ jobs:
 
   hdc-ohos-verify:
     name: hdc OHOS verify (mac ARM)
-    if: false # TEMP: needs ohos-test-build; re-enable with full matrix
     needs: [ohos-test-build]
-    # if: ${{ needs['ohos-test-build'].result == 'success' }}
+    if: ${{ needs['ohos-test-build'].result == 'success' }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     defaults:
       run:
@@ -650,8 +646,8 @@ jobs:
           echo "All hdc OHOS smoke checks passed." >> "$GITHUB_STEP_SUMMARY"
 
   actions-timeline:
-    # TEMP: pipeline sink is build only while matrix is Windows-only.
-    needs: [build]
+    # Runs after hdc sink; if: always() so the timeline still renders when hdc is skipped.
+    needs: [hdc-ohos-verify]
     if: always()
     runs-on: ubuntu-22.04
     permissions:
