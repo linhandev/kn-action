@@ -69,11 +69,11 @@ jobs:
         run: |
           echo "python"
           which python
-          where python
+          command -v python || true
 
           echo "git"
           which git
-          where git
+          command -v git || true
 
           AP="${{ env.ARTIFACT_LOCAL_PATH }}"
           AP="${AP/#\~/$HOME}"
