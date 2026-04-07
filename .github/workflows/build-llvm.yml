@@ -420,43 +420,43 @@ jobs:
           set -euo pipefail
           mkdir -p linux-final
           tar -xzf extract-linux/packages/clang-dev-linux-x86_64.tar.gz -C linux-final
-          # Local artifact server forbids reusing the same basename; keep JetBrains-style stem + unique run id.
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-essentials-${LLVM_ESSENTIALS_ID}-run${GITHUB_RUN_ID}"
+          # Inner dir: JetBrains/Konan essentials stem only. Tar.gz basename adds -run<id> so LAN artifact server accepts re-runs.
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-essentials-${LLVM_ESSENTIALS_ID}"
+          ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
           cp -a linux-final/. "$STEM/"
-          NAME="${STEM}.tar.gz"
-          tar -czf "$NAME" "$STEM"
-          echo "archive=$NAME" >> "$GITHUB_OUTPUT"
-          echo "Packed $NAME (single top-level dir $STEM for ~/.konan/dependencies-style layout)" >> "$GITHUB_STEP_SUMMARY"
+          tar -czf "$ARCHIVE" "$STEM"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "Packed $ARCHIVE (top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pack llvm-final macOS ARM64 OHOS toolchain
         id: pack_arm64
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-arm64-*' | head -1)"
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-essentials-${LLVM_ESSENTIALS_ID}-run${GITHUB_RUN_ID}"
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-essentials-${LLVM_ESSENTIALS_ID}"
+          ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
           cp -a "$TC" "$STEM/"
-          NAME="${STEM}.tar.gz"
-          tar -cf - "$STEM" | pigz -9 > "$NAME"
-          echo "archive=$NAME" >> "$GITHUB_OUTPUT"
-          echo "Packed $NAME (single top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
+          tar -cf - "$STEM" | pigz -9 > "$ARCHIVE"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "Packed $ARCHIVE (top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pack llvm-final macOS X64 OHOS toolchain
         id: pack_x64
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-x86_64-*' | head -1)"
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-essentials-${LLVM_ESSENTIALS_ID}-run${GITHUB_RUN_ID}"
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-essentials-${LLVM_ESSENTIALS_ID}"
+          ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
           cp -a "$TC" "$STEM/"
-          NAME="${STEM}.tar.gz"
-          tar -cf - "$STEM" | pigz -9 > "$NAME"
-          echo "archive=$NAME" >> "$GITHUB_OUTPUT"
-          echo "Packed $NAME (single top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
+          tar -cf - "$STEM" | pigz -9 > "$ARCHIVE"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "Packed $ARCHIVE (top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload llvm-final Linux X64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
