@@ -54,7 +54,7 @@ jobs:
             container_image: ''
     runs-on: ${{ matrix.runner }}
     # When `container_image` is empty, the runner runs on the host (no job container).
-    container: ${{ matrix.container_image != '' && fromJSON(format('{"image":"{0}","volumes":["{1}/../../../artifact:/home/runner/runner/artifact"]}', matrix.container_image, github.workspace)) || '' }}
+    container: ${{ matrix.container_image != '' && fromJSON(format('{{"image":"{0}","volumes":["{1}/../../../artifact:/home/runner/runner/artifact"]}}', matrix.container_image, github.workspace)) || '' }}
     defaults:
       run:
         shell: bash
