@@ -198,12 +198,9 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/bin:$PATH"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo sync -c -v -j 16
-          # One path for all OSes: repo forall -c goes through cmd.exe on Windows and breaks git lfs quoting.
-          while IFS= read -r -d '' g; do
-            d="${g%/.git}"
-            [ -n "$d" ] || d="."
-            (cd "$d" && git lfs pull) || true
-          done < <(find . \( -path './.repo' -o -path './.repo/*' \) -prune -o -name .git -print0 2>/dev/null)
+          # Do not quote: -c git lfs pull must be three argv words. -c 'git lfs pull' is one token with spaces →
+          # repo forall uses subprocess with shell=True on Windows and cmd breaks. See .repo/repo/subcmds/forall.py.
+          repo forall -c git lfs pull
 
       - name: Restore git config (remove GitCode credentials)
         env:

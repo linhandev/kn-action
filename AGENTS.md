@@ -70,7 +70,7 @@ Checklist for self-hosted **`llvm`** runners so [`.github/workflows/build-llvm.y
 |------|--------|
 | **Homebrew** | Workflow installs **`swig`**, **`git-lfs`**, **`java`**, **`coreutils`**, **`wget`**, **`pigz`**, **`python`** (Python 3 + pip for Google **`repo`** and **`requests`**). |
 | **Xcode / CLT** | Must satisfy OH LLVM build scripts (same as local OH dev expectations). |
-| **`git-lfs`** | Used after **`repo sync`**: the workflow runs **`git lfs pull`** in each nested worktree (find **`.git`**, skip **`.repo/**`), same on all OSes — avoids **`repo forall -c`** on Windows (**cmd.exe** quoting). |
+| **`git-lfs`** | After **`repo sync`**, **`repo forall -c git lfs pull`** (three separate words after **`-c`**, not quoted as one string). A single quoted argument forces **`shell=True`** in **`repo`**’s **`forall`** on Windows and breaks under **cmd.exe**. |
 
 ### Linux (`llvm`, Docker job)
 
@@ -85,7 +85,7 @@ Checklist for self-hosted **`llvm`** runners so [`.github/workflows/build-llvm.y
 | Item | Notes |
 |------|--------|
 | **Shell** | Workflow **`defaults.run.shell`**: **`C:\PROGRA~1\Git\bin\bash.exe`** with **`--noprofile --norc -e -o pipefail`**. **Git for Windows** must be installed there (or adjust the workflow path). |
-| **Git LFS** | Install **Git LFS** (bundled with **Git for Windows** under **`mingw64/bin`** or **`usr/bin`**) and run **`git lfs install`**. The workflow prepends those dirs to **`PATH`**; LFS pulls use the same **find + `git lfs pull`** loop as macOS/Linux (not **`repo forall -c`**, which is unsafe on Windows). |
+| **Git LFS** | Install **Git LFS** (bundled with **Git for Windows** under **`mingw64/bin`** or **`usr/bin`**) and run **`git lfs install`**. The workflow prepends those dirs to **`PATH`**. Use **`repo forall -c git lfs pull`** without shell-quoting the command into one token (see macOS row). |
 | **Python 3.12+** | Must be usable with **`python -m pip`** for **`requests`**. The workflow prepends the first match to **`GITHUB_PATH`**, in order: **`%LOCALAPPDATA%\Programs\Python\Python{314..310}`**, **`%ProgramFiles%\Python*`**, then each **`/c/Users/*/AppData/Local/Programs/Python/Python{314..310}`** (every user under **`C:\Users`**) so the service account can still find an interactive user’s install. Prefer an **all-users** install or run the listener as the user that owns Python. |
 | **Service account vs interactive user** | The Actions listener often runs as **Network Service**; **`LOCALAPPDATA`** may **not** point at the user who installed Python — the **`Users/*`** scan above is the fallback. |
 | **Symlinks / Developer Mode** | **`repo`** and **git** expect to create symlinks under **`.repo`**. Turn on **Settings → System → For developers → Developer Mode**. Confirm **`AllowDevelopmentWithoutDevLicense`** = **`1`** under **`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock`**, or verify **`New-Item -ItemType SymbolicLink`** works without elevation. Without this, **`repo init` / `repo sync`** fails with symlink errors. |
