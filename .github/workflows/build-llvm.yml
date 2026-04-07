@@ -161,6 +161,15 @@ jobs:
           done
           echo "::warning::No Python under LOCALAPPDATA, Program Files, or /c/Users/*/AppData/Local/Programs/Python; relying on PATH"
 
+      # repo forall -c runs under cmd.exe on Windows; single-quoted 'git lfs pull' becomes a bogus executable name — use bash -lc for LFS and put git-lfs on PATH (Git/usr/bin).
+      - name: Prepend Git LFS to PATH (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          for d in "/c/PROGRA~1/Git/usr/bin" "/c/PROGRA~1/Git/mingw64/bin" "/c/Program Files/Git/usr/bin" "/c/Program Files/Git/mingw64/bin"; do
+            if [ -d "$d" ]; then echo "$d" >> "$GITHUB_PATH"; fi
+          done
+
       - name: Setup repo tool
         run: bash "$GITHUB_WORKSPACE/kn-action/scripts/setup-repo-tool.sh"
 
@@ -188,7 +197,11 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/bin:$PATH"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo sync -c -v -j 16
-          repo forall -c 'git lfs pull'
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            repo forall -c "bash -lc 'git lfs pull'"
+          else
+            repo forall -c 'git lfs pull'
+          fi
 
       - name: Restore git config (remove GitCode credentials)
         env:
