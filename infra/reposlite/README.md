@@ -99,6 +99,9 @@ launchctl unload ~/Library/LaunchAgents/com.kmp.reposilite.plist # 卸载/停用
 wget http://localhost:8080/releases/org/apache/felix/maven-bundle-plugin/3.5.0/maven-bundle-plugin-3.5.0.pom
 # Kotlin bootstrap（proxied `reference` 必须以 `/` 结尾，否则拼接会变成 …/maven/org/jetbrains/… 而 404）
 wget -S -O /dev/null "http://localhost:8080/releases/org/jetbrains/kotlin/kotlin-stdlib-js/2.2.20-Beta2-71/kotlin-stdlib-js-2.2.20-Beta2-71.klib"
+# Gradle distribution（wrapper 可改为指向 `http://<host>:8080/releases/distributions/...`，当前 kn 侧未接）
+wget -S -O /dev/null "http://localhost:8080/releases/distributions/gradle-8.5-bin.zip"
+wget -S -O /dev/null "http://localhost:8080/releases/distributions/gradle-8.5-bin.zip.sha256"
 ```
 
 ### Proxied 源 URL 必须以 `/` 结尾

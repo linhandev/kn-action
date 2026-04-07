@@ -59,6 +59,16 @@
             "store": true
           },
           {
+            "reference": "https://services.gradle.org/",
+            "store": true,
+            "allowedExtensions": [
+              ".zip",
+              ".sha256",
+              ".sha512",
+              ".asc"
+            ]
+          },
+          {
             "reference": "https://download.jetbrains.com/teamcity-repository/",
             "store": true
           },
