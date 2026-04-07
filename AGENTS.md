@@ -68,10 +68,10 @@ Checklist for self-hosted **`llvm`** runners so [`.github/workflows/build-llvm.y
 
 | Item | Notes |
 |------|--------|
-| **Homebrew** | Workflow installs **`swig`**, **`git-lfs`**, **`java`**, **`coreutils`**, **`wget`**, **`pigz`**, **`python`** (Python 3 + pip for Google **`repo`** and **`requests`**). |
-| **Xcode / CLT** | Must satisfy OH LLVM build scripts (same as local OH dev expectations). |
-| **`git-lfs`** | After **`repo sync`**, **`repo forall -c git lfs pull`** (three separate words after **`-c`**, not quoted as one string). A single quoted argument forces **`shell=True`** in **`repo`**’s **`forall`** on Windows and breaks under **cmd.exe**. |
-| **`hdc` on `PATH`** | The **Execute test artifacts** job in **`build-llvm.yml`** runs on a self-hosted macOS ARM64 **`llvm`** runner and assumes the OpenHarmony **`hdc`** binary is available **on `PATH`** (for example symlink or wrapper to DevEco’s **`…/openharmony/toolchains/hdc`**). It is not invoked via a hardcoded app-bundle path. |
+| **Build deps** | **`swig`**, **`git-lfs`**, **`java`**, **GNU coreutils**, **`wget`**, **`pigz`**, **Python 3** with **pip** (for Google **repo** and **requests**). Install with Homebrew or equivalent. **Tested:** Homebrew-installed set matching what the llvm macOS matrix expects. |
+| **Xcode / CLT** | Must satisfy OH LLVM build scripts (same as local OH dev). **Tested:** full Xcode selected via **`xcode-select`** on the project’s macOS **`llvm`** runners (not a minimal CLT-only layout unless you have confirmed OH scripts accept it). |
+| **Git LFS** | **`git-lfs`** installed and **`git lfs install`** run for the runner user. **Tested:** **`repo forall -c git lfs pull`** with **three words** after **`-c`** (`git`, `lfs`, `pull`) — on Windows/Git Bash, do not pass that as one quoted token (breaks under **cmd.exe** when repo shells out). |
+| **`hdc` on `PATH`** | Needed only on hosts that run OH **device verify** / test-artifact steps: OpenHarmony **`hdc`** on **`PATH`** (e.g. symlink to DevEco’s **`…/openharmony/toolchains/hdc`**). |
 
 #### Local environment dependencies (build-llvm — device verify)
 
@@ -83,7 +83,7 @@ For **`hdc-ohos-verify`** / **Execute test artifacts**: install or link **`hdc`*
 |------|--------|
 | **Image** | **`ghcr.io/<repo-owner>/kn-action-linux-llvm-builder:<tag>`** — pin in **`build-llvm.yml`** must match an image built from [`infra/docker/Dockerfile`](infra/docker/Dockerfile) (push under `infra/docker/**` runs [**Build Linux image**](.github/workflows/build-linux-image.yml)). |
 | **Volume** | Host **`${{ github.workspace }}/../../../artifact`** mounted at **`/home/runner/runner/artifact`** so the container can write the same artifact layout as other OSes. |
-| **Tools in image** | **bash**, **git**, **git-lfs**, **curl**; **Python 3** and **`python3-pip`** (required for **`scripts/setup-repo-tool.sh`**). |
+| **Base tooling** | Image provides **bash**, **git**, **git-lfs**, **curl**, **Python 3**, and a **pip**-usable install (same contract as **`kn-action-linux-llvm-builder`** from [`infra/docker/Dockerfile`](infra/docker/Dockerfile)). |
 
 ### Windows (`llvm`)
 
@@ -130,19 +130,19 @@ The listener usually runs as **`NT AUTHORITY\NETWORK SERVICE`**, so job **`$HOME
 
 ---
 
-## Design specs — Build Kotlin (`build-kotlin.yml`)
+## Design targets — Build Kotlin (`build-kotlin.yml`)
 
-Abstract goals the workflow should keep satisfying:
+Goals the workflow should keep satisfying (details live in the workflow and scripts):
 
-1. **Multi-platform matrix** — Same logical build (OH Kotlin) on **macOS ARM64, macOS X64, Linux X64, Windows X64**, with runner labels **`self-hosted`, `kotlin`**, plus arch/OS dimensions as today.
-2. **Correct Java layout per OS** — macOS ARM64/Linux use Java 17 (and Linux also 21 where needed); macOS X64 uses 8 + 11; Windows uses setup-java as defined in the workflow — agents must not collapse these without testing all matrix legs. **Windows `run` shell** — same as Build LLVM: **`C:\PROGRA~1\Git\bin\bash.exe`** with **`--noprofile --norc -e -o pipefail`** (bare **`shell: bash`** fails on typical self-hosted Windows when Git’s bash is not on `PATH`).
-3. **Incremental vs clean build** — **Clean**: ephemeral Gradle/Konan/Maven roots under `RUNNER_TEMP` (or equivalent clean root), then optional **promotion** of that cache into **`~/runner/cache`** after success. **Incremental**: persist caches under **`PERSISTED_CACHE_ROOT`** (`~/runner/cache` by default). Scheduled runs force clean behavior as documented in the workflow.
-4. **Optional Maven proxy** — Reachability check against `DEFAULT_MAVEN_PROXY_URL`; if unreachable, degrade gracefully (no proxy). Init script from `scripts/maven-proxy.init.gradle` and Maven `settings.xml` mirror **`external:*`** only (do not mirror `file:` repos). When the proxy is used, **`scripts/rewrite-gradle-wrapper-reposlite.sh`** rewrites the Kotlin checkout’s **`gradle/wrapper/gradle-wrapper.properties`** to download the same Gradle zip from Reposilite **`gradle-distributions`** (host derived from `…/releases` → `…/gradle-distributions`, or `DEFAULT_GRADLE_DISTRIBUTIONS_URL`). For a **local** end-to-end check of `scripts/build-ohos.sh` with the same wiring (isolated caches, Gradle + Maven via Reposilite), use **`scripts/run-build-ohos-with-reposlite-proxy.sh`**.
-5. **GitCode source of truth** — Clone via **SSH** (`REPO_URL`); runner must already have SSH keys/config for GitCode (workflow does not inject SSH secrets). **Windows** `kotlin` hosts: one-time **`NetworkService\.ssh`** setup and **`GIT_SSH_COMMAND`** in **Setup environment** only — see **Kotlin `kotlin` runners** above.
-6. **Branch / commit / MR modes** — Support building a **commit**, a **branch**, or **branch + merge-request** via `prepare-repo` inputs (see action README).
-7. **Artifacts** — Pack `build/repo` into a gzip archive named with Kotlin SHA + action SHA + OS/arch; deliver to **`~/runner/artifact`** via `upload-artifact-local`.
-8. **macOS toolchain check** — On macOS, verify **bitcode-build-tool** via `xcrun` early (`DEVELOPER_DIR` points at expected Xcode).
-9. **Local proxy mode** - network connection to upstream repos are flaky in all repos, when local proxy mode is enabled, aim to do no web request to upstream repos at all, make all dependency/plugin download go thru the lan proxy.
+1. **Multi-platform matrix** — Same logical OH Kotlin build on **macOS ARM64, macOS X64, Linux X64, Windows X64** with **`self-hosted`** + **`kotlin`** labels and the usual OS/arch split.
+2. **Per-leg toolchain** — Keep Java versions and Windows job shell behavior aligned with what each matrix leg needs; treat any consolidation across legs as a full-matrix change.
+3. **Incremental vs clean** — Support **clean** runs (throwaway cache roots with optional promotion into **`~/runner/cache`** after success) and **incremental** runs (persistent caches under **`~/runner/cache`**). Scheduled or documented inputs may force clean.
+4. **Maven / Gradle mirroring** — When a LAN Maven mirror is available, use it; when not, continue without it. Never break `file:` or other local repos. When mirroring is on, keep Gradle distribution fetches consistent with that mirror story.
+5. **GitCode via SSH** — Clone from GitCode using host SSH identity only (no SSH secrets in the workflow). Windows **`kotlin`** runners follow the **NetworkService** **`~/.ssh`** layout described above.
+6. **Source selection** — Build a specific **commit**, **branch**, or **branch + merge request** via `prepare-repo` (see the action README).
+7. **Artifacts** — Ship **`build/repo`** as compressed archives into **`~/runner/artifact`**, with names that identify Kotlin revision, workflow/action revision, and platform.
+8. **macOS toolchain** — On macOS, detect a bad or missing Xcode toolchain early (e.g. **bitcode-build-tool**), before expensive work.
+9. **Local proxy mode** — When enabled, route dependency and plugin downloads through the LAN proxy and avoid hitting upstreams directly where the design allows.
 
 ---
 
@@ -172,7 +172,7 @@ Abstract goals the workflow should keep satisfying:
 ## Conventions for agents
 
 1. **Prefer SSH verification** on `win` / `linux` / `mini` / this host before large workflow rewrites touching paths, shells, or Docker.
-2. **Keep design specs** in this file aligned when you change **`build-kotlin.yml`** or **`build-llvm.yml`** in ways that affect goals above.
+2. **Keep design targets / specs** in this file aligned when you change **`build-kotlin.yml`** or **`build-llvm.yml`** in ways that affect goals above.
 3. **Push path filters** — Build LLVM triggers on `build-llvm.yml` and `scripts/setup-repo-tool.sh`; Build Kotlin on its workflow, `prepare-repo`, and `maven-proxy.init.gradle`. If you add new shared scripts, extend `paths` when appropriate.
 4. **End-to-end** — After substantive workflow changes, push to **`develop`** and poll the relevant run until green or a clear external failure (TLS, runner offline, etc.).
 
