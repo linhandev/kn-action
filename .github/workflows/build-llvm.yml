@@ -654,7 +654,14 @@ jobs:
           CXXLOG="$("$OHOS_CXX" "${OHOS_FLAGS[@]}" -std=c++17 -O2 -o src/hello_ohos_cpp src/test.cpp 2>&1)"; CXXRC=$?
           set -e
           if [ "$CXXRC" -ne 0 ]; then echo "::error::C++ compile failed: $CXXLOG"; exit 1; fi
-          if command -v file >/dev/null 2>&1; then file src/hello_ohos_c src/hello_ohos_cpp; else ls -la src/hello_ohos_c src/hello_ohos_cpp; fi
+          # Docker/llvm Linux runner: `file` can hit seccomp (SIGSYS / exit 159); macOS hosts are fine.
+          if [ "${{ matrix.platform }}" = "linux-x64" ]; then
+            ls -la src/hello_ohos_c src/hello_ohos_cpp
+          elif command -v file >/dev/null 2>&1; then
+            file src/hello_ohos_c src/hello_ohos_cpp
+          else
+            ls -la src/hello_ohos_c src/hello_ohos_cpp
+          fi
 
       - name: Pack test binaries
         id: test_pack
