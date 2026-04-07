@@ -464,19 +464,27 @@ jobs:
             host_suffix: macOS_X64
             shell: bash
     runs-on: ${{ matrix.runner }}
-    # Ephemeral path avoids a reused workspace/kn-action tree with root-owned files (e.g. .cursor)
-    # that breaks actions/checkout (index.lock / rmdir EACCES on self-hosted runners).
-    env:
-      KN_ACTION_CHECKOUT: gha-kn-action-${{ github.run_id }}-${{ matrix.platform }}
     defaults:
       run:
         working-directory: ${{ github.workspace }}/ohos-test-work
         shell: ${{ matrix.shell }}
     steps:
+      # Move aside any stale workspace/kn-action (e.g. root-owned .cursor) so checkout can recreate it.
+      # Renaming only needs write access on the parent dir; rm -rf inside may still fail with EACCES.
+      - name: Retire stale kn-action clone
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          d="${GITHUB_WORKSPACE}/kn-action"
+          if [ -e "$d" ]; then
+            grave="${GITHUB_WORKSPACE}/.kn-action-retired-${{ github.run_id }}-${RANDOM}"
+            mv "$d" "$grave" || { rm -rf "$d" || sudo -n rm -rf "$d" || true; }
+          fi
+
       - name: Checkout kn-action
         uses: actions/checkout@v6
         with:
-          path: ${{ env.KN_ACTION_CHECKOUT }}
+          path: kn-action
 
       - name: Prepare workspace
         # Must not inherit defaults.run.working-directory (ohos-test-work): it does not exist until this step creates it.
@@ -487,7 +495,7 @@ jobs:
 
       - name: Download llvm-final OHOS toolchain
         id: dl_final
-        uses: ./${{ env.KN_ACTION_CHECKOUT }}/.github/actions/download-artifact-local
+        uses: ./kn-action/.github/actions/download-artifact-local
         with:
           name: llvm-final-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
           path: ${{ github.workspace }}/ohos-test-work/dl
@@ -588,7 +596,7 @@ jobs:
           echo "archive_name=$NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload test binaries
-        uses: ./${{ env.KN_ACTION_CHECKOUT }}/.github/actions/upload-artifact-local
+        uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ github.workspace }}/ohos-test-work/${{ steps.test_pack.outputs.archive_name }}
 
@@ -613,16 +621,24 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      KN_ACTION_CHECKOUT: gha-kn-action-${{ github.run_id }}-${{ matrix.host_suffix }}
     steps:
+      - name: Retire stale kn-action clone
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          d="${GITHUB_WORKSPACE}/kn-action"
+          if [ -e "$d" ]; then
+            grave="${GITHUB_WORKSPACE}/.kn-action-retired-${{ github.run_id }}-${RANDOM}"
+            mv "$d" "$grave" || { rm -rf "$d" || sudo -n rm -rf "$d" || true; }
+          fi
+
       - name: Checkout kn-action
         uses: actions/checkout@v6
         with:
-          path: ${{ env.KN_ACTION_CHECKOUT }}
+          path: kn-action
 
       - name: Download test binaries
-        uses: ./${{ env.KN_ACTION_CHECKOUT }}/.github/actions/download-artifact-local
+        uses: ./kn-action/.github/actions/download-artifact-local
         with:
           name: test-binaries-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
           path: ${{ github.workspace }}/hdc-verify/dl
