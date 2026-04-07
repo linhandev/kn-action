@@ -13,6 +13,12 @@
 
 set -euo pipefail
 
+# Git for Windows: Kotlin contains paths >260 chars; without this, clone/clean/checkout errors with
+# "Filename too long" and leaves a dirty tree ("untracked files would be overwritten by checkout").
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) git config --global core.longpaths true ;;
+esac
+
 REPO_URL="${REPO_URL:?}"
 BRANCH="${BRANCH:-}"
 COMMIT="${COMMIT:-}"
