@@ -253,6 +253,8 @@ jobs:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
           MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
           MAVEN_PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
+          # When set, kotlin scripts/build-ohos.sh uses -s with Aliyun (mirrorOf *), ignoring MAVEN_USER_HOME settings.
+          USE_CN_MIRROR: ${{ steps.vars.outputs.maven_proxy_url != '' && 'false' || 'true' }}
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
           DEVELOPER_DIR: ${{ env.DEVELOPER_DIR }}
           JDK_18: ${{ steps.java8.outputs.path }}
