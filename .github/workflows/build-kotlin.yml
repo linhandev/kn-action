@@ -36,6 +36,7 @@ on:
       - '.github/workflows/build-kotlin.yml'
       - '.github/actions/prepare-repo/*'
       - 'scripts/maven-proxy.init.gradle'
+      - 'scripts/nodejs-dist-mirror.init.gradle'
       - 'scripts/rewrite-gradle-wrapper-reposlite.sh'
       - 'scripts/run-build-ohos-with-reposlite-proxy.sh'
       - 'patches/kotlin-js-tests-npmSetRegistry.patch'
@@ -52,7 +53,6 @@ env:
   LOCAL_REFERENCE_DIR: ~/git/ci/
   PERSISTED_CACHE_ROOT: ~/runner/cache
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
-  DEVELOPER_DIR: /Applications/Xcode-26.2.app/Contents/Developer/
 
 jobs:
   build:
@@ -144,6 +144,15 @@ jobs:
           fi
           echo "PROXY_URL after network test: $PROXY_URL"
 
+          # Gradle Node plugin downloads tarballs from distributionUrl (default nodejs.org). Self-hosted
+          # networks often block that TLS; LAN should mirror https://nodejs.org/dist/ under this base.
+          if [ -n "$PROXY_URL" ]; then
+            echo "NODEJS_DIST_MIRROR=${PROXY_URL%/releases}/nodejs-dist" >> "$GITHUB_ENV"
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            # Fallback when no LAN proxy: npmmirror matches nodejs.org/dist layout (same paths as upstream).
+            echo "NODEJS_DIST_MIRROR=https://npmmirror.com/mirrors/node" >> "$GITHUB_ENV"
+          fi
+
           echo "## Run Settings" >> "$GITHUB_STEP_SUMMARY"
 
           echo "java_version=$(java -version 2>&1 | head -1)" >> "$GITHUB_STEP_SUMMARY"
@@ -170,6 +179,13 @@ jobs:
             "${{ steps.vars.outputs.konan_data_dir }}" \
             "${{ steps.vars.outputs.maven_user_home }}/.m2" \
             "${{ steps.vars.outputs.artifact_local_path }}"
+
+      - name: Install Gradle nodejs-dist init script
+        run: |
+          mkdir -p "${{ steps.vars.outputs.gradle_user_home }}/init.d"
+          cp "$GITHUB_WORKSPACE/kn-action/scripts/nodejs-dist-mirror.init.gradle" \
+            "${{ steps.vars.outputs.gradle_user_home }}/init.d/"
+          echo "Gradle: nodejs-dist-mirror init installed (no-op unless NODEJS_DIST_MIRROR is set)"
 
       - name: Clean Konan and Maven caches for clean build
         if: steps.vars.outputs.clean_build == 'true'
@@ -222,6 +238,11 @@ jobs:
           echo "Gradle: init script installed to $GRADLE_USER_HOME/init.d/"
 
           mkdir -p "$MAVEN_USER_HOME/.m2"
+          # Drop stale "not found" metadata so archetype IT / nested Maven retries resolution after build/repo is populated.
+          KREPO="$MAVEN_USER_HOME/.m2/repository/org/jetbrains/kotlin"
+          if [[ -d "$KREPO" ]]; then
+            find "$KREPO" \( -name '*.lastUpdated' -o -name '_remote.repositories' \) -delete 2>/dev/null || true
+          fi
           # OH Kotlin GAVs (2.2.21-OH-001, …) live under build/repo (file). Settings profiles inject *before*
           # POM repos (sourceDominant), so file must be listed first. Use mirrorOf external:* only — combining
           # external:* with ,!repoId can confuse some Maven versions and route file repos through the mirror;
@@ -325,7 +346,8 @@ jobs:
           # When set, kotlin scripts/build-ohos.sh uses -s with Aliyun (mirrorOf *), ignoring MAVEN_USER_HOME settings.
           USE_CN_MIRROR: ${{ steps.vars.outputs.maven_proxy_url != '' && 'false' || 'true' }}
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
-          DEVELOPER_DIR: ${{ runner.os == 'macOS' && env.DEVELOPER_DIR || '' }}
+          # Xcode toolchain for macOS only; do not set globally (Windows would inherit a bogus macOS path).
+          DEVELOPER_DIR: ${{ runner.os == 'macOS' && '/Applications/Xcode-26.2.app/Contents/Developer/' || '' }}
           JDK_18: ${{ steps.java8.outputs.path }}
           MAVEN_OPTS: -Duser.home=${{ steps.vars.outputs.maven_user_home }}
           GRADLE_OPTS: "-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000"

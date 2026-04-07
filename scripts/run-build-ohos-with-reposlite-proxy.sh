@@ -36,6 +36,7 @@ fi
 export GRADLE_USER_HOME="$BUILD_OHOS_CACHE_ROOT/gradle"
 mkdir -p "$GRADLE_USER_HOME/init.d"
 cp "$KN_ACTION_ROOT/scripts/maven-proxy.init.gradle" "$GRADLE_USER_HOME/init.d/"
+cp "$KN_ACTION_ROOT/scripts/nodejs-dist-mirror.init.gradle" "$GRADLE_USER_HOME/init.d/"
 
 export MAVEN_USER_HOME="$BUILD_OHOS_CACHE_ROOT/maven"
 export HOME="$MAVEN_USER_HOME"

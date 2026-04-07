@@ -11,9 +11,19 @@ if [[ ! -f "$PROP" ]]; then
   exit 1
 fi
 
+# Windows self-hosted runners often expose `python` but not `python3` (see AGENTS.md — Build LLVM Windows).
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+  PYTHON=python
+else
+  echo "ERROR: need python3 or python on PATH (for gradle-wrapper.properties rewrite)" >&2
+  exit 1
+fi
+
 BASE="${BASE%/}"
 export ROOT BASE PROP
-python3 <<'PY'
+"$PYTHON" <<'PY'
 import os, pathlib, re
 
 prop = pathlib.Path(os.environ["PROP"])
