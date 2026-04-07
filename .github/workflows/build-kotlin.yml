@@ -36,6 +36,7 @@ on:
       - '.github/workflows/build-kotlin.yml'
       - '.github/actions/prepare-repo/*'
       - 'scripts/maven-proxy.init.gradle'
+      - 'scripts/rewrite-gradle-wrapper-reposlite.sh'
       - 'patches/kotlin-js-tests-npmSetRegistry.patch'
 
 # default or global config
@@ -43,6 +44,8 @@ env:
   DEFAULT_KOTLIN_BRANCH: develop-2.2.21-OH
   DEFAULT_CLEAN_BUILD: false
   DEFAULT_MAVEN_PROXY_URL: http://192.168.3.5:8080/releases
+  # Same Reposilite host as DEFAULT_MAVEN_PROXY_URL; used when maven proxy URL is not …/releases
+  DEFAULT_GRADLE_DISTRIBUTIONS_URL: http://192.168.3.5:8080/gradle-distributions
   REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
   WORKSPACE_DIR: ci-workspace
   LOCAL_REFERENCE_DIR: ~/git/ci/
@@ -223,6 +226,21 @@ jobs:
           # LAN mirror. Force project property so Settings skips registering that hook (see
           # repo/gradle-settings-conventions/cache-redirector/.../cache-redirector.settings.gradle.kts).
           echo "ORG_GRADLE_PROJECT_cacheRedirectorEnabled=false" >> "$GITHUB_ENV"
+
+      - name: Point Gradle wrapper at Reposilite (gradle-distributions)
+        if: steps.vars.outputs.maven_proxy_url != ''
+        run: |
+          set -euo pipefail
+          MP="${{ steps.vars.outputs.maven_proxy_url }}"
+          if [[ "$MP" == */releases ]]; then
+            GRADLE_DIST_BASE="${MP%/releases}/gradle-distributions"
+          else
+            GRADLE_DIST_BASE="${{ env.DEFAULT_GRADLE_DISTRIBUTIONS_URL }}"
+          fi
+          bash "$GITHUB_WORKSPACE/kn-action/scripts/rewrite-gradle-wrapper-reposlite.sh" \
+            "$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}" \
+            "$GRADLE_DIST_BASE"
+          echo "Gradle wrapper → Reposilite \`$GRADLE_DIST_BASE\` (same host as Maven proxy)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build Kotlin
         env:

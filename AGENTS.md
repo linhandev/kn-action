@@ -71,6 +71,11 @@ Checklist for self-hosted **`llvm`** runners so [`.github/workflows/build-llvm.y
 | **Homebrew** | Workflow installs **`swig`**, **`git-lfs`**, **`java`**, **`coreutils`**, **`wget`**, **`pigz`**, **`python`** (Python 3 + pip for Google **`repo`** and **`requests`**). |
 | **Xcode / CLT** | Must satisfy OH LLVM build scripts (same as local OH dev expectations). |
 | **`git-lfs`** | After **`repo sync`**, **`repo forall -c git lfs pull`** (three separate words after **`-c`**, not quoted as one string). A single quoted argument forces **`shell=True`** in **`repo`**’s **`forall`** on Windows and breaks under **cmd.exe**. |
+| **`hdc` on `PATH`** | The **Execute test artifacts** job in **`build-llvm.yml`** runs on a self-hosted macOS ARM64 **`llvm`** runner and assumes the OpenHarmony **`hdc`** binary is available **on `PATH`** (for example symlink or wrapper to DevEco’s **`…/openharmony/toolchains/hdc`**). It is not invoked via a hardcoded app-bundle path. |
+
+#### Local environment dependencies (build-llvm — device verify)
+
+For **`hdc-ohos-verify`** / **Execute test artifacts**: install or link **`hdc`** so `command -v hdc` succeeds for the runner user; connect at least one OH device when exercising that job.
 
 ### Linux (`llvm`, Docker job)
 
@@ -120,7 +125,7 @@ Abstract goals the workflow should keep satisfying:
 1. **Multi-platform matrix** — Same logical build (OH Kotlin) on **macOS ARM64, macOS X64, Linux X64, Windows X64**, with runner labels **`self-hosted`, `kotlin`**, plus arch/OS dimensions as today.
 2. **Correct Java layout per OS** — macOS ARM64/Linux use Java 17 (and Linux also 21 where needed); macOS X64 uses 8 + 11; Windows uses setup-java as defined in the workflow — agents must not collapse these without testing all matrix legs.
 3. **Incremental vs clean build** — **Clean**: ephemeral Gradle/Konan/Maven roots under `RUNNER_TEMP` (or equivalent clean root), then optional **promotion** of that cache into **`~/runner/cache`** after success. **Incremental**: persist caches under **`PERSISTED_CACHE_ROOT`** (`~/runner/cache` by default). Scheduled runs force clean behavior as documented in the workflow.
-4. **Optional Maven proxy** — Reachability check against `DEFAULT_MAVEN_PROXY_URL`; if unreachable, degrade gracefully (no proxy). Init script from `scripts/maven-proxy.init.gradle` and Maven `settings.xml` mirror **`external:*`** only (do not mirror `file:` repos).
+4. **Optional Maven proxy** — Reachability check against `DEFAULT_MAVEN_PROXY_URL`; if unreachable, degrade gracefully (no proxy). Init script from `scripts/maven-proxy.init.gradle` and Maven `settings.xml` mirror **`external:*`** only (do not mirror `file:` repos). When the proxy is used, **`scripts/rewrite-gradle-wrapper-reposlite.sh`** rewrites the Kotlin checkout’s **`gradle/wrapper/gradle-wrapper.properties`** to download the same Gradle zip from Reposilite **`gradle-distributions`** (host derived from `…/releases` → `…/gradle-distributions`, or `DEFAULT_GRADLE_DISTRIBUTIONS_URL`).
 5. **GitCode source of truth** — Clone via **SSH** (`REPO_URL`); runner must already have SSH keys/config for GitCode (workflow does not inject SSH secrets).
 6. **Branch / commit / MR modes** — Support building a **commit**, a **branch**, or **branch + merge-request** via `prepare-repo` inputs (see action README).
 7. **Artifacts** — Pack `build/repo` into a gzip archive named with Kotlin SHA + action SHA + OS/arch; deliver to **`~/runner/artifact`** via `upload-artifact-local`.
@@ -140,7 +145,7 @@ Abstract goals the workflow should keep satisfying:
 5. **Repo / GitCode** — **`scripts/setup-repo-tool.sh`** installs **repo** with a **wrapper** so Windows Git Bash does not rely on `#!/usr/bin/env python` alone. Sync uses **`GITCODE_TOKEN`** (repository environment **`env`**); URL rewrites in git config for GitCode HTTPS.
 6. **Windows shell** — Use a Git Bash invocation that survives self-hosted Windows (e.g. **`C:\PROGRA~1\Git\bin\bash.exe`** with `pipefail`) — avoid quoted `Program Files` paths that break runner/OpenSSH command parsing. **Windows** also needs **Developer Mode** (or equivalent) so **`repo`/git symlinks** work; see **Build LLVM — required runner environment** above.
 7. **OH sysroot** — Download/cache sysroot tarball under **`~/runner/cache`**; symlink into build layout as the workflow defines.
-8. **Artifacts** — Archive **`llvm/packages`** (and naming/metadata) consistent with downstream **cross-copy** / **ohos-test-build** jobs in the same file; upload via local server action where configured.
+8. **Artifacts** — Archive **`llvm/packages`** (and naming/metadata) consistent with downstream **cross-copy** / **ohos-test-build** jobs in the same file; upload via local server action where configured. **cross-copy** publishes **`llvm-final-ohos-<Linux_X64|macOS_ARM64|macOS_X64>-<run_id>.tar.gz`** (single tarball per host for tests; not **`llvm-merged-ohos-*`** / not raw outer **`llvm-packages-*.tar`** in **ohos-test-build**).
 9. **Fail-soft matrix** — **`fail-fast: false`** so one OS failure does not cancel others; fix and iterate per OS.
 
 ---
