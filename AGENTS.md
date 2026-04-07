@@ -130,7 +130,7 @@ The **GitHub Actions Runner** Windows service usually runs as **`NT AUTHORITY\NE
 | **Cancel pending runs** | [`.github/workflows/cancel-pending-runs.yml`](.github/workflows/cancel-pending-runs.yml) | Housekeeping for queued runs. |
 | **Test prepare repo** | [`.github/workflows/test-prepare-repo.yml`](.github/workflows/test-prepare-repo.yml) | Exercises `prepare-repo` / polling tests. |
 
-**Polling CI from CLI:** [`scripts/poll-workflow-run.py`](scripts/poll-workflow-run.py) — requires `gh` authenticated.
+**Polling CI from CLI:** [`scripts/poll-workflow-run.py`](scripts/poll-workflow-run.py) — requires `gh` authenticated. For matrix workflows, `--job-substring Windows` waits only until `build (Windows-X64)` (or any job whose name contains that substring) finishes and ignores other legs.
 
 ---
 

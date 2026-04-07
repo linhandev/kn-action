@@ -49,7 +49,7 @@ Polls a workflow run until it finishes. Exit 0 on success, 1 on failure. On fail
 - **Default:** wait until all jobs finish, then exit 0 or 1.
 - **`--fail-fast`:** exit as soon as any job fails (print that job's log); do not wait for other jobs.
 
-**Usage:** `python3 scripts/poll-workflow-run.py RUN_ID [--repo OWNER/REPO] [--fail-fast]`
+**Usage:** `python3 scripts/poll-workflow-run.py RUN_ID [--repo OWNER/REPO] [--fail-fast] [--job-substring SUBSTR]`
 
 **Requires:** `gh` CLI (authenticated), Python 3.9+.
 

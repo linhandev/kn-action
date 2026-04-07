@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Poll a GitHub Actions workflow run until it finishes. Exit 0 on success, 1 on failure.
-Usage: python poll-workflow-run.py RUN_ID [--repo OWNER/REPO] [--fail-fast]
-  --fail-fast: exit as soon as any job fails (print that job's log). Default: wait for all jobs to finish."""
+Usage: python poll-workflow-run.py RUN_ID [--repo OWNER/REPO] [--fail-fast] [--job-substring SUBSTR]
+  --fail-fast: exit as soon as any job fails (print that job's log). Default: wait for all jobs to finish.
+  --job-substring: only track jobs whose name contains SUBSTR (case-insensitive); exit when those jobs
+    complete — ignores other matrix legs (e.g. --job-substring Windows for build (Windows-X64))."""
 
 import argparse
 import json
@@ -28,11 +30,19 @@ def gh(run_id: str, repo: str | None, *args: str) -> dict | None:
         return None
 
 
-def _print_failed_and_exit(data: dict, jobs: list, run_id: str, repo: str | None) -> int:
-    failed = [j for j in jobs if (j.get("conclusion") or "") in BAD]
+def _job_matches(job: dict, substr: str | None) -> bool:
+    if not substr:
+        return True
+    name = (job.get("name") or "").lower()
+    return substr.lower() in name
+
+
+def _print_failed_and_exit(
+    data: dict, failed: list, run_id: str, repo: str | None, *, label: str = "Failed jobs"
+) -> int:
     if not failed:
         return 0
-    print("\nFailed jobs:", file=sys.stderr)
+    print(f"\n{label}:", file=sys.stderr)
     for j in failed:
         print(f"  {j.get('name')} ({j.get('databaseId')})", file=sys.stderr)
     fid = failed[0].get("databaseId")
@@ -56,8 +66,13 @@ def main() -> int:
     p.add_argument("run_id", help="Workflow run ID")
     p.add_argument("--repo", metavar="OWNER/REPO", help="Repository")
     p.add_argument("--fail-fast", action="store_true", help="Exit as soon as any job fails")
+    p.add_argument(
+        "--job-substring",
+        metavar="SUBSTR",
+        help="Only poll jobs whose name contains this substring (e.g. Windows); exit when they finish",
+    )
     args = p.parse_args()
-    run_id, repo, fail_fast = args.run_id, args.repo, args.fail_fast
+    run_id, repo, fail_fast, job_substr = args.run_id, args.repo, args.fail_fast, args.job_substring
 
     data = gh(run_id, repo)
     if not data:
@@ -71,7 +86,12 @@ def main() -> int:
     for k in ("workflowName", "displayTitle", "event"):
         if data.get(k):
             print(f"{k}: {data[k]}")
-    print(f"Polling run {run_id} every {POLL_INTERVAL}s" + (" (fail-fast)" if fail_fast else "") + "\n")
+    mode = ""
+    if fail_fast:
+        mode += " (fail-fast)"
+    if job_substr:
+        mode += f" (jobs matching {job_substr!r} only)"
+    print(f"Polling run {run_id} every {POLL_INTERVAL}s{mode}\n")
 
     seen = {}
     while True:
@@ -82,7 +102,16 @@ def main() -> int:
         jobs = data.get("jobs") or []
         now = datetime.now(TZ).strftime("%H:%M:%S")
 
-        for j in jobs:
+        if job_substr:
+            track = [j for j in jobs if _job_matches(j, job_substr)]
+            if jobs and not track:
+                names = [j.get("name") for j in jobs]
+                print(f"No job name contains {job_substr!r}. Jobs: {names}", file=sys.stderr)
+                return 1
+        else:
+            track = jobs
+
+        for j in track:
             jid = j.get("databaseId")
             status = j.get("status") or "unknown"
             conc = j.get("conclusion") or "unknown"
@@ -101,10 +130,22 @@ def main() -> int:
                 print(line)
                 seen[jid] = key
 
+        if job_substr:
+            if not track:
+                time.sleep(POLL_INTERVAL)
+                continue
+            failed_track = [j for j in track if (j.get("conclusion") or "") in BAD]
+            if failed_track:
+                return _print_failed_and_exit(data, failed_track, run_id, repo)
+            if all(j.get("status") == "completed" for j in track):
+                return 0
+            time.sleep(POLL_INTERVAL)
+            continue
+
         # Fail-fast: exit as soon as any job has a bad conclusion
         failed = [j for j in jobs if (j.get("conclusion") or "") in BAD]
         if failed:
-            return _print_failed_and_exit(data, jobs, run_id, repo)
+            return _print_failed_and_exit(data, failed, run_id, repo)
 
         if not all(j.get("status") == "completed" for j in jobs):
             time.sleep(POLL_INTERVAL)
