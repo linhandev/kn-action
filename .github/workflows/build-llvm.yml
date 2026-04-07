@@ -20,18 +20,27 @@ on:
         description: 'Skip the compile matrix; cross-copy uses latest-per-OS llvm-packages outer tars from the artifact server (need not be the same build)'
         default: false
         type: boolean
+      final_llvm_artifact_version:
+        description: 'Essentials id for final OHOS LLVM tarballs (JetBrains-style), e.g. 200 -> llvm-19-aarch64-macos-essentials-200.tar.gz'
+        default: '200'
+        type: string
+      llvm_major_version:
+        description: 'LLVM major version segment in published names (matches CLANG_RESOURCE_VERSION / konan layout)'
+        default: '19'
+        type: string
       run_name:
         description: 'Custom title for this run (shown in Actions UI)'
         required: false
         type: string
-  push:
-    paths:
-      - '.github/workflows/build-llvm.yml'
-      - 'scripts/setup-repo-tool.sh'
-      - 'scripts/platform_package.sh'
-      # Windows LLVM scripts (not in active matrix):
-      # - 'scripts/ohos-env-prepare-windows.sh'
-      # - 'scripts/ohos-build-llvm-windows.sh'
+  # Restored after skip_build validation — keep commented only while iterating on this workflow.
+  # push:
+  #   paths:
+  #     - '.github/workflows/build-llvm.yml'
+  #     - 'scripts/setup-repo-tool.sh'
+  #     - 'scripts/platform_package.sh'
+  #     # Windows LLVM scripts (not in active matrix):
+  #     # - 'scripts/ohos-env-prepare-windows.sh'
+  #     # - 'scripts/ohos-build-llvm-windows.sh'
 
 env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
@@ -43,6 +52,10 @@ env:
   OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02
   OHOS_SYSROOT_URL: https://maven.eazytec-cloud.com/nexus/repository/file-storage/sysroot-ohos-aarch64-6.0.2.640-02.tar.gz
   OHOS_SYSROOT_CACHE_DIR: ~/runner/cache
+  # Upstream Kotlin/Native naming: https://download.jetbrains.com/kotlin/native/resources/llvm/<major>-<triple>/llvm-<major>-<triple>-essentials-<id>.tar.gz
+  # Untar yields a single top-level directory matching the archive basename (see ~/.konan/dependencies).
+  LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
+  LLVM_MAJOR_FOR_PACKAGE: ${{ github.event.inputs.llvm_major_version || '19' }}
 
 jobs:
   build:
@@ -333,6 +346,10 @@ jobs:
     needs: llvm-artifact-refs
     if: ${{ !cancelled() && needs['llvm-artifact-refs'].result == 'success' }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
+    outputs:
+      archive_linux: ${{ steps.pack_linux_final.outputs.archive }}
+      archive_mac_arm64: ${{ steps.pack_arm64.outputs.archive }}
+      archive_mac_x64: ${{ steps.pack_x64.outputs.archive }}
     defaults:
       run:
         working-directory: ${{ github.workspace }}/cross-copy-work
@@ -404,27 +421,42 @@ jobs:
           set -euo pipefail
           mkdir -p linux-final
           tar -xzf extract-linux/packages/clang-dev-linux-x86_64.tar.gz -C linux-final
-          NAME="llvm-final-ohos-Linux_X64-${{ github.run_id }}.tar.gz"
-          tar -czf "$NAME" -C linux-final .
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-essentials-${LLVM_ESSENTIALS_ID}"
+          rm -rf "$STEM"
+          mkdir -p "$STEM"
+          cp -a linux-final/. "$STEM/"
+          NAME="${STEM}.tar.gz"
+          tar -czf "$NAME" "$STEM"
           echo "archive=$NAME" >> "$GITHUB_OUTPUT"
+          echo "Packed $NAME (single top-level dir $STEM for ~/.konan/dependencies-style layout)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pack llvm-final macOS ARM64 OHOS toolchain
         id: pack_arm64
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-arm64-*' | head -1)"
-          NAME="llvm-final-ohos-macOS_ARM64-${{ github.run_id }}.tar.gz"
-          tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-essentials-${LLVM_ESSENTIALS_ID}"
+          rm -rf "$STEM"
+          mkdir -p "$STEM"
+          cp -a "$TC" "$STEM/"
+          NAME="${STEM}.tar.gz"
+          tar -cf - "$STEM" | pigz -9 > "$NAME"
           echo "archive=$NAME" >> "$GITHUB_OUTPUT"
+          echo "Packed $NAME (single top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pack llvm-final macOS X64 OHOS toolchain
         id: pack_x64
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-x86_64-*' | head -1)"
-          NAME="llvm-final-ohos-macOS_X64-${{ github.run_id }}.tar.gz"
-          tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-essentials-${LLVM_ESSENTIALS_ID}"
+          rm -rf "$STEM"
+          mkdir -p "$STEM"
+          cp -a "$TC" "$STEM/"
+          NAME="${STEM}.tar.gz"
+          tar -cf - "$STEM" | pigz -9 > "$NAME"
           echo "archive=$NAME" >> "$GITHUB_OUTPUT"
+          echo "Packed $NAME (single top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload llvm-final Linux X64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
@@ -464,6 +496,10 @@ jobs:
             host_suffix: macOS_X64
             shell: bash
     runs-on: ${{ matrix.runner }}
+    env:
+      LLVM_FINAL_LINUX: ${{ needs.cross-copy.outputs.archive_linux }}
+      LLVM_FINAL_MAC_ARM64: ${{ needs.cross-copy.outputs.archive_mac_arm64 }}
+      LLVM_FINAL_MAC_X64: ${{ needs.cross-copy.outputs.archive_mac_x64 }}
     defaults:
       run:
         working-directory: ${{ github.workspace }}/ohos-test-work
@@ -493,11 +529,24 @@ jobs:
           rm -rf "${{ github.workspace }}/ohos-test-work"
           mkdir -p "${{ github.workspace }}/ohos-test-work"
 
+      - name: Select llvm-final artifact name (JetBrains-style essentials tarball)
+        id: llvm_tar
+        working-directory: ${{ github.workspace }}/ohos-test-work
+        run: |
+          set -euo pipefail
+          case "${{ matrix.platform }}" in
+            linux-x64) n="${LLVM_FINAL_LINUX}" ;;
+            macos-arm64) n="${LLVM_FINAL_MAC_ARM64}" ;;
+            macos-x64) n="${LLVM_FINAL_MAC_X64}" ;;
+            *) echo "::error::unexpected platform ${{ matrix.platform }}"; exit 1 ;;
+          esac
+          echo "name=$n" >> "$GITHUB_OUTPUT"
+
       - name: Download llvm-final OHOS toolchain
         id: dl_final
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-final-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
+          name: ${{ steps.llvm_tar.outputs.name }}
           path: ${{ github.workspace }}/ohos-test-work/dl
 
       - name: Layout llvm-final toolchain + sysroot
@@ -505,6 +554,13 @@ jobs:
           set -euo pipefail
           W="${{ github.workspace }}/ohos-test-work"
           tar -xzf "${{ steps.dl_final.outputs.path }}" -C "$W"
+          ROOT="$(find "$W" -maxdepth 1 -type d -name 'llvm-*-essentials-*' | head -1)"
+          if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
+            echo "::error::Expected one top-level llvm-*-essentials-* directory after extracting ${{ steps.llvm_tar.outputs.name }}"
+            ls -la "$W" || true
+            exit 1
+          fi
+          echo "LLVM_ESS_ROOT=$ROOT" >> "$GITHUB_ENV"
           CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-~/runner/cache}"
           CACHE_BASE="${CACHE_BASE/#\~/$HOME}"
           mkdir -p "$CACHE_BASE"
@@ -514,17 +570,17 @@ jobs:
           ln -sfn "$CACHE_BASE/${OHOS_SYSROOT}" "$W/sysroot"
           test -d "$W/sysroot"
           if [ "${{ matrix.platform }}" = "linux-x64" ]; then
-            if [ ! -d "$W/clang-dev" ] && [ ! -d "$W/clang" ]; then
-              echo "::error::Expected clang-dev/ or clang/ under $W"; ls -la "$W"
+            if [ ! -d "$ROOT/clang-dev" ] && [ ! -d "$ROOT/clang" ]; then
+              echo "::error::Expected clang-dev/ or clang/ under $ROOT"; ls -la "$ROOT"
               exit 1
             fi
-            if [ ! -d "$W/clang-dev/bin" ] && [ ! -d "$W/clang/bin" ]; then
-              echo "::error::Expected clang-dev/bin or clang/bin"; find "$W" -maxdepth 5 | head -80
+            if [ ! -d "$ROOT/clang-dev/bin" ] && [ ! -d "$ROOT/clang/bin" ]; then
+              echo "::error::Expected clang-dev/bin or clang/bin under $ROOT"; find "$ROOT" -maxdepth 5 | head -80
               exit 1
             fi
           else
-            test -d "$(find "$W" -maxdepth 1 -type d -name 'clang_darwin-*' | head -1)" || {
-              echo "::error::Expected clang_darwin-* under $W"; ls -la "$W" || true
+            test -d "$(find "$ROOT" -maxdepth 1 -type d -name 'clang_darwin-*' | head -1)" || {
+              echo "::error::Expected clang_darwin-* under $ROOT"; ls -la "$ROOT" || true
               exit 1
             }
           fi
@@ -548,14 +604,15 @@ jobs:
           }
           EOF
 
-      # llvm-final: Linux unpacks to clang-dev/bin (or clang/bin); Darwin to clang_darwin-*/bin.
+      # llvm-*-essentials-*: Linux has clang-dev/bin (or clang/bin); Darwin has clang_darwin-*/bin inside the essentials folder.
       - name: Cross-compile OHOS aarch64 (C and C++)
         run: |
           set -euo pipefail
           W="$(pwd)"
+          ROOT="${LLVM_ESS_ROOT:?}"
           BIN=""
           if [ "${{ matrix.platform }}" = "linux-x64" ]; then
-            for d in "$W/clang-dev/bin" "$W/clang/bin"; do
+            for d in "$ROOT/clang-dev/bin" "$ROOT/clang/bin"; do
               if [ -d "$d" ]; then BIN="$d"; break; fi
             done
           else
@@ -564,8 +621,8 @@ jobs:
               macos-x64) PAT='clang_darwin-x86_64-*' ;;
               *) echo "::error::unexpected platform ${{ matrix.platform }}"; exit 1 ;;
             esac
-            TC="$(find "$W" -maxdepth 1 -type d -name "$PAT" | head -1)"
-            [ -n "$TC" ] && [ -d "$TC/bin" ] || { echo "::error::No llvm-final Darwin toolchain ($PAT) under $W"; ls -la "$W" || true; exit 1; }
+            TC="$(find "$ROOT" -maxdepth 1 -type d -name "$PAT" | head -1)"
+            [ -n "$TC" ] && [ -d "$TC/bin" ] || { echo "::error::No llvm-final Darwin toolchain ($PAT) under $ROOT"; ls -la "$ROOT" || true; exit 1; }
             BIN="$TC/bin"
           fi
           [ -n "$BIN" ] || { echo "::error::No toolchain bin under $W"; exit 1; }
