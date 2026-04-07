@@ -95,11 +95,25 @@
         "proxied": [
           {
             "reference": "https://downloads.gradle.org/distributions/",
-            "store": true
+            "store": true,
+            "allowedExtensions": [
+              ".zip",
+              ".sha256",
+              ".sha1",
+              ".md5",
+              ".xml"
+            ]
           },
           {
             "reference": "https://mirrors.cloud.tencent.com/gradle/",
-            "store": true
+            "store": true,
+            "allowedExtensions": [
+              ".zip",
+              ".sha256",
+              ".sha1",
+              ".md5",
+              ".xml"
+            ]
           }
         ]
       }
