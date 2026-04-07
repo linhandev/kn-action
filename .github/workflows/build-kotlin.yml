@@ -37,6 +37,7 @@ on:
       - '.github/actions/prepare-repo/*'
       - 'scripts/maven-proxy.init.gradle'
       - 'scripts/rewrite-gradle-wrapper-reposlite.sh'
+      - 'scripts/run-build-ohos-with-reposlite-proxy.sh'
       - 'patches/kotlin-js-tests-npmSetRegistry.patch'
 
 # default or global config
