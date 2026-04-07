@@ -24,18 +24,27 @@ if [ ! -f "$REPO_SCRIPT" ]; then
   }
 fi
 
-# Prefer `python` before `python3`: on Windows, python3 is often a Store stub that
-# still appears on PATH. Require a working --version (exit 0).
+# Pick a Python 3 that can run pip (repo.py needs `requests`). Prefer `python` before
+# `python3`: on Windows, python3 in PATH is often a Store stub. On Linux images, /usr/bin/python
+# may exist without pip while python3 has pip — skip interpreters that fail `python -m pip`.
+pick_py() {
+  local c="$1"
+  if command -v "$c" >/dev/null 2>&1 && "$c" --version >/dev/null 2>&1 && "$c" -m pip --version >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
 PY_EXEC=""
-if command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+if pick_py python; then
   PY_EXEC="python"
-elif command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+elif pick_py python3; then
   PY_EXEC="python3"
-elif command -v py >/dev/null 2>&1 && py -3 --version >/dev/null 2>&1; then
+elif command -v py >/dev/null 2>&1 && py -3 --version >/dev/null 2>&1 && py -3 -m pip --version >/dev/null 2>&1; then
   PY_EXEC="py -3"
 fi
 if [ -z "$PY_EXEC" ]; then
-  echo "::error::no usable Python 3 (tried python, python3, py -3 with --version)"
+  echo "::error::no usable Python 3 with pip (tried python, python3, py -3)"
   exit 1
 fi
 
