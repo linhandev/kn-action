@@ -32,15 +32,14 @@ on:
         description: 'Custom title for this run (shown in Actions UI)'
         required: false
         type: string
-  # Restored after skip_build validation — keep commented only while iterating on this workflow.
-  # push:
-  #   paths:
-  #     - '.github/workflows/build-llvm.yml'
-  #     - 'scripts/setup-repo-tool.sh'
-  #     - 'scripts/platform_package.sh'
-  #     # Windows LLVM scripts (not in active matrix):
-  #     # - 'scripts/ohos-env-prepare-windows.sh'
-  #     # - 'scripts/ohos-build-llvm-windows.sh'
+  push:
+    paths:
+      - '.github/workflows/build-llvm.yml'
+      - 'scripts/setup-repo-tool.sh'
+      - 'scripts/platform_package.sh'
+      # Windows LLVM scripts (not in active matrix):
+      # - 'scripts/ohos-env-prepare-windows.sh'
+      # - 'scripts/ohos-build-llvm-windows.sh'
 
 env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
@@ -421,7 +420,8 @@ jobs:
           set -euo pipefail
           mkdir -p linux-final
           tar -xzf extract-linux/packages/clang-dev-linux-x86_64.tar.gz -C linux-final
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-essentials-${LLVM_ESSENTIALS_ID}"
+          # Local artifact server forbids reusing the same basename; keep JetBrains-style stem + unique run id.
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-essentials-${LLVM_ESSENTIALS_ID}-run${GITHUB_RUN_ID}"
           rm -rf "$STEM"
           mkdir -p "$STEM"
           cp -a linux-final/. "$STEM/"
@@ -435,7 +435,7 @@ jobs:
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-arm64-*' | head -1)"
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-essentials-${LLVM_ESSENTIALS_ID}"
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-essentials-${LLVM_ESSENTIALS_ID}-run${GITHUB_RUN_ID}"
           rm -rf "$STEM"
           mkdir -p "$STEM"
           cp -a "$TC" "$STEM/"
@@ -449,7 +449,7 @@ jobs:
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-x86_64-*' | head -1)"
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-essentials-${LLVM_ESSENTIALS_ID}"
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-essentials-${LLVM_ESSENTIALS_ID}-run${GITHUB_RUN_ID}"
           rm -rf "$STEM"
           mkdir -p "$STEM"
           cp -a "$TC" "$STEM/"
