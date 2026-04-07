@@ -59,16 +59,6 @@
             "store": true
           },
           {
-            "reference": "https://services.gradle.org/",
-            "store": true,
-            "allowedExtensions": [
-              ".zip",
-              ".sha256",
-              ".sha512",
-              ".asc"
-            ]
-          },
-          {
             "reference": "https://download.jetbrains.com/teamcity-repository/",
             "store": true
           },
@@ -94,6 +84,23 @@
               ".md5",
               ".asc",
               ".kotlin_module"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "gradle-distributions",
+        "visibility": "PUBLIC",
+        "redeployment": false,
+        "proxied": [
+          {
+            "reference": "https://services.gradle.org/",
+            "store": true,
+            "allowedExtensions": [
+              ".zip",
+              ".sha256",
+              ".sha512",
+              ".asc"
             ]
           }
         ]

@@ -7,7 +7,7 @@
 
 | 路径                          | 说明                               |
 | --------------------------- | -------------------------------- |
-| `configuration.shared.json` | 共享配置（代理源等），可提交                   |
+| `configuration.shared.json` | 共享配置（`releases` Maven 聚合 + `gradle-distributions` 独立仓） |
 | `start.sh`                  | 启动脚本，工作目录固定为 `workspace/`        |
 | `workspace/reposilite.jar`  | 从 Release 下载后放到这里（勿提交）           |
 | `workspace/reposilite.db`   | SQLite 库，自动生成或从旧实例拷贝             |
@@ -99,10 +99,17 @@ launchctl unload ~/Library/LaunchAgents/com.kmp.reposilite.plist # 卸载/停用
 wget http://localhost:8080/releases/org/apache/felix/maven-bundle-plugin/3.5.0/maven-bundle-plugin-3.5.0.pom
 # Kotlin bootstrap（proxied `reference` 必须以 `/` 结尾，否则拼接会变成 …/maven/org/jetbrains/… 而 404）
 wget -S -O /dev/null "http://localhost:8080/releases/org/jetbrains/kotlin/kotlin-stdlib-js/2.2.20-Beta2-71/kotlin-stdlib-js-2.2.20-Beta2-71.klib"
-# Gradle distribution（wrapper 可改为指向 `http://<host>:8080/releases/distributions/...`，当前 kn 侧未接）
-wget -S -O /dev/null "http://localhost:8080/releases/distributions/gradle-8.5-bin.zip"
-wget -S -O /dev/null "http://localhost:8080/releases/distributions/gradle-8.5-bin.zip.sha256"
+# Gradle distribution（独立仓库，避免与 Maven 代理链混在一起；wrapper 用 `http://<host>:8080/gradle-distributions/distributions/...`）
+wget -S -O /dev/null "http://localhost:8080/gradle-distributions/distributions/gradle-8.5-bin.zip"
+wget -S -O /dev/null "http://localhost:8080/gradle-distributions/distributions/gradle-8.5-bin.zip.sha256"
 ```
+
+### `releases` 与 `gradle-distributions`
+
+- **`releases`**：聚合 Maven 上游，供 `maven-proxy.init.gradle` 等使用（`/releases/...`）。
+- **`gradle-distributions`**：只代理 `https://services.gradle.org/`，给 Gradle Wrapper 的 `distributionUrl` 用（`/gradle-distributions/distributions/...`），与 Maven 解析链分开。
+
+启动成功后日志中应出现 `+ releases (public)` 与 `+ gradle-distributions (public)`。若只有默认的 `snapshots` / `private`，说明未读到 `configuration.shared.json`（例如旧版 `start.sh` 在 `cd workspace` 后把相对路径指错；当前 `start.sh` 已用绝对路径传 `--shared-configuration`）。
 
 ### Proxied 源 URL 必须以 `/` 结尾
 

@@ -2,7 +2,8 @@
 # Reposilite runs with working directory = workspace/
 # so reposilite.db, repositories/, logs/, etc. all live under workspace/
 set -e
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
 if [[ -z "${JAVA:-}" ]]; then
   JAVA=/usr/lib/jvm/java-21-openjdk/bin/java
@@ -10,7 +11,7 @@ if [[ -z "${JAVA:-}" ]]; then
     JAVA=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java
   fi
 fi
-WORKSPACE="$(pwd)/workspace"
+WORKSPACE="$SCRIPT_DIR/workspace"
 JAR="reposilite.jar"
 
 mkdir -p "$WORKSPACE/logs"
@@ -30,5 +31,5 @@ if [[ ! -f "$JAR" ]]; then
 fi
 
 exec "$JAVA" -jar "$JAR" \
-  --shared-configuration="$(dirname "$0")/configuration.shared.json" \
+  --shared-configuration="$SCRIPT_DIR/configuration.shared.json" \
   --working-directory="$WORKSPACE"
