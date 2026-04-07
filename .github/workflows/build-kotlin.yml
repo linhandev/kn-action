@@ -120,7 +120,7 @@ jobs:
             mkdir -p "$HOME/.ssh"
             chmod 700 "$HOME/.ssh"
             NS_SSH="/c/WINDOWS/ServiceProfiles/NetworkService/.ssh"
-            if [ -f "$NS_SSH/id_ed25519" ] && [ ! -f "$HOME/.ssh/id_ed25519" ]; then
+            if [ -f "$NS_SSH/id_ed25519" ]; then
               cp -f "$NS_SSH/id_ed25519" "$NS_SSH/id_ed25519.pub" "$HOME/.ssh/"
             fi
             chmod 600 "$HOME/.ssh/id_ed25519" 2>/dev/null || true

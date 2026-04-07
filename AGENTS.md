@@ -101,6 +101,22 @@ For **`hdc-ohos-verify`** / **Execute test artifacts**: install or link **`hdc`*
 
 **Build Kotlin** does **not** use **`GITCODE_TOKEN`** in the workflow file; runners need **SSH keys** on the host for **GitCode** as documented in **`build-kotlin.yml`** / design specs below.
 
+#### Windows `kotlin` runner — GitCode SSH (required)
+
+The **GitHub Actions Runner** Windows service usually runs as **`NT AUTHORITY\NETWORK SERVICE`**, not as the interactive user who RDPs or SSHs in. **Git** and **OpenSSH** read **`$HOME/.ssh`** during jobs; that **`HOME`** is not always the same directory as the interactive profile, so keys must be installed in the right place and mirrored at job start.
+
+**Prerequisites on each Windows `kotlin` host**
+
+| Item | Action |
+|------|--------|
+| **Canonical key directory** | **`C:\Windows\ServiceProfiles\NetworkService\.ssh\`** — this is the service account’s profile; keep the GitCode deploy key here as the source of truth. |
+| **Private key** | Copy **`id_ed25519`** (or your GitCode key) and **`id_ed25519.pub`** from a trusted machine, e.g. `scp ~/.ssh/id_ed25519 ~/.ssh/id_ed25519.pub win:C:/Windows/ServiceProfiles/NetworkService/.ssh/` (adjust `win` SSH host and paths as needed). |
+| **Private key ACL** | Restrict to the service account (OpenSSH on Windows enforces this). Example: `icacls "C:\Windows\ServiceProfiles\NetworkService\.ssh\id_ed25519" /inheritance:r /grant:r "NT AUTHORITY\NETWORK SERVICE:(R)" /grant:r "NT AUTHORITY\SYSTEM:(F)"` (run from a session that can modify that file). |
+| **`known_hosts`** | Must include **`gitcode.com`**. Example from the runner or dev host: `ssh-keyscan -t rsa,ecdsa,ed25519 gitcode.com >> "C:\Windows\ServiceProfiles\NetworkService\.ssh\known_hosts"`. |
+| **Interactive user (optional)** | Copy the same key material to **`C:\Users\<runner-admin>\.ssh\`** with **`chmod 600`** on the private key under Git Bash so `ssh win 'git ls-remote …'` style checks work as that user. |
+
+**Workflow behavior** — [`.github/workflows/build-kotlin.yml`](.github/workflows/build-kotlin.yml) **Setup environment** (Windows only) copies **`id_ed25519`**, **`id_ed25519.pub`**, and relevant **`known_hosts`** lines from **`NetworkService\.ssh`** into the job’s **`$HOME/.ssh`**, then ensures **`gitcode.com`** is present (via **`ssh-keyscan`** if needed). If that step fails with missing key or host key, fix the **Network Service** `.ssh` layout on the host first.
+
 ---
 
 ## Key workflows (overview)
