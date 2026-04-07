@@ -114,13 +114,24 @@ jobs:
           if [ "$RUNNER_OS" = "macOS" ]; then
             /usr/bin/xcrun -f bitcode-build-tool
           fi
-          # Windows service-account jobs use job $HOME/.ssh; pre-seed gitcode.com host key for Git SSH clone.
+          # Windows: runner service uses NETWORK SERVICE; Git/SSH resolve keys under job $HOME/.ssh, which can
+          # differ from C:\Windows\ServiceProfiles\NetworkService\.ssh where keys are installed on the host.
           if [ "$RUNNER_OS" = "Windows" ]; then
             mkdir -p "$HOME/.ssh"
             chmod 700 "$HOME/.ssh"
+            NS_SSH="/c/WINDOWS/ServiceProfiles/NetworkService/.ssh"
+            if [ -f "$NS_SSH/id_ed25519" ] && [ ! -f "$HOME/.ssh/id_ed25519" ]; then
+              cp -f "$NS_SSH/id_ed25519" "$NS_SSH/id_ed25519.pub" "$HOME/.ssh/"
+            fi
+            chmod 600 "$HOME/.ssh/id_ed25519" 2>/dev/null || true
+            chmod 644 "$HOME/.ssh/id_ed25519.pub" 2>/dev/null || true
+            if [ -f "$NS_SSH/known_hosts" ] && ! grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts" 2>/dev/null; then
+              cat "$NS_SSH/known_hosts" >> "$HOME/.ssh/known_hosts"
+            fi
             if ! grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts" 2>/dev/null; then
               ssh-keyscan -t rsa,ecdsa,ed25519 gitcode.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
             fi
+            test -f "$HOME/.ssh/id_ed25519"
             test -s "$HOME/.ssh/known_hosts"
             grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts"
             chmod 644 "$HOME/.ssh/known_hosts"
