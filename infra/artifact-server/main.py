@@ -2,8 +2,10 @@
 """
 Simple artifact server: upload tar/zip files, serve them for download.
 Stores files in a single directory; supports concurrent uploads.
+Writes a server-side MD5 digest file next to each artifact: {name}.md5 (hex + newline).
 """
 from datetime import datetime
+import hashlib
 from pathlib import Path
 import os
 import re
@@ -39,12 +41,17 @@ async def upload_artifact(file: UploadFile = File(...)):
             status_code=409,
             detail=f"Artifact already exists: {artifact_name}. Re-upload is not allowed.",
         )
+    md5_path = ARTIFACTS_DIR / f"{artifact_name}.md5"
     try:
-        # Stream write for concurrent uploads; each request writes to its own file
+        digest = hashlib.md5()
         with open(dest, "wb") as f:
             while chunk := await file.read(1024 * 1024):
+                digest.update(chunk)
                 f.write(chunk)
+        md5_path.write_text(digest.hexdigest() + "\n", encoding="ascii")
     except OSError as e:
+        dest.unlink(missing_ok=True)
+        md5_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=str(e))
     return JSONResponse({"ok": True, "name": artifact_name})
 
@@ -83,7 +90,7 @@ async def latest_artifact(pattern: str = Query(..., description="Regex to match 
         raise HTTPException(status_code=400, detail=f"Invalid regex: {e}")
     matches = []
     for p in ARTIFACTS_DIR.iterdir():
-        if p.is_file() and rx.search(p.name):
+        if p.is_file() and not p.name.endswith(".md5") and rx.search(p.name):
             matches.append((p.name, p.stat().st_mtime))
     if not matches:
         raise HTTPException(status_code=404, detail="No artifact matching pattern")

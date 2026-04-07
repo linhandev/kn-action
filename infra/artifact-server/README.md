@@ -4,10 +4,15 @@ Simple HTTP server to store and serve build artifacts (tar/zip) on your LAN, so 
 
 ## Endpoints
 
-- **POST /upload** — Upload a file. Body: multipart form with `file`. Stored under the uploaded filename.
+- **POST /upload** — Upload a file. Body: multipart form with `file`. Stored under the uploaded filename. After a successful upload, the server writes **`{name}.md5`** next to it (single line: 32-char hex MD5 digest). Re-upload of the same name is rejected unless the upload client skips via MD5 match (see below).
 - **GET /artifacts** — Directory listing (HTML with links) or JSON list when `Accept: application/json`.
-- **GET /artifacts/latest?pattern={regex}** — Redirect (302) to the latest (by mtime) artifact whose name matches the regex.
+- **GET /artifacts/latest?pattern={regex}** — Redirect (302) to the latest (by mtime) artifact whose name matches the regex (`.md5` sidecar files are ignored for matching).
 - **GET /artifacts/{name}** — Download artifact by name.
+- **GET /artifacts/{name}.md5** — Download the MD5 digest for an artifact (used by CI to skip upload when the server already has the same bytes).
+
+### Skipping upload when the file already exists
+
+The **`upload-artifact-local`** composite action fetches **`/artifacts/<basename>.md5`** before **POST /upload**. If the digest matches the local file, upload is skipped. If the artifact exists but the digest differs, the job fails with an MD5 mismatch error. Legacy trees without a `.md5` sidecar still return **409** on re-upload; generate sidecars once (e.g. `md5sum file | awk '{print $1}' > file.md5` in `artifacts/`) or remove the remote artifact and upload again.
 
 ## Setup (macOS)
 
