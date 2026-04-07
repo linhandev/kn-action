@@ -46,10 +46,15 @@ export MAVEN_PROXY_URL
 export KONAN_DATA_DIR="${KONAN_DATA_DIR:-$BUILD_OHOS_CACHE_ROOT/konan}"
 mkdir -p "$KONAN_DATA_DIR"
 
-# OH Kotlin versions resolve from build/repo (file) during the build; keep that repo out of the Reposilite mirror.
+# OH Kotlin versions resolve from build/repo (file) first; mirror external:* only (no ,!id — avoids bad mirror matching).
 BUILD_REPO_ABS="$(cd "$KOTLIN_ROOT" && pwd -P)/build/repo"
-FILE_BUILD_REPO_URL="file://${BUILD_REPO_ABS}"
+if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == CYGWIN* ]]; then
+  FILE_BUILD_REPO_URL="file:///$(cygpath -m "$BUILD_REPO_ABS")"
+else
+  FILE_BUILD_REPO_URL="file://${BUILD_REPO_ABS}"
+fi
 LOCAL_BUILD_REPO_ID="kn-action-local-build-repo"
+LAN_RELEASES_ID="kn-action-lan-releases"
 
 cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
 <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
@@ -59,7 +64,7 @@ cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
   <mirrors>
     <mirror>
       <id>maven-proxy</id>
-      <mirrorOf>external:*,!${LOCAL_BUILD_REPO_ID}</mirrorOf>
+      <mirrorOf>external:*</mirrorOf>
       <url>${MAVEN_PROXY_URL}</url>
     </mirror>
   </mirrors>
@@ -74,11 +79,23 @@ cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
           <releases><enabled>true</enabled></releases>
           <snapshots><enabled>true</enabled></snapshots>
         </repository>
+        <repository>
+          <id>${LAN_RELEASES_ID}</id>
+          <url>${MAVEN_PROXY_URL}</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </repository>
       </repositories>
       <pluginRepositories>
         <repository>
           <id>${LOCAL_BUILD_REPO_ID}</id>
           <url>${FILE_BUILD_REPO_URL}</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+        <repository>
+          <id>${LAN_RELEASES_ID}</id>
+          <url>${MAVEN_PROXY_URL}</url>
           <releases><enabled>true</enabled></releases>
           <snapshots><enabled>true</enabled></snapshots>
         </repository>

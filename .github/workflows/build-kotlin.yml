@@ -222,10 +222,12 @@ jobs:
           echo "Gradle: init script installed to $GRADLE_USER_HOME/init.d/"
 
           mkdir -p "$MAVEN_USER_HOME/.m2"
-          # mirrorOf * would send every remote to the proxy; external:* skips file:// — but Kotlin OH artifacts
-          # (2.2.21-OH-001, etc.) live only under build/repo while still matching JetBrains/Central coordinates,
-          # so resolution can incorrectly hit the proxy and cache failures. Add build/repo as an explicit file
-          # repository and exclude it from mirroring (same id in mirrorOf and <repository/>).
+          # OH Kotlin GAVs (2.2.21-OH-001, …) live under build/repo (file). Settings profiles inject *before*
+          # POM repos (sourceDominant), so file must be listed first. Use mirrorOf external:* only — combining
+          # external:* with ,!repoId can confuse some Maven versions and route file repos through the mirror;
+          # external:* already leaves file: repositories unmirrorable. Also copy settings to job $HOME/.m2 so
+          # nested mvn (e.g. kotlin-archetype-jvm IT) that does not inherit MAVEN_OPTS user.home still resolves
+          # kotlin-maven-plugin deps from build/repo before Central/JetBrains (mirrored to LAN).
           KOTLIN_WS="$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}"
           BUILD_REPO_ABS="$(cd "$KOTLIN_WS" && pwd -P)/build/repo"
           # Windows: Java/Maven do not treat MSYS paths (/c/...) as file: URLs; use cygpath -m → file:///C:/...
@@ -237,13 +239,19 @@ jobs:
             MAVEN_LOCAL_REPO_FOR_XML="$MAVEN_LOCAL_REPO"
           fi
           LOCAL_BUILD_REPO_ID="kn-action-local-build-repo"
+          LAN_RELEASES_ID="kn-action-lan-releases"
           cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
-          <settings>
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
             <localRepository>$MAVEN_LOCAL_REPO_FOR_XML</localRepository>
-            <mirrors><mirror>
-              <id>maven-proxy</id><mirrorOf>external:*,!${LOCAL_BUILD_REPO_ID}</mirrorOf>
-              <url>$MAVEN_PROXY_URL</url>
-            </mirror></mirrors>
+            <mirrors>
+              <mirror>
+                <id>maven-proxy</id>
+                <mirrorOf>external:*</mirrorOf>
+                <url>$MAVEN_PROXY_URL</url>
+              </mirror>
+            </mirrors>
             <profiles>
               <profile>
                 <id>kn-action-kotlin-build-repo</id>
@@ -255,6 +263,12 @@ jobs:
                     <releases><enabled>true</enabled></releases>
                     <snapshots><enabled>true</enabled></snapshots>
                   </repository>
+                  <repository>
+                    <id>${LAN_RELEASES_ID}</id>
+                    <url>$MAVEN_PROXY_URL</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
                 </repositories>
                 <pluginRepositories>
                   <repository>
@@ -263,12 +277,20 @@ jobs:
                     <releases><enabled>true</enabled></releases>
                     <snapshots><enabled>true</enabled></snapshots>
                   </repository>
+                  <repository>
+                    <id>${LAN_RELEASES_ID}</id>
+                    <url>$MAVEN_PROXY_URL</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
                 </pluginRepositories>
               </profile>
             </profiles>
           </settings>
           EOF
-          echo "Maven: MAVEN_USER_HOME=$MAVEN_USER_HOME localRepository=$MAVEN_LOCAL_REPO mirror=$MAVEN_PROXY_URL fileRepo=$FILE_BUILD_REPO_URL (excluded from mirror)"
+          mkdir -p "$HOME/.m2"
+          cp "$MAVEN_USER_HOME/.m2/settings.xml" "$HOME/.m2/settings.xml"
+          echo "Maven: MAVEN_USER_HOME=$MAVEN_USER_HOME localRepository=$MAVEN_LOCAL_REPO_FOR_XML mirror=$MAVEN_PROXY_URL fileRepo=$FILE_BUILD_REPO_URL (also copied to \$HOME/.m2 for nested mvn)"
 
           # Kotlin upstream enables cache-redirector (gradle.properties). Its gradle.beforeProject hook runs
           # after maven-proxy.init.gradle and rewrites repos back to cache-redirector.jetbrains.com, undoing the
