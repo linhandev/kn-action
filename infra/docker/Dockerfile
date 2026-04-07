@@ -9,7 +9,7 @@ RUN apt-get update \
     git build-essential swig python3-dev libedit-dev libncurses5-dev \
     binutils-dev gcc-multilib abigail-tools elfutils pkg-config \
     autoconf autoconf-archive libxml2 \
-    curl python3-requests git-lfs wget rsync ccache pigz \
+    curl python3 python3-pip python3-requests git-lfs wget rsync ccache pigz \
  && ln -sf "$(command -v python3)" /usr/bin/python \
  && rm -rf /var/lib/apt/lists/*
 

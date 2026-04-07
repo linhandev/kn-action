@@ -139,6 +139,18 @@ jobs:
           git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
+      # Older pinned Linux images may ship python3 without pip; setup-repo-tool requires `python3 -m pip`.
+      - name: Ensure python3-pip (Linux container)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          if command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then
+            exit 0
+          fi
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq python3-pip
+
       # Self-hosted Windows runners often execute as a service account (LOCALAPPDATA ≠ the interactive user
       # that installed Python). Probe typical install locations including a fixed path for win-llvm.
       - name: Prepend Python to PATH (Windows)
