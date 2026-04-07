@@ -114,6 +114,17 @@ jobs:
           if [ "$RUNNER_OS" = "macOS" ]; then
             /usr/bin/xcrun -f bitcode-build-tool
           fi
+          # Windows service-account jobs use job $HOME/.ssh; pre-seed gitcode.com host key for Git SSH clone.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            mkdir -p "$HOME/.ssh"
+            chmod 700 "$HOME/.ssh"
+            if ! grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts" 2>/dev/null; then
+              ssh-keyscan -t rsa,ecdsa,ed25519 gitcode.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+            fi
+            test -s "$HOME/.ssh/known_hosts"
+            grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts"
+            chmod 644 "$HOME/.ssh/known_hosts"
+          fi
           CLEAN_CACHE_ROOT="${RUNNER_TEMP}/clean-cache"
           PERSISTED_CACHE_ROOT="$(echo "${{ env.PERSISTED_CACHE_ROOT }}/" | sed "s|^~|$HOME|")"
           CLEAN_BUILD="${{ github.event_name == 'schedule' && 'true' || github.event.inputs.clean_build || env.DEFAULT_CLEAN_BUILD }}"
@@ -175,22 +186,6 @@ jobs:
           mkdir -p "$KONAN_DATA_DIR"
           rm -rf "$MAVEN_USER_HOME"
           mkdir -p "$MAVEN_USER_HOME/.m2"
-
-      # Self-hosted Windows jobs often run as NETWORK SERVICE; Git's ssh uses job $HOME/.ssh, not the
-      # interactive user's profile, so SSH cannot see pre-seeded known_hosts → host key verification fails.
-      - name: Windows SSH known_hosts for GitCode
-        if: runner.os == 'Windows'
-        shell: ${{ matrix.shell }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.ssh"
-          chmod 700 "$HOME/.ssh"
-          if ! grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts" 2>/dev/null; then
-            ssh-keyscan -t rsa,ecdsa,ed25519 gitcode.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
-          fi
-          test -s "$HOME/.ssh/known_hosts"
-          grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts"
-          chmod 644 "$HOME/.ssh/known_hosts"
 
       - name: Prepare Kotlin repo
         id: kotlin
