@@ -102,7 +102,8 @@ jobs:
           java-version: '17'
 
       - name: Set up Java 21
-        if: runner.os == 'Linux'
+        # Kotlin build-ohos Gradle step uses a Java 21 toolchain; Linux and Windows need it on PATH (Windows cannot auto-provision from Gradle).
+        if: runner.os == 'Linux' || runner.os == 'Windows'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
