@@ -567,8 +567,9 @@ jobs:
           ARCHIVE="$CACHE_BASE/${OHOS_SYSROOT}.tar.gz"
           if [ ! -f "$ARCHIVE" ]; then curl -fsSL -o "$ARCHIVE" "$OHOS_SYSROOT_URL"; fi
           if [ ! -d "$CACHE_BASE/${OHOS_SYSROOT}" ]; then tar -xzf "$ARCHIVE" -C "$CACHE_BASE"; fi
-          ln -sfn "$CACHE_BASE/${OHOS_SYSROOT}" "$W/sysroot"
-          test -d "$W/sysroot"
+          # OHOS clang resolves sysroot relative to the merged install (same level as clang-dev / clang_darwin-*).
+          ln -sfn "$CACHE_BASE/${OHOS_SYSROOT}" "$ROOT/sysroot"
+          test -d "$ROOT/sysroot"
           if [ "${{ matrix.platform }}" = "linux-x64" ]; then
             if [ ! -d "$ROOT/clang-dev" ] && [ ! -d "$ROOT/clang" ]; then
               echo "::error::Expected clang-dev/ or clang/ under $ROOT"; ls -la "$ROOT"
