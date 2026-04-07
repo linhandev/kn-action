@@ -38,10 +38,6 @@ jobs:
   build:
     name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
     environment: env
-    # Self-hosted runners omit runner.tool_cache; setup-python otherwise defaults to /Users/runner/...
-    # and tries to mkdir a path that does not exist. Point at the real _work/_tool next to this job's workspace.
-    env:
-      RUNNER_TOOL_CACHE: ${{ github.workspace }}/../../_tool
     outputs:
       llvm_sha_short: ${{ steps.archive.outputs.llvm_sha_short }}
       action_sha_short: ${{ steps.archive.outputs.action_sha_short }}
@@ -91,9 +87,6 @@ jobs:
             rm -rf "$LLVM_WORKSPACE"
           fi
           mkdir -p "$LLVM_WORKSPACE"
-          if [ "${RUNNER_OS:-}" != "Windows" ]; then
-            mkdir -p "${RUNNER_TOOL_CACHE:-$GITHUB_WORKSPACE/../../_tool}"
-          fi
 
           NEED_ENV_PREPARE="false"
           if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
@@ -122,7 +115,7 @@ jobs:
             return $ret
           }
           brew_install_quiet swig git-lfs java coreutils wget
-          brew_install_quiet pigz
+          brew_install_quiet pigz python
 
       - name: Setup git
         env:
@@ -146,33 +139,26 @@ jobs:
           git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
-      # macOS/Linux: setup-python uses RUNNER_TOOL_CACHE (set above). Windows: TLS to github.com for the
-      # python-versions download is flaky on some hosts — use a local install on PATH instead.
-      - name: Setup Python
-        if: runner.os != 'Windows'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Prepend user Python to PATH (Windows)
+      # Self-hosted Windows runners often execute as a service account (LOCALAPPDATA ≠ the interactive user
+      # that installed Python). Probe typical install locations including a fixed path for win-llvm.
+      - name: Prepend Python to PATH (Windows)
         if: runner.os == 'Windows'
         run: |
           set -euo pipefail
-          for v in 314 313 312 311 310; do
-            dir="${LOCALAPPDATA}/Programs/Python/Python${v}"
-            if [ -f "$dir/python.exe" ]; then
-              echo "$dir" >> "$GITHUB_PATH"
-              exit 0
+          try_dir() {
+            local d="$1"
+            if [ -f "$d/python.exe" ]; then
+              echo "$d" >> "$GITHUB_PATH"
+              return 0
             fi
-          done
+            return 1
+          }
           for v in 314 313 312 311 310; do
-            dir="${PROGRAMFILES}/Python${v}"
-            if [ -f "$dir/python.exe" ]; then
-              echo "$dir" >> "$GITHUB_PATH"
-              exit 0
-            fi
+            try_dir "${LOCALAPPDATA}/Programs/Python/Python${v}" && exit 0
+            try_dir "${PROGRAMFILES}/Python${v}" && exit 0
+            try_dir "/c/Users/lin/AppData/Local/Programs/Python/Python${v}" && exit 0
           done
-          echo "::warning::No stock Python install found; relying on existing PATH"
+          echo "::warning::No Python found under LOCALAPPDATA, Program Files, or Users/lin; relying on PATH"
 
       - name: Setup repo tool
         run: bash "$GITHUB_WORKSPACE/kn-action/scripts/setup-repo-tool.sh"
