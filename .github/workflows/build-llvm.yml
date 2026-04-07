@@ -115,7 +115,7 @@ jobs:
             return $ret
           }
           brew_install_quiet swig git-lfs java coreutils wget
-          brew_install_quiet pigz
+          brew_install_quiet pigz python
 
       - name: Setup git
         env:
@@ -139,11 +139,28 @@ jobs:
           git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
-      # One Python for repo (pip + requests) across macOS / Linux container / Windows; prepends to PATH.
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      # actions/setup-python targets GitHub-hosted tool cache (/Users/runner/...); self-hosted fails with
+      # permission errors and extra GitHub downloads. Use host Python: brew on macOS, image python3 on Linux,
+      # explicit PATH on Windows (service account often omits per-user Python).
+      - name: Prepend user Python to PATH (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          for v in 314 313 312 311 310; do
+            dir="${LOCALAPPDATA}/Programs/Python/Python${v}"
+            if [ -f "$dir/python.exe" ]; then
+              echo "$dir" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          for v in 314 313 312 311 310; do
+            dir="${PROGRAMFILES}/Python${v}"
+            if [ -f "$dir/python.exe" ]; then
+              echo "$dir" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::warning::No stock Python install found; relying on existing PATH"
 
       - name: Setup repo tool
         run: bash "$GITHUB_WORKSPACE/kn-action/scripts/setup-repo-tool.sh"
