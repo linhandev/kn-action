@@ -2,7 +2,7 @@
 # Linux (Docker) + macOS (ARM64/X64) on self-hosted runners. Windows matrix is disabled until upstream Windows host build is restored.
 # Linux: runs inside OpenHarmony build env Docker image (empty `container.image` skips Docker; see actions/runner#265).
 # Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
-# workflow_dispatch skip_build: skips the compile matrix; resolve-packages-from-disk picks latest llvm-packages-*_Linux_X64.tar under ~/runner/artifact (by mtime) and requires macOS sibling tars.
+# workflow_dispatch skip_build: skips the compile matrix; resolve-packages-from-disk uses download-artifact-local pattern= (latest match via artifact server) then parses SHAs from the Linux tar basename.
 # Requires: environment "env" with secret GITCODE_TOKEN (GitCode PAT with read access) for repo sync from gitcode.com.
 
 name: Build LLVM
@@ -248,63 +248,55 @@ jobs:
         with:
           path: ${{ steps.archive.outputs.path }}
 
-  # When workflow_dispatch skip_build: pick newest llvm-packages-*_Linux_X64.tar under ~/runner/artifact, parse SHAs, require macOS sibling tars.
+  # When workflow_dispatch skip_build: latest llvm-packages-*_Linux_X64.tar via artifact server (download-artifact-local pattern), parse SHAs, verify macOS tars resolve the same way.
   resolve-packages-from-disk:
     name: resolve llvm-packages (skip_build)
     if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     outputs:
-      llvm_sha_short: ${{ steps.resolve.outputs.llvm_sha_short }}
-      action_sha_short: ${{ steps.resolve.outputs.action_sha_short }}
+      llvm_sha_short: ${{ steps.parse.outputs.llvm_sha_short }}
+      action_sha_short: ${{ steps.parse.outputs.action_sha_short }}
     steps:
-      - id: resolve
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Download latest Linux X64 llvm-packages (regex → server latest)
+        id: dl_linux
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          pattern: 'llvm-packages-.*_Linux_X64\.tar$'
+          path: ${{ github.workspace }}/skip-build-resolve
+
+      - name: Parse SHAs and verify macOS sibling artifacts
+        id: parse
         run: |
           set -euo pipefail
-          AP="${{ env.ARTIFACT_LOCAL_PATH }}"
-          AP="${AP/#\~/$HOME}"
-          if [ ! -d "$AP" ]; then
-            echo "::error::Artifact dir missing: $AP"
-            exit 1
-          fi
-          mtime() {
-            if stat -f%m "$1" >/dev/null 2>&1; then stat -f%m "$1"
-            else stat -c %Y "$1"
-            fi
-          }
-          best=""
-          best_ts=-1
-          for f in "$AP"/*; do
-            [ -f "$f" ] || continue
-            base=$(basename "$f")
-            echo "$base" | grep -qE '^llvm-packages-.+_Linux_X64\.tar$' || continue
-            ts=$(mtime "$f")
-            if [ "$ts" -gt "$best_ts" ]; then
-              best_ts=$ts
-              best=$base
-            fi
-          done
-          if [ -z "$best" ]; then
-            echo "::error::No llvm-packages-*_Linux_X64.tar under $AP"
-            ls -la "$AP" | head -50 || true
-            exit 1
-          fi
-          if [[ "$best" =~ ^llvm-packages-([0-9a-fA-F]+)_act-([0-9a-fA-F]+)_Linux_X64\.tar$ ]]; then
+          path="${{ steps.dl_linux.outputs.path }}"
+          base=$(basename "$path")
+          if [[ "$base" =~ ^llvm-packages-([0-9a-fA-F]+)_act-([0-9a-fA-F]+)_Linux_X64\.tar$ ]]; then
             LLVM="${BASH_REMATCH[1]}"
             ACT="${BASH_REMATCH[2]}"
           else
-            echo "::error::Chosen file must be named llvm-packages-<llvm>_act-<sha>_Linux_X64.tar got: $best"
+            echo "::error::Expected llvm-packages-<llvm>_act-<sha>_Linux_X64.tar, got: $base"
             exit 1
           fi
-          for suf in macOS_ARM64 macOS_X64; do
-            exp="llvm-packages-${LLVM}_act-${ACT}_${suf}.tar"
-            if [ ! -f "$AP/$exp" ]; then
-              echo "::error::Missing sibling artifact for merge/tests: $exp (picked Linux tar: $best)"
-              exit 1
-            fi
-          done
-          echo "Picked llvm_sha_short=$LLVM action_sha_short=$ACT (linux tar: $best, mtime=$best_ts)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Resolved llvm_sha_short=$LLVM action_sha_short=$ACT (from $base)" >> "$GITHUB_STEP_SUMMARY"
           echo "llvm_sha_short=$LLVM" >> "$GITHUB_OUTPUT"
           echo "action_sha_short=$ACT" >> "$GITHUB_OUTPUT"
+
+      - name: Verify macOS ARM64 package exists (download-artifact-local by exact name)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ steps.parse.outputs.llvm_sha_short }}_act-${{ steps.parse.outputs.action_sha_short }}_macOS_ARM64.tar
+          path: ${{ github.workspace }}/skip-build-resolve
+
+      - name: Verify macOS X64 package exists (download-artifact-local by exact name)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: llvm-packages-${{ steps.parse.outputs.llvm_sha_short }}_act-${{ steps.parse.outputs.action_sha_short }}_macOS_X64.tar
+          path: ${{ github.workspace }}/skip-build-resolve
 
   # Normalizes outputs when either the build matrix or skip_build resolver produced SHAs.
   llvm-artifact-refs:
