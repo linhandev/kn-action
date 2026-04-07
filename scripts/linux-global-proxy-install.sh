@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Apply system-wide HTTP(S) proxy on Arch (or similar). Run as root:
+# System-wide env + systemd + Docker HTTP proxy (CLI, runners, daemons).
+# For a Windows-style "proxy on this Wi‑Fi" only, use scripts/linux-nm-wifi-proxy.sh instead.
+#
 #   sudo bash scripts/linux-global-proxy-install.sh
 # Override: PROXY_URL=http://host:port/ NO_PROXY_VALUE=... sudo -E bash ...
 set -euo pipefail
