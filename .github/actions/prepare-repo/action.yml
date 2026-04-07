@@ -40,7 +40,8 @@ runs:
   steps:
     - name: Prepare repo
       id: prepare
-      shell: bash
+      # Composite steps do not inherit the caller workflow shell; self-hosted Windows often has no `bash` on PATH.
+      shell: ${{ runner.os == 'Windows' && 'C:/PROGRA~1/Git/bin/bash.exe --noprofile --norc -e -o pipefail {0}' || 'bash' }}
       env:
         REPO_URL: ${{ inputs.repo_url }}
         BRANCH: ${{ inputs.branch }}
@@ -50,6 +51,6 @@ runs:
         LOCAL_REFERENCE_DIR: ${{ inputs.local_reference_dir }}
         MR_REF_TEMPLATE: ${{ inputs.mr_ref_template }}
       run: |
-        bash "$GITHUB_ACTION_PATH/prepare-repo.sh"
+        source "$GITHUB_ACTION_PATH/prepare-repo.sh"
         echo "sha=$(cd ${{ inputs.workspace_dir }} && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
         echo "workspace_dir=${{ inputs.workspace_dir }}" >> "$GITHUB_OUTPUT"

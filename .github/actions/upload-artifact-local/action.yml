@@ -26,10 +26,10 @@ runs:
   steps:
     - name: Upload artifact to local server and cache
       id: upload
-      shell: bash
+      shell: ${{ runner.os == 'Windows' && 'C:/PROGRA~1/Git/bin/bash.exe --noprofile --norc -e -o pipefail {0}' || 'bash' }}
       env:
         INPUT_PATH: ${{ inputs.path }}
         INPUT_SERVER_URL: ${{ inputs.server_url }}
         INPUT_CACHE_DIR: ${{ inputs.cache_dir }}
       run: |
-        bash "$GITHUB_ACTION_PATH/upload.sh"
+        source "$GITHUB_ACTION_PATH/upload.sh"

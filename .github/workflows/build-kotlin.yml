@@ -243,7 +243,7 @@ jobs:
           else
             GRADLE_DIST_BASE="${{ env.DEFAULT_GRADLE_DISTRIBUTIONS_URL }}"
           fi
-          bash "$GITHUB_WORKSPACE/kn-action/scripts/rewrite-gradle-wrapper-reposlite.sh" \
+          "$BASH" "$GITHUB_WORKSPACE/kn-action/scripts/rewrite-gradle-wrapper-reposlite.sh" \
             "$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}" \
             "$GRADLE_DIST_BASE"
           echo "Gradle wrapper → Reposilite \`$GRADLE_DIST_BASE\` (same host as Maven proxy)" >> "$GITHUB_STEP_SUMMARY"
@@ -260,7 +260,7 @@ jobs:
           GRADLE_OPTS: "-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000"
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
-          bash scripts/build-ohos.sh
+          "$BASH" scripts/build-ohos.sh
           ./gradlew --stop
 
       - name: Promote clean build cache to persisted Gradle home

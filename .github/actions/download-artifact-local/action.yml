@@ -31,7 +31,7 @@ runs:
   steps:
     - name: Download artifact from cache or server
       id: download
-      shell: bash
+      shell: ${{ runner.os == 'Windows' && 'C:/PROGRA~1/Git/bin/bash.exe --noprofile --norc -e -o pipefail {0}' || 'bash' }}
       env:
         INPUT_NAME: ${{ inputs.name }}
         INPUT_PATTERN: ${{ inputs.pattern }}
@@ -39,4 +39,4 @@ runs:
         INPUT_CACHE_DIR: ${{ inputs.cache_dir }}
         INPUT_PATH: ${{ inputs.path }}
       run: |
-        bash "$GITHUB_ACTION_PATH/download.sh"
+        source "$GITHUB_ACTION_PATH/download.sh"
