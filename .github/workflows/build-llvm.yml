@@ -250,7 +250,7 @@ jobs:
 
   # When workflow_dispatch skip_build: three independent latest outer tars (pattern each via download-artifact-local); they need not share llvm/act SHA.
   resolve-packages-skip-build:
-    name: resolve llvm-packages (skip_build, artifact server)
+    name: Get latest artifacts names
     if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     outputs:
@@ -298,10 +298,10 @@ jobs:
 
   # Outer llvm-packages tar basenames for cross-copy / tests (same triple from one build, or three independent latest when skip_build).
   llvm-artifact-refs:
-    name: LLVM package refs for downstream
+    name: Resolve artifact names
     needs: [build, resolve-packages-skip-build]
     if: ${{ always() && (needs.build.result == 'success' || needs['resolve-packages-skip-build'].result == 'success') }}
-    runs-on: [self-hosted, macOS, ARM64, llvm]
+    runs-on: ubuntu-latest
     env:
       # Only workflow_dispatch + skip_build uses pattern-resolved latest tars; never fall back when a real build failed.
       SKIP_BUILD_LATEST: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
@@ -397,7 +397,7 @@ jobs:
             echo "Merged $p -> $D"
           done
 
-      - name: Pack merged Darwin ARM64 toolchain
+      - name: Pack merged macOS ARM64 toolchain
         id: pack_arm64
         run: |
           set -euo pipefail
@@ -406,7 +406,7 @@ jobs:
           tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
           echo "archive=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Pack merged Darwin x86_64 toolchain
+      - name: Pack merged macOS x86_64 toolchain
         id: pack_x64
         run: |
           set -euo pipefail
@@ -604,9 +604,10 @@ jobs:
           path: ${{ github.workspace }}/ohos-test-work/${{ steps.test_pack.outputs.archive_name }}
 
   hdc-ohos-verify:
-    name: hdc OHOS verify (mac ARM)
+    name: Execute test artifacts
     needs: [ohos-test-build]
-    if: ${{ needs['ohos-test-build'].result == 'success' }}
+    # always(): skip_build skips `build`; implicit success() would skip this job even when ohos-test-build matrix succeeds.
+    if: ${{ always() && !cancelled() && needs['ohos-test-build'].result == 'success' }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     defaults:
       run:
@@ -617,31 +618,30 @@ jobs:
         with:
           path: kn-action
 
-      - name: Download test binaries
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          mkdir -p hdc-verify/dl
-          SCRIPT="$GITHUB_WORKSPACE/kn-action/.github/actions/download-artifact-local/download.sh"
-          export INPUT_SERVER_URL="${INPUT_SERVER_URL:-http://192.168.3.5:8765}"
-          export INPUT_CACHE_DIR="${INPUT_CACHE_DIR:-~/runner/artifact}"
-          RID="${{ github.run_id }}"
-          for suf in Linux_X64 macOS_ARM64 macOS_X64; do
-            export INPUT_NAME="test-binaries-ohos-${suf}-${RID}.tar.gz"
-            export INPUT_PATH="${{ github.workspace }}/hdc-verify/dl"
-            bash "$SCRIPT"
-          done
+      - name: Download test binaries (Linux X64)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: test-binaries-ohos-Linux_X64-${{ github.run_id }}.tar.gz
+          path: ${{ github.workspace }}/hdc-verify/dl
+
+      - name: Download test binaries (macOS ARM64)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: test-binaries-ohos-macOS_ARM64-${{ github.run_id }}.tar.gz
+          path: ${{ github.workspace }}/hdc-verify/dl
+
+      - name: Download test binaries (macOS X64)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: test-binaries-ohos-macOS_X64-${{ github.run_id }}.tar.gz
+          path: ${{ github.workspace }}/hdc-verify/dl
 
       - name: Pick hdc target and record API level
         run: |
           set -euo pipefail
-          HDC_BIN="${HDC:-}"
-          if [ -z "$HDC_BIN" ] && [ -x "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc" ]; then
-            HDC_BIN="/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc"
-          fi
-          HDC_BIN="${HDC_BIN:-$(command -v hdc || true)}"
+          HDC_BIN="$(command -v hdc || true)"
           if [ -z "$HDC_BIN" ] || [ ! -x "$HDC_BIN" ]; then
-            echo "::error::hdc not found; set HDC or install DevEco toolchains"
+            echo "::error::hdc not found in PATH (see AGENTS.md — macOS llvm runner local env: hdc on PATH)"
             exit 1
           fi
           echo "HDC_BIN=$HDC_BIN" >> "$GITHUB_ENV"
