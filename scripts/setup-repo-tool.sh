@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install Google's repo launcher under $REPO_DIR (default: $GITHUB_WORKSPACE/bin).
-# Upstream repo-py3 uses `#!/usr/bin/env python`; Windows Git Bash often has no `python`
-# on PATH — we keep the script as repo.py and write a small `repo` wrapper.
+# A tiny bash wrapper runs repo.py with a Python we verified here — avoids relying on
+# repo.py's shebang under Git Bash and avoids Windows "python3" app-installer stubs
+# (command -v succeeds but the binary is useless).
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}/bin}"
@@ -23,30 +24,36 @@ if [ ! -f "$REPO_SCRIPT" ]; then
   }
 fi
 
-PY_CMD=""
-for c in python3 python py; do
-  if command -v "$c" >/dev/null 2>&1; then PY_CMD="$c"; break; fi
-done
-if [ -z "$PY_CMD" ]; then
-  echo "::error::python3, python, or py (Windows) not found"
+# Prefer `python` before `python3`: on Windows, python3 is often a Store stub that
+# still appears on PATH. Require a working --version (exit 0).
+PY_EXEC=""
+if command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+  PY_EXEC="python"
+elif command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+  PY_EXEC="python3"
+elif command -v py >/dev/null 2>&1 && py -3 --version >/dev/null 2>&1; then
+  PY_EXEC="py -3"
+fi
+if [ -z "$PY_EXEC" ]; then
+  echo "::error::no usable Python 3 (tried python, python3, py -3 with --version)"
   exit 1
 fi
 
-if [ "$PY_CMD" = "py" ]; then
-  py -3 -m pip install requests || py -3 -m pip install --user requests
-else
-  "$PY_CMD" -m pip install requests || "$PY_CMD" -m pip install --user requests
-fi
+case "$PY_EXEC" in
+  "py -3")
+    py -3 -m pip install requests || py -3 -m pip install --user requests
+    ;;
+  *)
+    "$PY_EXEC" -m pip install requests || "$PY_EXEC" -m pip install --user requests
+    ;;
+esac
 
-printf '%s\n' \
-  '#!/usr/bin/env bash' \
-  'set -euo pipefail' \
-  '_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
-  'if command -v python3 >/dev/null 2>&1; then exec python3 "$_dir/repo.py" "$@"; fi' \
-  'if command -v python >/dev/null 2>&1; then exec python "$_dir/repo.py" "$@"; fi' \
-  'if command -v py >/dev/null 2>&1; then exec py -3 "$_dir/repo.py" "$@"; fi' \
-  'echo "::error::no python for repo"; exit 1' \
-  > "$REPO_WRAPPER"
+cat > "$REPO_WRAPPER" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+exec $PY_EXEC "\$_dir/repo.py" "\$@"
+EOF
 
 chmod a+x "$REPO_WRAPPER" "$REPO_SCRIPT"
 
