@@ -97,8 +97,9 @@ def main() -> int:
     while True:
         data = gh(run_id, repo)
         if not data:
-            print(f"Run {run_id} not found.", file=sys.stderr)
-            return 1
+            print(f"Run {run_id}: transient gh failure, retrying…", file=sys.stderr)
+            time.sleep(POLL_INTERVAL)
+            continue
         jobs = data.get("jobs") or []
         now = datetime.now(TZ).strftime("%H:%M:%S")
 
