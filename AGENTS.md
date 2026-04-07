@@ -90,6 +90,7 @@ Checklist for self-hosted **`llvm`** runners so [`.github/workflows/build-llvm.y
 | **Service account vs interactive user** | The Actions listener often runs as **Network Service**; **`LOCALAPPDATA`** may **not** point at the user who installed Python — the **`Users/*`** scan above is the fallback. |
 | **Symlinks / Developer Mode** | **`repo`** and **git** expect to create symlinks under **`.repo`**. Turn on **Settings → System → For developers → Developer Mode**. Confirm **`AllowDevelopmentWithoutDevLicense`** = **`1`** under **`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock`**, or verify **`New-Item -ItemType SymbolicLink`** works without elevation. Without this, **`repo init` / `repo sync`** fails with symlink errors. |
 | **Stale `.repo` after policy changes** | If symlink mode or `repo` layout changed, remove **`…/llvm/.repo`** once on the runner or run **`workflow_dispatch`** with **`clean_build`**. |
+| **LLVM prebuilts (first / clean run)** | **`toolchain/.../env_prepare.sh`** only supports **Linux/Darwin** **`uname`**. On Windows the workflow runs [**`scripts/ohos-env-prepare-windows.sh`**](scripts/ohos-env-prepare-windows.sh) and [**`scripts/ohos-build-llvm-windows.sh`**](scripts/ohos-build-llvm-windows.sh) (MingW Python / **`build.py`**) instead of **`build.sh`**’s hardcoded Linux paths. |
 
 ### Kotlin `kotlin` runners (short pointer)
 

@@ -23,6 +23,8 @@ on:
       - '.github/workflows/build-llvm.yml'
       - 'scripts/setup-repo-tool.sh'
       - 'scripts/platform_package.sh'
+      - 'scripts/ohos-env-prepare-windows.sh'
+      - 'scripts/ohos-build-llvm-windows.sh'
 
 env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
@@ -211,11 +213,17 @@ jobs:
           fi
           git config --global --unset credential.helper 2>/dev/null || true
 
-      - name: Prepare build environment
-        if: steps.vars.outputs.need_env_prepare == 'true'
+      - name: Prepare build environment (Linux / macOS)
+        if: steps.vars.outputs.need_env_prepare == 'true' && runner.os != 'Windows'
         run: |
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
+
+      - name: Prepare build environment (Windows / Git Bash)
+        if: steps.vars.outputs.need_env_prepare == 'true' && runner.os == 'Windows'
+        run: |
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
+          bash -x "$GITHUB_WORKSPACE/kn-action/scripts/ohos-env-prepare-windows.sh"
 
       - name: Build LLVM
         run: |
@@ -227,7 +235,11 @@ jobs:
             # echo "Disk/memory before build:" && df -h && free -m || true
           fi
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
-          bash toolchain/llvm-project/llvm-build/build.sh
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            bash "$GITHUB_WORKSPACE/kn-action/scripts/ohos-build-llvm-windows.sh"
+          else
+            bash toolchain/llvm-project/llvm-build/build.sh
+          fi
 
       - name: Archive llvm/packages
         id: archive
