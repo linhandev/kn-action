@@ -25,7 +25,6 @@ on:
       - 'scripts/platform_package.sh'
       - 'scripts/ohos-env-prepare-windows.sh'
       - 'scripts/ohos-build-llvm-windows.sh'
-      - 'scripts/patches/ohos-llvm-build-py-windows-host.patch'
 
 env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
@@ -94,6 +93,11 @@ jobs:
 
           NEED_ENV_PREPARE="false"
           if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
+            NEED_ENV_PREPARE="true"
+          fi
+          # Windows: ohos-env-prepare-windows.sh caches tarballs under download_packages/; deleting that folder
+          # must re-run prepare even when prebuilts/cmake already exists (need_env_prepare would stay false otherwise).
+          if [ "$RUNNER_OS" = "Windows" ] && [ "$NEED_ENV_PREPARE" != "true" ] && [ ! -d "$LLVM_WORKSPACE/download_packages" ]; then
             NEED_ENV_PREPARE="true"
           fi
 
