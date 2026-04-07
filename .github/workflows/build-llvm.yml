@@ -55,7 +55,7 @@ jobs:
             shell: bash
           - runner: [self-hosted, Windows, X64, llvm]
             container_image: ''
-            shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -e -o pipefail {0}'
+            shell: bash.exe
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ matrix.container_image }}
