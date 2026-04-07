@@ -2,7 +2,7 @@
 # Linux (Docker) + macOS (ARM64/X64) on self-hosted runners. Windows matrix is disabled until upstream Windows host build is restored.
 # Linux: runs inside OpenHarmony build env Docker image (empty `container.image` skips Docker; see actions/runner#265).
 # Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
-# workflow_dispatch skip_build: skips the compile matrix; resolve-packages-from-disk uses download-artifact-local pattern= (latest match via artifact server) then parses SHAs from the Linux tar basename.
+# workflow_dispatch skip_build: three independent download-artifact-local pattern= calls (latest per OS via server); outer tars need not share the same llvm/act SHA.
 # Requires: environment "env" with secret GITCODE_TOKEN (GitCode PAT with read access) for repo sync from gitcode.com.
 
 name: Build LLVM
@@ -17,7 +17,7 @@ on:
         default: false
         type: boolean
       skip_build:
-        description: 'Skip the compile matrix; cross-copy/tests use latest matching llvm-packages tarballs on disk'
+        description: 'Skip the compile matrix; cross-copy uses latest-per-OS llvm-packages outer tars from the artifact server (need not be the same build)'
         default: false
         type: boolean
       run_name:
@@ -248,75 +248,78 @@ jobs:
         with:
           path: ${{ steps.archive.outputs.path }}
 
-  # When workflow_dispatch skip_build: latest llvm-packages-*_Linux_X64.tar via artifact server (download-artifact-local pattern), parse SHAs, verify macOS tars resolve the same way.
+  # When workflow_dispatch skip_build: three independent latest outer tars (pattern each); they need not share llvm/act SHA.
   resolve-packages-from-disk:
     name: resolve llvm-packages (skip_build)
     if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     outputs:
-      llvm_sha_short: ${{ steps.parse.outputs.llvm_sha_short }}
-      action_sha_short: ${{ steps.parse.outputs.action_sha_short }}
+      outer_linux_name: ${{ steps.collect.outputs.outer_linux_name }}
+      outer_mac_arm_name: ${{ steps.collect.outputs.outer_mac_arm_name }}
+      outer_mac_x64_name: ${{ steps.collect.outputs.outer_mac_x64_name }}
     steps:
       - name: Checkout kn-action
         uses: actions/checkout@v6
         with:
           path: kn-action
 
-      - name: Download latest Linux X64 llvm-packages (regex → server latest)
+      - name: Latest Linux X64 outer tar (pattern)
         id: dl_linux
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
           pattern: 'llvm-packages-.*_Linux_X64\.tar$'
           path: ${{ github.workspace }}/skip-build-resolve
 
-      - name: Parse SHAs and verify macOS sibling artifacts
-        id: parse
+      - name: Latest macOS ARM64 outer tar (pattern)
+        id: dl_mac_arm
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          pattern: 'llvm-packages-.*_macOS_ARM64\.tar$'
+          path: ${{ github.workspace }}/skip-build-resolve
+
+      - name: Latest macOS X64 outer tar (pattern)
+        id: dl_mac_x64
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          pattern: 'llvm-packages-.*_macOS_X64\.tar$'
+          path: ${{ github.workspace }}/skip-build-resolve
+
+      - name: Collect outer tar basenames
+        id: collect
         run: |
           set -euo pipefail
-          path="${{ steps.dl_linux.outputs.path }}"
-          base=$(basename "$path")
-          if [[ "$base" =~ ^llvm-packages-([0-9a-fA-F]+)_act-([0-9a-fA-F]+)_Linux_X64\.tar$ ]]; then
-            LLVM="${BASH_REMATCH[1]}"
-            ACT="${BASH_REMATCH[2]}"
-          else
-            echo "::error::Expected llvm-packages-<llvm>_act-<sha>_Linux_X64.tar, got: $base"
-            exit 1
-          fi
-          echo "Resolved llvm_sha_short=$LLVM action_sha_short=$ACT (from $base)" >> "$GITHUB_STEP_SUMMARY"
-          echo "llvm_sha_short=$LLVM" >> "$GITHUB_OUTPUT"
-          echo "action_sha_short=$ACT" >> "$GITHUB_OUTPUT"
+          echo "outer_linux_name=$(basename "${{ steps.dl_linux.outputs.path }}")" >> "$GITHUB_OUTPUT"
+          echo "outer_mac_arm_name=$(basename "${{ steps.dl_mac_arm.outputs.path }}")" >> "$GITHUB_OUTPUT"
+          echo "outer_mac_x64_name=$(basename "${{ steps.dl_mac_x64.outputs.path }}")" >> "$GITHUB_OUTPUT"
+          echo "### skip_build outer tars" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Linux: \`$(basename "${{ steps.dl_linux.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- macOS ARM64: \`$(basename "${{ steps.dl_mac_arm.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- macOS X64: \`$(basename "${{ steps.dl_mac_x64.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify macOS ARM64 package exists (download-artifact-local by exact name)
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: llvm-packages-${{ steps.parse.outputs.llvm_sha_short }}_act-${{ steps.parse.outputs.action_sha_short }}_macOS_ARM64.tar
-          path: ${{ github.workspace }}/skip-build-resolve
-
-      - name: Verify macOS X64 package exists (download-artifact-local by exact name)
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: llvm-packages-${{ steps.parse.outputs.llvm_sha_short }}_act-${{ steps.parse.outputs.action_sha_short }}_macOS_X64.tar
-          path: ${{ github.workspace }}/skip-build-resolve
-
-  # Normalizes outputs when either the build matrix or skip_build resolver produced SHAs.
+  # Outer llvm-packages tar basenames for cross-copy / tests (same triple from one build, or three independent latest when skip_build).
   llvm-artifact-refs:
     name: LLVM package refs for downstream
     needs: [build, resolve-packages-from-disk]
     if: ${{ always() && (needs.build.result == 'success' || needs['resolve-packages-from-disk'].result == 'success') }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     outputs:
-      llvm_sha_short: ${{ steps.pick.outputs.llvm_sha_short }}
-      action_sha_short: ${{ steps.pick.outputs.action_sha_short }}
+      outer_linux_name: ${{ steps.pick.outputs.outer_linux_name }}
+      outer_mac_arm_name: ${{ steps.pick.outputs.outer_mac_arm_name }}
+      outer_mac_x64_name: ${{ steps.pick.outputs.outer_mac_x64_name }}
     steps:
       - id: pick
         run: |
           set -euo pipefail
           if [ "${{ needs.build.result }}" = "success" ]; then
-            echo "llvm_sha_short=${{ needs.build.outputs.llvm_sha_short }}" >> "$GITHUB_OUTPUT"
-            echo "action_sha_short=${{ needs.build.outputs.action_sha_short }}" >> "$GITHUB_OUTPUT"
+            L="${{ needs.build.outputs.llvm_sha_short }}"
+            A="${{ needs.build.outputs.action_sha_short }}"
+            echo "outer_linux_name=llvm-packages-${L}_act-${A}_Linux_X64.tar" >> "$GITHUB_OUTPUT"
+            echo "outer_mac_arm_name=llvm-packages-${L}_act-${A}_macOS_ARM64.tar" >> "$GITHUB_OUTPUT"
+            echo "outer_mac_x64_name=llvm-packages-${L}_act-${A}_macOS_X64.tar" >> "$GITHUB_OUTPUT"
           else
-            echo "llvm_sha_short=${{ needs['resolve-packages-from-disk'].outputs.llvm_sha_short }}" >> "$GITHUB_OUTPUT"
-            echo "action_sha_short=${{ needs['resolve-packages-from-disk'].outputs.action_sha_short }}" >> "$GITHUB_OUTPUT"
+            echo "outer_linux_name=${{ needs['resolve-packages-from-disk'].outputs.outer_linux_name }}" >> "$GITHUB_OUTPUT"
+            echo "outer_mac_arm_name=${{ needs['resolve-packages-from-disk'].outputs.outer_mac_arm_name }}" >> "$GITHUB_OUTPUT"
+            echo "outer_mac_x64_name=${{ needs['resolve-packages-from-disk'].outputs.outer_mac_x64_name }}" >> "$GITHUB_OUTPUT"
           fi
 
   cross-copy:
@@ -343,19 +346,19 @@ jobs:
       - name: Download llvm-packages (Linux X64)
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-packages-${{ needs['llvm-artifact-refs'].outputs.llvm_sha_short }}_act-${{ needs['llvm-artifact-refs'].outputs.action_sha_short }}_Linux_X64.tar
+          name: ${{ needs['llvm-artifact-refs'].outputs.outer_linux_name }}
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
       - name: Download llvm-packages (macOS ARM64)
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-packages-${{ needs['llvm-artifact-refs'].outputs.llvm_sha_short }}_act-${{ needs['llvm-artifact-refs'].outputs.action_sha_short }}_macOS_ARM64.tar
+          name: ${{ needs['llvm-artifact-refs'].outputs.outer_mac_arm_name }}
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
       - name: Download llvm-packages (macOS X64)
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-packages-${{ needs['llvm-artifact-refs'].outputs.llvm_sha_short }}_act-${{ needs['llvm-artifact-refs'].outputs.action_sha_short }}_macOS_X64.tar
+          name: ${{ needs['llvm-artifact-refs'].outputs.outer_mac_x64_name }}
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
       - name: Extract outer tars and merge packages (scripts/platform_package.sh)
@@ -366,11 +369,13 @@ jobs:
         run: |
           set -euo pipefail
           DL="$(pwd)/downloads"
-          P="llvm-packages-${{ needs['llvm-artifact-refs'].outputs.llvm_sha_short }}_act-${{ needs['llvm-artifact-refs'].outputs.action_sha_short }}"
+          LNX="${{ needs['llvm-artifact-refs'].outputs.outer_linux_name }}"
+          ARM="${{ needs['llvm-artifact-refs'].outputs.outer_mac_arm_name }}"
+          X64="${{ needs['llvm-artifact-refs'].outputs.outer_mac_x64_name }}"
           mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 staging
-          tar -xf "$DL/${P}_Linux_X64.tar" -C extract-linux
-          tar -xf "$DL/${P}_macOS_ARM64.tar" -C extract-mac-arm64
-          tar -xf "$DL/${P}_macOS_X64.tar" -C extract-mac-x64
+          tar -xf "$DL/$LNX" -C extract-linux
+          tar -xf "$DL/$ARM" -C extract-mac-arm64
+          tar -xf "$DL/$X64" -C extract-mac-x64
           cp -f extract-linux/packages/*.tar.gz staging/
           cp -f extract-mac-arm64/packages/clang-dev-darwin-arm64.tar.gz staging/
           cp -f extract-mac-x64/packages/clang-dev-darwin-x86_64.tar.gz staging/
@@ -464,12 +469,12 @@ jobs:
           rm -rf "${{ github.workspace }}/ohos-test-work"
           mkdir -p "${{ github.workspace }}/ohos-test-work"
 
-      - name: Download llvm-packages (host tar, same naming as build matrix)
+      - name: Download llvm-packages (host tar; Linux uses outer_linux_name from llvm-artifact-refs)
         if: matrix.toolchain_kind == 'host-llvm-tar'
         id: dl_linux_pkg
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: llvm-packages-${{ needs['llvm-artifact-refs'].outputs.llvm_sha_short }}_act-${{ needs['llvm-artifact-refs'].outputs.action_sha_short }}_${{ matrix.host_suffix }}.tar
+          name: ${{ needs['llvm-artifact-refs'].outputs.outer_linux_name }}
           path: ${{ github.workspace }}/ohos-test-work/dl
 
       - name: Download merged Darwin toolchain
