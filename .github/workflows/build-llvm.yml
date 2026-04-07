@@ -291,7 +291,7 @@ jobs:
           echo "outer_linux_name=$(basename "${{ steps.dl_linux.outputs.path }}")" >> "$GITHUB_OUTPUT"
           echo "outer_mac_arm_name=$(basename "${{ steps.dl_mac_arm.outputs.path }}")" >> "$GITHUB_OUTPUT"
           echo "outer_mac_x64_name=$(basename "${{ steps.dl_mac_x64.outputs.path }}")" >> "$GITHUB_OUTPUT"
-          echo "### skip_build outer tars" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Using latest artifacts (not built from this workflow run)" >> "$GITHUB_STEP_SUMMARY"
           echo "- Linux: \`$(basename "${{ steps.dl_linux.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- macOS ARM64: \`$(basename "${{ steps.dl_mac_arm.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- macOS X64: \`$(basename "${{ steps.dl_mac_x64.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
@@ -397,35 +397,51 @@ jobs:
             echo "Merged $p -> $D"
           done
 
-      - name: Pack merged macOS ARM64 toolchain
+      # Linux: one tarball for ohos-test-build (inner clang-dev only; outer .tar already extracted above).
+      - name: Pack llvm-final Linux X64 OHOS toolchain
+        id: pack_linux_final
+        run: |
+          set -euo pipefail
+          mkdir -p linux-final
+          tar -xzf extract-linux/packages/clang-dev-linux-x86_64.tar.gz -C linux-final
+          NAME="llvm-final-ohos-Linux_X64-${{ github.run_id }}.tar.gz"
+          tar -czf "$NAME" -C linux-final .
+          echo "archive=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Pack llvm-final macOS ARM64 OHOS toolchain
         id: pack_arm64
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-arm64-*' | head -1)"
-          NAME="llvm-merged-ohos-macOS_ARM64-${{ github.run_id }}.tar.gz"
+          NAME="llvm-final-ohos-macOS_ARM64-${{ github.run_id }}.tar.gz"
           tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
           echo "archive=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Pack merged macOS x86_64 toolchain
+      - name: Pack llvm-final macOS X64 OHOS toolchain
         id: pack_x64
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-x86_64-*' | head -1)"
-          NAME="llvm-merged-ohos-macOS_X64-${{ github.run_id }}.tar.gz"
+          NAME="llvm-final-ohos-macOS_X64-${{ github.run_id }}.tar.gz"
           tar -cf - -C "$(dirname "$TC")" "$(basename "$TC")" | pigz -9 > "$NAME"
           echo "archive=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Upload merged macOS ARM64 OHOS toolchain
+      - name: Upload llvm-final Linux X64 OHOS toolchain
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_linux_final.outputs.archive }}
+
+      - name: Upload llvm-final macOS ARM64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_arm64.outputs.archive }}
 
-      - name: Upload merged macOS X64 OHOS toolchain
+      - name: Upload llvm-final macOS X64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
           path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_x64.outputs.archive }}
 
-  # Build OHOS aarch64 test programs on each self-hosted runner using the same run's artifacts.
+  # Build OHOS aarch64 test programs on each self-hosted runner (host jobs; ~/runner/artifact + cache like the LLVM build matrix).
   ohos-test-build:
     name: ${{ format('ohos-test-build ({0})', matrix.platform) }}
     needs: [llvm-artifact-refs, cross-copy]
@@ -436,28 +452,18 @@ jobs:
         include:
           - platform: linux-x64
             runner: [self-hosted, linux, X64, llvm]
-            container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:bc3de27
             host_suffix: Linux_X64
-            toolchain_kind: host-llvm-tar
             shell: bash
           # Windows host tar tests disabled while Windows LLVM build matrix is off.
           - platform: macos-arm64
             runner: [self-hosted, macOS, ARM64, llvm]
-            container_image: ''
             host_suffix: macOS_ARM64
-            toolchain_kind: merged-darwin
             shell: bash
           - platform: macos-x64
             runner: [self-hosted, macOS, X64, llvm]
-            container_image: ''
             host_suffix: macOS_X64
-            toolchain_kind: merged-darwin
             shell: bash
     runs-on: ${{ matrix.runner }}
-    container:
-      image: ${{ matrix.container_image }}
-      volumes:
-        - ${{ github.workspace }}/../../../artifact:/home/runner/runner/artifact
     defaults:
       run:
         working-directory: ${{ github.workspace }}/ohos-test-work
@@ -475,53 +481,18 @@ jobs:
           rm -rf "${{ github.workspace }}/ohos-test-work"
           mkdir -p "${{ github.workspace }}/ohos-test-work"
 
-      - name: Download llvm-packages (host tar; Linux uses outer_linux_name from llvm-artifact-refs)
-        if: matrix.toolchain_kind == 'host-llvm-tar'
-        id: dl_linux_pkg
+      - name: Download llvm-final OHOS toolchain
+        id: dl_final
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: ${{ needs['llvm-artifact-refs'].outputs.outer_linux_name }}
+          name: llvm-final-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
           path: ${{ github.workspace }}/ohos-test-work/dl
 
-      - name: Download merged Darwin toolchain
-        if: matrix.toolchain_kind == 'merged-darwin'
-        id: dl_merged
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: llvm-merged-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
-          path: ${{ github.workspace }}/ohos-test-work/dl
-
-      # Linux host tar: fixed OH package name clang-dev-linux-x86_64.tar.gz inside outer/packages.
-      - name: Layout toolchain and sysroot (Linux host tar)
-        if: matrix.toolchain_kind == 'host-llvm-tar'
-        run: |
-          set -euo pipefail
-          mkdir -p outer
-          tar -xf "${{ steps.dl_linux_pkg.outputs.path }}" -C outer
-          tar -xzf outer/packages/clang-dev-linux-x86_64.tar.gz -C .
-          CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-~/runner/cache}"
-          CACHE_BASE="${CACHE_BASE/#\~/$HOME}"
-          mkdir -p "$CACHE_BASE"
-          ARCHIVE="$CACHE_BASE/${OHOS_SYSROOT}.tar.gz"
-          if [ ! -f "$ARCHIVE" ]; then curl -fsSL -o "$ARCHIVE" "$OHOS_SYSROOT_URL"; fi
-          if [ ! -d "$CACHE_BASE/${OHOS_SYSROOT}" ]; then tar -xzf "$ARCHIVE" -C "$CACHE_BASE"; fi
-          ln -sfn "$CACHE_BASE/${OHOS_SYSROOT}" "$(pwd)/sysroot"
-          test -d sysroot
-          if [ ! -d clang-dev ] && [ ! -d clang ]; then
-            echo "::error::Expected clang-dev/ or clang/ next to sysroot"; ls -la
-            exit 1
-          fi
-          if [ ! -d clang-dev/bin ] && [ ! -d clang/bin ]; then
-            echo "::error::Expected clang-dev/bin or clang/bin"; find . -maxdepth 5 | head -80
-            exit 1
-          fi
-
-      - name: Layout merged toolchain + sysroot (Darwin host)
-        if: matrix.toolchain_kind == 'merged-darwin'
+      - name: Layout llvm-final toolchain + sysroot
         run: |
           set -euo pipefail
           W="${{ github.workspace }}/ohos-test-work"
-          tar -xzf "${{ steps.dl_merged.outputs.path }}" -C "$W"
+          tar -xzf "${{ steps.dl_final.outputs.path }}" -C "$W"
           CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-~/runner/cache}"
           CACHE_BASE="${CACHE_BASE/#\~/$HOME}"
           mkdir -p "$CACHE_BASE"
@@ -529,8 +500,22 @@ jobs:
           if [ ! -f "$ARCHIVE" ]; then curl -fsSL -o "$ARCHIVE" "$OHOS_SYSROOT_URL"; fi
           if [ ! -d "$CACHE_BASE/${OHOS_SYSROOT}" ]; then tar -xzf "$ARCHIVE" -C "$CACHE_BASE"; fi
           ln -sfn "$CACHE_BASE/${OHOS_SYSROOT}" "$W/sysroot"
-          test -d "$(find "$W" -maxdepth 1 -type d -name 'clang_darwin-*' | head -1)"
           test -d "$W/sysroot"
+          if [ "${{ matrix.platform }}" = "linux-x64" ]; then
+            if [ ! -d "$W/clang-dev" ] && [ ! -d "$W/clang" ]; then
+              echo "::error::Expected clang-dev/ or clang/ under $W"; ls -la "$W"
+              exit 1
+            fi
+            if [ ! -d "$W/clang-dev/bin" ] && [ ! -d "$W/clang/bin" ]; then
+              echo "::error::Expected clang-dev/bin or clang/bin"; find "$W" -maxdepth 5 | head -80
+              exit 1
+            fi
+          else
+            test -d "$(find "$W" -maxdepth 1 -type d -name 'clang_darwin-*' | head -1)" || {
+              echo "::error::Expected clang_darwin-* under $W"; ls -la "$W" || true
+              exit 1
+            }
+          fi
 
       - name: Write OHOS test sources
         run: |
@@ -551,13 +536,13 @@ jobs:
           }
           EOF
 
-      # Merged Darwin trees live under clang_darwin-*/bin; Linux host tar unpacks to clang-dev/bin (same OHOS driver names from upstream).
+      # llvm-final: Linux unpacks to clang-dev/bin (or clang/bin); Darwin to clang_darwin-*/bin.
       - name: Cross-compile OHOS aarch64 (C and C++)
         run: |
           set -euo pipefail
           W="$(pwd)"
           BIN=""
-          if [ "${{ matrix.toolchain_kind }}" = "host-llvm-tar" ]; then
+          if [ "${{ matrix.platform }}" = "linux-x64" ]; then
             for d in "$W/clang-dev/bin" "$W/clang/bin"; do
               if [ -d "$d" ]; then BIN="$d"; break; fi
             done
@@ -568,7 +553,7 @@ jobs:
               *) echo "::error::unexpected platform ${{ matrix.platform }}"; exit 1 ;;
             esac
             TC="$(find "$W" -maxdepth 1 -type d -name "$PAT" | head -1)"
-            [ -n "$TC" ] && [ -d "$TC/bin" ] || { echo "::error::No merged Darwin toolchain ($PAT) under $W"; ls -la "$W" || true; exit 1; }
+            [ -n "$TC" ] && [ -d "$TC/bin" ] || { echo "::error::No llvm-final Darwin toolchain ($PAT) under $W"; ls -la "$W" || true; exit 1; }
             BIN="$TC/bin"
           fi
           [ -n "$BIN" ] || { echo "::error::No toolchain bin under $W"; exit 1; }
@@ -604,11 +589,23 @@ jobs:
           path: ${{ github.workspace }}/ohos-test-work/${{ steps.test_pack.outputs.archive_name }}
 
   hdc-ohos-verify:
-    name: Execute test artifacts
+    name: Execute test artifacts (${{ matrix.host_suffix }})
     needs: [ohos-test-build]
     # always(): skip_build skips `build`; implicit success() would skip this job even when ohos-test-build matrix succeeds.
     if: ${{ always() && !cancelled() && needs['ohos-test-build'].result == 'success' }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
+    strategy:
+      fail-fast: false
+      # One leg at a time: same runner + hdc session; avoids concurrent file send / shell to one device.
+      max-parallel: 1
+      matrix:
+        include:
+          - host_suffix: Linux_X64
+            run_subdir: linux
+          - host_suffix: macOS_ARM64
+            run_subdir: arm64
+          - host_suffix: macOS_X64
+            run_subdir: x64
     defaults:
       run:
         shell: bash
@@ -618,22 +615,10 @@ jobs:
         with:
           path: kn-action
 
-      - name: Download test binaries (Linux X64)
+      - name: Download test binaries
         uses: ./kn-action/.github/actions/download-artifact-local
         with:
-          name: test-binaries-ohos-Linux_X64-${{ github.run_id }}.tar.gz
-          path: ${{ github.workspace }}/hdc-verify/dl
-
-      - name: Download test binaries (macOS ARM64)
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: test-binaries-ohos-macOS_ARM64-${{ github.run_id }}.tar.gz
-          path: ${{ github.workspace }}/hdc-verify/dl
-
-      - name: Download test binaries (macOS X64)
-        uses: ./kn-action/.github/actions/download-artifact-local
-        with:
-          name: test-binaries-ohos-macOS_X64-${{ github.run_id }}.tar.gz
+          name: test-binaries-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
           path: ${{ github.workspace }}/hdc-verify/dl
 
       - name: Pick hdc target and record API level
@@ -655,13 +640,13 @@ jobs:
             "$HDC_BIN" list targets || true
             exit 1
           fi
-          idx=$((RANDOM % n))
+          idx=0
           TARGET="${T[$idx]}"
           # First column if hdc prints "SN\tName\tStatus"
           TARGET="${TARGET%%$'\t'*}"
           TARGET="$(echo "$TARGET" | tr -d '\r')"
           echo "HDC_TARGET=$TARGET" >> "$GITHUB_ENV"
-          echo "### hdc" >> "$GITHUB_STEP_SUMMARY"
+          echo "### hdc (${{ matrix.host_suffix }})" >> "$GITHUB_STEP_SUMMARY"
           echo "- Selected target (${n} available): \`$TARGET\`" >> "$GITHUB_STEP_SUMMARY"
           API=""
           for _try in \
@@ -680,32 +665,25 @@ jobs:
       - name: Extract and run OHOS ELFs
         run: |
           set -euo pipefail
+          SUF="${{ matrix.host_suffix }}"
           ROOT="${{ github.workspace }}/hdc-verify"
           DL="$ROOT/dl"
           RID="${{ github.run_id }}"
-          mkdir -p "$ROOT/run/linux" "$ROOT/run/arm64" "$ROOT/run/x64"
-          tar -xzf "$DL/test-binaries-ohos-Linux_X64-${RID}.tar.gz" -C "$ROOT/run/linux"
-          tar -xzf "$DL/test-binaries-ohos-macOS_ARM64-${RID}.tar.gz" -C "$ROOT/run/arm64"
-          tar -xzf "$DL/test-binaries-ohos-macOS_X64-${RID}.tar.gz" -C "$ROOT/run/x64"
+          mkdir -p "$ROOT/run/${{ matrix.run_subdir }}"
+          tar -xzf "$DL/test-binaries-ohos-${SUF}-${RID}.tar.gz" -C "$ROOT/run/${{ matrix.run_subdir }}"
           REMOTE_BASE=/data/local/tmp/llvm-ci-${{ github.run_id }}
           HDC_T() { "$HDC_BIN" -t "$HDC_TARGET" "$@"; }
           HDC_T shell mkdir -p "$REMOTE_BASE"
-          run_one() {
-            local dir="$1" suf="$2"
-            for kind in c cpp; do
-              if [ "$kind" = c ]; then b=hello_ohos_c; exp="ok_ohos_c_${suf}"; else b=hello_ohos_cpp; exp="ok_ohos_cpp_${suf}"; fi
-              RPATH="$REMOTE_BASE/${suf}_${kind}"
-              HDC_T file send "$dir/$b" "$RPATH"
-              HDC_T shell chmod 755 "$RPATH"
-              OUT=$(HDC_T shell "$RPATH" 2>&1) || true
-              echo "output ($suf $kind): $OUT"
-              echo "$OUT" | grep -q "$exp" || { echo "::error::Expected '$exp' in output"; exit 1; }
-            done
-          }
-          run_one "$ROOT/run/linux" Linux_X64
-          run_one "$ROOT/run/arm64" macOS_ARM64
-          run_one "$ROOT/run/x64" macOS_X64
-          echo "All hdc OHOS smoke checks passed." >> "$GITHUB_STEP_SUMMARY"
+          for kind in c cpp; do
+            if [ "$kind" = c ]; then b=hello_ohos_c; exp="ok_ohos_c_${SUF}"; else b=hello_ohos_cpp; exp="ok_ohos_cpp_${SUF}"; fi
+            RPATH="$REMOTE_BASE/${SUF}_${kind}"
+            HDC_T file send "$ROOT/run/${{ matrix.run_subdir }}/$b" "$RPATH"
+            HDC_T shell chmod 755 "$RPATH"
+            OUT=$(HDC_T shell "$RPATH" 2>&1) || true
+            echo "output ($SUF $kind): $OUT"
+            echo "$OUT" | grep -q "$exp" || { echo "::error::Expected '$exp' in output"; exit 1; }
+          done
+          echo "OHOS smoke checks passed for ${SUF}." >> "$GITHUB_STEP_SUMMARY"
 
   actions-timeline:
     # Runs after hdc sink; if: always() so the timeline still renders when hdc is skipped.
