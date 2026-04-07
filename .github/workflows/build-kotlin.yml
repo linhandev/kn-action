@@ -228,11 +228,18 @@ jobs:
           # repository and exclude it from mirroring (same id in mirrorOf and <repository/>).
           KOTLIN_WS="$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}"
           BUILD_REPO_ABS="$(cd "$KOTLIN_WS" && pwd -P)/build/repo"
-          FILE_BUILD_REPO_URL="file://${BUILD_REPO_ABS}"
+          # Windows: Java/Maven do not treat MSYS paths (/c/...) as file: URLs; use cygpath -m → file:///C:/...
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            FILE_BUILD_REPO_URL="file:///$(cygpath -m "$BUILD_REPO_ABS")"
+            MAVEN_LOCAL_REPO_FOR_XML="$(cygpath -m "$MAVEN_LOCAL_REPO")"
+          else
+            FILE_BUILD_REPO_URL="file://${BUILD_REPO_ABS}"
+            MAVEN_LOCAL_REPO_FOR_XML="$MAVEN_LOCAL_REPO"
+          fi
           LOCAL_BUILD_REPO_ID="kn-action-local-build-repo"
           cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
           <settings>
-            <localRepository>$MAVEN_LOCAL_REPO</localRepository>
+            <localRepository>$MAVEN_LOCAL_REPO_FOR_XML</localRepository>
             <mirrors><mirror>
               <id>maven-proxy</id><mirrorOf>external:*,!${LOCAL_BUILD_REPO_ID}</mirrorOf>
               <url>$MAVEN_PROXY_URL</url>
@@ -292,7 +299,7 @@ jobs:
           # When set, kotlin scripts/build-ohos.sh uses -s with Aliyun (mirrorOf *), ignoring MAVEN_USER_HOME settings.
           USE_CN_MIRROR: ${{ steps.vars.outputs.maven_proxy_url != '' && 'false' || 'true' }}
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
-          DEVELOPER_DIR: ${{ env.DEVELOPER_DIR }}
+          DEVELOPER_DIR: ${{ runner.os == 'macOS' && env.DEVELOPER_DIR || '' }}
           JDK_18: ${{ steps.java8.outputs.path }}
           MAVEN_OPTS: -Duser.home=${{ steps.vars.outputs.maven_user_home }}
           GRADLE_OPTS: "-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000"
