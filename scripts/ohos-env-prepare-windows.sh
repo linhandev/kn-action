@@ -71,8 +71,11 @@ if [ -z "${CLANG_FOUND_VERSION}" ]; then
 fi
 
 VER_PY="${code_dir}/toolchain/llvm-project/llvm-build/prebuilts_clang_version.py"
-echo "prebuilts_clang_version='${CLANG_FOUND_VERSION}'" | diff -q - "${VER_PY}" || {
-  echo "Clang versions mismatch"
+# Git on Windows may checkout prebuilts_clang_version.py with CRLF; pipe+diff sees a false mismatch vs LF-only echo.
+want="prebuilts_clang_version='${CLANG_FOUND_VERSION}'"
+got=$(tr -d '\r\n' < "${VER_PY}")
+if [ "${got}" != "${want}" ]; then
+  echo "Clang versions mismatch (expected '${want}', got '${got}')" >&2
   exit 1
-}
+fi
 exit 0
