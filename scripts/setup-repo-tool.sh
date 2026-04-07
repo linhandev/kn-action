@@ -24,9 +24,9 @@ if [ ! -f "$REPO_SCRIPT" ]; then
   }
 fi
 
-# Pick a Python 3 that can run pip (repo.py needs `requests`). Prefer `python` before
-# `python3`: on Windows, python3 in PATH is often a Store stub. On Linux images, /usr/bin/python
-# may exist without pip while python3 has pip — skip interpreters that fail `python -m pip`.
+# Pick Python 3 with pip (repo.py needs `requests`). In CI, actions/setup-python runs first and
+# prepends a real interpreter; this probe still helps local runs and odd images (e.g. python
+# without pip, or Windows Store python3 stubs ahead of a good install).
 pick_py() {
   local c="$1"
   if command -v "$c" >/dev/null 2>&1 && "$c" --version >/dev/null 2>&1 && "$c" -m pip --version >/dev/null 2>&1; then

@@ -115,7 +115,7 @@ jobs:
             return $ret
           }
           brew_install_quiet swig git-lfs java coreutils wget
-          brew_install_quiet pigz python
+          brew_install_quiet pigz
 
       - name: Setup git
         env:
@@ -139,26 +139,11 @@ jobs:
           git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
-      # Windows runner services often omit the per-user Python install from PATH (ssh shows python; CI did not).
-      - name: Prepend user Python to PATH (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          set -euo pipefail
-          for v in 314 313 312 311 310; do
-            dir="${LOCALAPPDATA}/Programs/Python/Python${v}"
-            if [ -f "$dir/python.exe" ]; then
-              echo "$dir" >> "$GITHUB_PATH"
-              exit 0
-            fi
-          done
-          for v in 314 313 312 311 310; do
-            dir="${PROGRAMFILES}/Python${v}"
-            if [ -f "$dir/python.exe" ]; then
-              echo "$dir" >> "$GITHUB_PATH"
-              exit 0
-            fi
-          done
-          echo "::warning::No stock Python install found; relying on existing PATH"
+      # One Python for repo (pip + requests) across macOS / Linux container / Windows; prepends to PATH.
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Setup repo tool
         run: bash "$GITHUB_WORKSPACE/kn-action/scripts/setup-repo-tool.sh"
