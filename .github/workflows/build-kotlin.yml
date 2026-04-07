@@ -237,17 +237,46 @@ jobs:
           echo "Gradle: init script installed to $GRADLE_USER_HOME/init.d/"
 
           mkdir -p "$MAVEN_USER_HOME/.m2"
-          # mirrorOf * would send file:// (and other local) repos to the proxy; external:* leaves them untouched.
+          # mirrorOf * would send every remote to the proxy; external:* skips file:// — but Kotlin OH artifacts
+          # (2.2.21-OH-001, etc.) live only under build/repo while still matching JetBrains/Central coordinates,
+          # so resolution can incorrectly hit the proxy and cache failures. Add build/repo as an explicit file
+          # repository and exclude it from mirroring (same id in mirrorOf and <repository/>).
+          KOTLIN_WS="$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}"
+          BUILD_REPO_ABS="$(cd "$KOTLIN_WS" && pwd -P)/build/repo"
+          FILE_BUILD_REPO_URL="file://${BUILD_REPO_ABS}"
+          LOCAL_BUILD_REPO_ID="kn-action-local-build-repo"
           cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
           <settings>
             <localRepository>$MAVEN_LOCAL_REPO</localRepository>
             <mirrors><mirror>
-              <id>maven-proxy</id><mirrorOf>external:*</mirrorOf>
+              <id>maven-proxy</id><mirrorOf>external:*,!${LOCAL_BUILD_REPO_ID}</mirrorOf>
               <url>$MAVEN_PROXY_URL</url>
             </mirror></mirrors>
+            <profiles>
+              <profile>
+                <id>kn-action-kotlin-build-repo</id>
+                <activation><activeByDefault>true</activeByDefault></activation>
+                <repositories>
+                  <repository>
+                    <id>${LOCAL_BUILD_REPO_ID}</id>
+                    <url>${FILE_BUILD_REPO_URL}</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
+                </repositories>
+                <pluginRepositories>
+                  <repository>
+                    <id>${LOCAL_BUILD_REPO_ID}</id>
+                    <url>${FILE_BUILD_REPO_URL}</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
+                </pluginRepositories>
+              </profile>
+            </profiles>
           </settings>
           EOF
-          echo "Maven: MAVEN_USER_HOME=$MAVEN_USER_HOME localRepository=$MAVEN_LOCAL_REPO mirror=$MAVEN_PROXY_URL"
+          echo "Maven: MAVEN_USER_HOME=$MAVEN_USER_HOME localRepository=$MAVEN_LOCAL_REPO mirror=$MAVEN_PROXY_URL fileRepo=$FILE_BUILD_REPO_URL (excluded from mirror)"
 
           # Kotlin upstream enables cache-redirector (gradle.properties). Its gradle.beforeProject hook runs
           # after maven-proxy.init.gradle and rewrites repos back to cache-redirector.jetbrains.com, undoing the

@@ -46,6 +46,11 @@ export MAVEN_PROXY_URL
 export KONAN_DATA_DIR="${KONAN_DATA_DIR:-$BUILD_OHOS_CACHE_ROOT/konan}"
 mkdir -p "$KONAN_DATA_DIR"
 
+# OH Kotlin versions resolve from build/repo (file) during the build; keep that repo out of the Reposilite mirror.
+BUILD_REPO_ABS="$(cd "$KOTLIN_ROOT" && pwd -P)/build/repo"
+FILE_BUILD_REPO_URL="file://${BUILD_REPO_ABS}"
+LOCAL_BUILD_REPO_ID="kn-action-local-build-repo"
+
 cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
 <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -54,10 +59,32 @@ cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
   <mirrors>
     <mirror>
       <id>maven-proxy</id>
-      <mirrorOf>external:*</mirrorOf>
+      <mirrorOf>external:*,!${LOCAL_BUILD_REPO_ID}</mirrorOf>
       <url>${MAVEN_PROXY_URL}</url>
     </mirror>
   </mirrors>
+  <profiles>
+    <profile>
+      <id>kn-action-kotlin-build-repo</id>
+      <activation><activeByDefault>true</activeByDefault></activation>
+      <repositories>
+        <repository>
+          <id>${LOCAL_BUILD_REPO_ID}</id>
+          <url>${FILE_BUILD_REPO_URL}</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <repository>
+          <id>${LOCAL_BUILD_REPO_ID}</id>
+          <url>${FILE_BUILD_REPO_URL}</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
 </settings>
 EOF
 
