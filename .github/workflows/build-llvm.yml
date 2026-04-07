@@ -36,6 +36,7 @@ on:
     paths:
       - '.github/workflows/build-llvm.yml'
       - 'scripts/setup-repo-tool.sh'
+      - 'scripts/setup-llvm-ccache.sh'
       - 'scripts/platform_package.sh'
       # Windows LLVM scripts (not in active matrix):
       # - 'scripts/ohos-env-prepare-windows.sh'
@@ -137,8 +138,8 @@ jobs:
           CI: 1
         run: |
           set -euo pipefail
-          echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python)…"
-          brew install swig git-lfs java coreutils wget pigz python
+          echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python, ccache)…"
+          brew install swig git-lfs java coreutils wget pigz python ccache
 
       - name: Re-checkout kn-action after clean workspace wipe
         if: steps.vars.outputs.clean_build == 'true'
@@ -215,16 +216,22 @@ jobs:
           bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
 
       - name: Build LLVM
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          RUNNER_ARCH: ${{ runner.arch }}
         run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            export CCACHE_DIR="${{ github.workspace }}/.ccache"
-            export CCACHE_MAXSIZE=10G
-            # # Cap parallelism to reduce OOM kills in Docker (silent failure with no step logs).
-            # export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
-            # echo "Disk/memory before build:" && df -h && free -m || true
-          fi
+          set -euo pipefail
+          # Incremental ninja/cmake objects live under LLVM_WORKSPACE (persists on self-hosted unless clean_build).
+          # ccache speeds recompiles after repo sync / header churn; Linux keeps CCACHE_DIR under GITHUB_WORKSPACE (Docker mount).
+          source "$GITHUB_WORKSPACE/kn-action/scripts/setup-llvm-ccache.sh"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           bash toolchain/llvm-project/llvm-build/build.sh
+          if command -v ccache >/dev/null 2>&1; then
+            {
+              echo "### ccache (${RUNNER_OS}-${RUNNER_ARCH})"
+              ccache -s || true
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Archive llvm/packages
         id: archive
