@@ -199,7 +199,12 @@ jobs:
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo sync -c -v -j 16
           if [ "$RUNNER_OS" = "Windows" ]; then
-            repo forall -c "bash -lc 'git lfs pull'"
+            # repo forall -c is executed via cmd.exe on Windows; nested bash/git quoting breaks. Pull LFS per nested .git under the workspace (skip .repo metadata).
+            while IFS= read -r -d '' g; do
+              d="${g%/.git}"
+              [ -n "$d" ] || d="."
+              (cd "$d" && git lfs pull) || true
+            done < <(find . \( -path './.repo' -o -path './.repo/*' \) -prune -o -name .git -print0 2>/dev/null)
           else
             repo forall -c 'git lfs pull'
           fi
