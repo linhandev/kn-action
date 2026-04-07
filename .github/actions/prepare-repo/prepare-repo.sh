@@ -77,11 +77,6 @@ git merge --abort 2>/dev/null || true
 git rebase --abort 2>/dev/null || true
 git cherry-pick --abort 2>/dev/null || true
 
-# Reused workspaces often accumulate gitignored untracked trees (.idea/, local tooling). Plain
-# `git clean -df` skips ignored files, so `git checkout` / `checkout -B` can fail with
-# "untracked working tree files would be overwritten by checkout" (seen on Windows kotlin runners).
-git clean -ffdx
-
 if [[ -n "$COMMIT" ]]; then
   git fetch origin "$COMMIT"
   git checkout "$COMMIT"
@@ -93,7 +88,7 @@ elif [[ -n "$PR_NUMBER" && -n "$BRANCH" ]]; then
   git checkout -B _ci_branch "origin/$BRANCH"
   # checkout -B can leave local edits when HEAD already matches the remote; merge then conflicts.
   git reset --hard "origin/$BRANCH"
-  git clean -dfx
+  git clean -ffdx
   git fetch origin "+${MR_REF}:pr_${PR_NUMBER}"
   git config user.email "ci@localhost"
   git config user.name "CI"
@@ -103,11 +98,11 @@ else
   git fetch origin "$BRANCH"
   git checkout -B _ci_branch "origin/$BRANCH"
   git reset --hard "origin/$BRANCH"
-  git clean -dfx
+  git clean -ffdx
 fi
 
 # Force working tree to match HEAD (runner does not clean workspace between runs)
-git clean -dfx
+git clean -ffdx
 git reset --hard HEAD
 
 # Output for workflow
