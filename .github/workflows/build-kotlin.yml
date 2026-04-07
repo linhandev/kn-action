@@ -120,8 +120,14 @@ jobs:
             mkdir -p "$HOME/.ssh"
             chmod 700 "$HOME/.ssh"
             NS_SSH="/c/WINDOWS/ServiceProfiles/NetworkService/.ssh"
+            # When the job HOME is already the Network Service profile, $HOME/.ssh is the same dir as NS_SSH;
+            # cp errors ("are the same file") and bash -e aborts — only copy if canonical paths differ.
             if [ -f "$NS_SSH/id_ed25519" ]; then
-              cp -f "$NS_SSH/id_ed25519" "$NS_SSH/id_ed25519.pub" "$HOME/.ssh/"
+              _job_ssh="$(cd "$HOME/.ssh" && pwd -P)"
+              _ns_ssh="$(cd "$NS_SSH" && pwd -P)"
+              if [ "$_job_ssh" != "$_ns_ssh" ]; then
+                cp -f "$NS_SSH/id_ed25519" "$NS_SSH/id_ed25519.pub" "$HOME/.ssh/"
+              fi
             fi
             chmod 600 "$HOME/.ssh/id_ed25519" 2>/dev/null || true
             chmod 644 "$HOME/.ssh/id_ed25519.pub" 2>/dev/null || true
