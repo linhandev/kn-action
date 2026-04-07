@@ -90,7 +90,11 @@ jobs:
           CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
 
           if [ "$CLEAN_BUILD" = "true" ]; then
-            rm -rf "$LLVM_WORKSPACE"
+            # Wipe the entire Actions work dir for this repo (e.g. .../_work/kn-action), not just llvm/.
+            WORK_ROOT="$(dirname "$GITHUB_WORKSPACE")"
+            cd /
+            rm -rf "$WORK_ROOT"
+            mkdir -p "$GITHUB_WORKSPACE"
           fi
           mkdir -p "$LLVM_WORKSPACE"
 
@@ -116,6 +120,12 @@ jobs:
           set -euo pipefail
           echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python)…"
           brew install swig git-lfs java coreutils wget pigz python
+
+      - name: Re-checkout kn-action after clean workspace wipe
+        if: steps.vars.outputs.clean_build == 'true'
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
 
       - name: Setup git
         env:
