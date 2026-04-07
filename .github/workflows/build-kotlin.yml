@@ -114,37 +114,12 @@ jobs:
           if [ "$RUNNER_OS" = "macOS" ]; then
             /usr/bin/xcrun -f bitcode-build-tool
           fi
-          # Windows: runner service uses NETWORK SERVICE; Git/SSH resolve keys under job $HOME/.ssh, which can
-          # differ from C:\Windows\ServiceProfiles\NetworkService\.ssh where keys are installed on the host.
+          # Windows: Git for Windows OpenSSH needs explicit paths; host prep is AGENTS.md § Windows kotlin GitCode SSH.
           if [ "$RUNNER_OS" = "Windows" ]; then
-            mkdir -p "$HOME/.ssh"
-            chmod 700 "$HOME/.ssh"
-            NS_SSH="/c/WINDOWS/ServiceProfiles/NetworkService/.ssh"
-            # When the job HOME is already the Network Service profile, $HOME/.ssh is the same dir as NS_SSH;
-            # cp errors ("are the same file") and bash -e aborts — only copy if canonical paths differ.
-            if [ -f "$NS_SSH/id_ed25519" ]; then
-              _job_ssh="$(cd "$HOME/.ssh" && pwd -P)"
-              _ns_ssh="$(cd "$NS_SSH" && pwd -P)"
-              if [ "$_job_ssh" != "$_ns_ssh" ]; then
-                cp -f "$NS_SSH/id_ed25519" "$NS_SSH/id_ed25519.pub" "$HOME/.ssh/"
-              fi
-            fi
-            chmod 600 "$HOME/.ssh/id_ed25519" 2>/dev/null || true
-            chmod 644 "$HOME/.ssh/id_ed25519.pub" 2>/dev/null || true
-            if [ -f "$NS_SSH/known_hosts" ] && ! grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts" 2>/dev/null; then
-              cat "$NS_SSH/known_hosts" >> "$HOME/.ssh/known_hosts"
-            fi
-            if ! grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts" 2>/dev/null; then
-              ssh-keyscan -t rsa,ecdsa,ed25519 gitcode.com >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
-            fi
-            test -f "$HOME/.ssh/id_ed25519"
-            test -s "$HOME/.ssh/known_hosts"
-            grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts"
-            chmod 644 "$HOME/.ssh/known_hosts"
-            # Pin identity + known_hosts for Git's OpenSSH (avoids wrong agent keys and MSYS HOME quirks).
-            _id_mix="$(cygpath -m "$HOME/.ssh/id_ed25519" 2>/dev/null || echo "$HOME/.ssh/id_ed25519")"
-            _kh_mix="$(cygpath -m "$HOME/.ssh/known_hosts" 2>/dev/null || echo "$HOME/.ssh/known_hosts")"
-            echo "GIT_SSH_COMMAND=ssh -i ${_id_mix} -o IdentitiesOnly=yes -o UserKnownHostsFile=${_kh_mix} -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
+            test -f "$HOME/.ssh/id_ed25519" && test -f "$HOME/.ssh/known_hosts"
+            idf="$(cygpath -m "$HOME/.ssh/id_ed25519" 2>/dev/null || echo "$HOME/.ssh/id_ed25519")"
+            khf="$(cygpath -m "$HOME/.ssh/known_hosts" 2>/dev/null || echo "$HOME/.ssh/known_hosts")"
+            echo "GIT_SSH_COMMAND=ssh -i ${idf} -o IdentitiesOnly=yes -o UserKnownHostsFile=${khf} -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
           fi
           CLEAN_CACHE_ROOT="${RUNNER_TEMP}/clean-cache"
           PERSISTED_CACHE_ROOT="$(echo "${{ env.PERSISTED_CACHE_ROOT }}/" | sed "s|^~|$HOME|")"

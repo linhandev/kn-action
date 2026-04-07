@@ -97,25 +97,21 @@ For **`hdc-ohos-verify`** / **Execute test artifacts**: install or link **`hdc`*
 | **Stale `.repo` after policy changes** | If symlink mode or `repo` layout changed, remove **`…/llvm/.repo`** once on the runner or run **`workflow_dispatch`** with **`clean_build`**. |
 | **LLVM prebuilts (first / clean run)** | **`toolchain/.../env_prepare.sh`** only supports **Linux/Darwin** **`uname`**. On Windows the workflow runs [**`scripts/ohos-env-prepare-windows.sh`**](scripts/ohos-env-prepare-windows.sh) and [**`scripts/ohos-build-llvm-windows.sh`**](scripts/ohos-build-llvm-windows.sh) (MingW Python / **`build.py`**) instead of **`build.sh`**’s hardcoded Linux paths. |
 
-### Kotlin `kotlin` runners (short pointer)
+### Kotlin `kotlin` runners
 
-**Build Kotlin** does **not** use **`GITCODE_TOKEN`** in the workflow file; runners need **SSH keys** on the host for **GitCode** as documented in **`build-kotlin.yml`** / design specs below.
+**Build Kotlin** does **not** use **`GITCODE_TOKEN`**; clone uses **SSH** to **GitCode** (`REPO_URL` in **`build-kotlin.yml`**). Non-Windows runners: install **`~/.ssh`** for the user that runs the job.
 
-#### Windows `kotlin` runner — GitCode SSH (required)
+#### Windows `kotlin` — GitCode SSH (one-time host setup)
 
-The **GitHub Actions Runner** Windows service usually runs as **`NT AUTHORITY\NETWORK SERVICE`**, not as the interactive user who RDPs or SSHs in. **Git** and **OpenSSH** read **`$HOME/.ssh`** during jobs; that **`HOME`** is not always the same directory as the interactive profile, so keys must be installed in the right place and mirrored at job start.
+The listener usually runs as **`NT AUTHORITY\NETWORK SERVICE`**, so job **`$HOME`** is **`C:\Windows\ServiceProfiles\NetworkService`**. **Setup environment** only verifies **`$HOME/.ssh/id_ed25519`** and **`$HOME/.ssh/known_hosts`** exist and exports **`GIT_SSH_COMMAND`** (explicit **`-i`**, **`IdentitiesOnly=yes`**, **`UserKnownHostsFile`**, **`StrictHostKeyChecking=yes`**). No copying, **`ssh-keyscan`**, or **`accept-new`** in CI.
 
-**Prerequisites on each Windows `kotlin` host**
-
-| Item | Action |
-|------|--------|
-| **Canonical key directory** | **`C:\Windows\ServiceProfiles\NetworkService\.ssh\`** — this is the service account’s profile; keep the GitCode deploy key here as the source of truth. |
-| **Private key** | Copy **`id_ed25519`** (or your GitCode key) and **`id_ed25519.pub`** from a trusted machine, e.g. `scp ~/.ssh/id_ed25519 ~/.ssh/id_ed25519.pub win:C:/Windows/ServiceProfiles/NetworkService/.ssh/` (adjust `win` SSH host and paths as needed). |
-| **Private key ACL** | Restrict to the service account (OpenSSH on Windows enforces this). Example: `icacls "C:\Windows\ServiceProfiles\NetworkService\.ssh\id_ed25519" /inheritance:r /grant:r "NT AUTHORITY\NETWORK SERVICE:(R)" /grant:r "NT AUTHORITY\SYSTEM:(F)"` (run from a session that can modify that file). |
-| **`known_hosts`** | Must include **`gitcode.com`**. Example from the runner or dev host: `ssh-keyscan -t rsa,ecdsa,ed25519 gitcode.com >> "C:\Windows\ServiceProfiles\NetworkService\.ssh\known_hosts"`. |
-| **Interactive user (optional)** | Copy the same key material to **`C:\Users\<runner-admin>\.ssh\`** with **`chmod 600`** on the private key under Git Bash so `ssh win 'git ls-remote …'` style checks work as that user. |
-
-**Workflow behavior** — [`.github/workflows/build-kotlin.yml`](.github/workflows/build-kotlin.yml) **Setup environment** (Windows only) copies **`id_ed25519`**, **`id_ed25519.pub`**, and relevant **`known_hosts`** lines from **`NetworkService\.ssh`** into the job’s **`$HOME/.ssh`** only when those paths differ (if **`$HOME`** is already the service profile, the copy is skipped). It then ensures **`gitcode.com`** is in **`known_hosts`** (via **`ssh-keyscan`** if needed) and sets **`GIT_SSH_COMMAND`** so Git’s **`ssh`** uses **`IdentitiesOnly=yes`**, **`-i …/id_ed25519`**, and that **`known_hosts`** path (Git for Windows / OpenSSH path quirks). If that step fails with **Permission denied (publickey)**, confirm this key’s public half is authorized on **GitCode** for **`CPF-KMP-CMP/kotlin`**. If that step fails with missing key or host key, fix the **Network Service** `.ssh` layout on the host first.
+| Requirement | What to do |
+|-------------|------------|
+| **Key pair** | **`id_ed25519`** + **`id_ed25519.pub`** in **`C:\Windows\ServiceProfiles\NetworkService\.ssh\`** (e.g. `scp … win:C:/Windows/ServiceProfiles/NetworkService/.ssh/`). |
+| **Private key ACL** | `icacls "C:\Windows\ServiceProfiles\NetworkService\.ssh\id_ed25519" /inheritance:r /grant:r "NT AUTHORITY\NETWORK SERVICE:(R)" /grant:r "NT AUTHORITY\SYSTEM:(F)"` |
+| **`known_hosts`** | Include **gitcode.com** (e.g. `ssh-keyscan -t rsa gitcode.com >> "C:\Windows\ServiceProfiles\NetworkService\.ssh\known_hosts"`). |
+| **GitCode** | Authorize the **public** key for **`CPF-KMP-CMP/kotlin`**. **`Permission denied (publickey)`** → key not registered on GitCode. |
+| **Optional** | Same key under **`C:\Users\<admin>\.ssh\`** for interactive **`ssh win 'git ls-remote …'`** checks. |
 
 ---
 
@@ -142,7 +138,7 @@ Abstract goals the workflow should keep satisfying:
 2. **Correct Java layout per OS** — macOS ARM64/Linux use Java 17 (and Linux also 21 where needed); macOS X64 uses 8 + 11; Windows uses setup-java as defined in the workflow — agents must not collapse these without testing all matrix legs. **Windows `run` shell** — same as Build LLVM: **`C:\PROGRA~1\Git\bin\bash.exe`** with **`--noprofile --norc -e -o pipefail`** (bare **`shell: bash`** fails on typical self-hosted Windows when Git’s bash is not on `PATH`).
 3. **Incremental vs clean build** — **Clean**: ephemeral Gradle/Konan/Maven roots under `RUNNER_TEMP` (or equivalent clean root), then optional **promotion** of that cache into **`~/runner/cache`** after success. **Incremental**: persist caches under **`PERSISTED_CACHE_ROOT`** (`~/runner/cache` by default). Scheduled runs force clean behavior as documented in the workflow.
 4. **Optional Maven proxy** — Reachability check against `DEFAULT_MAVEN_PROXY_URL`; if unreachable, degrade gracefully (no proxy). Init script from `scripts/maven-proxy.init.gradle` and Maven `settings.xml` mirror **`external:*`** only (do not mirror `file:` repos). When the proxy is used, **`scripts/rewrite-gradle-wrapper-reposlite.sh`** rewrites the Kotlin checkout’s **`gradle/wrapper/gradle-wrapper.properties`** to download the same Gradle zip from Reposilite **`gradle-distributions`** (host derived from `…/releases` → `…/gradle-distributions`, or `DEFAULT_GRADLE_DISTRIBUTIONS_URL`). For a **local** end-to-end check of `scripts/build-ohos.sh` with the same wiring (isolated caches, Gradle + Maven via Reposilite), use **`scripts/run-build-ohos-with-reposlite-proxy.sh`**.
-5. **GitCode source of truth** — Clone via **SSH** (`REPO_URL`); runner must already have SSH keys/config for GitCode (workflow does not inject SSH secrets).
+5. **GitCode source of truth** — Clone via **SSH** (`REPO_URL`); runner must already have SSH keys/config for GitCode (workflow does not inject SSH secrets). **Windows** `kotlin` hosts: one-time **`NetworkService\.ssh`** setup and **`GIT_SSH_COMMAND`** in **Setup environment** only — see **Kotlin `kotlin` runners** above.
 6. **Branch / commit / MR modes** — Support building a **commit**, a **branch**, or **branch + merge-request** via `prepare-repo` inputs (see action README).
 7. **Artifacts** — Pack `build/repo` into a gzip archive named with Kotlin SHA + action SHA + OS/arch; deliver to **`~/runner/artifact`** via `upload-artifact-local`.
 8. **macOS toolchain check** — On macOS, verify **bitcode-build-tool** via `xcrun` early (`DEVELOPER_DIR` points at expected Xcode).
