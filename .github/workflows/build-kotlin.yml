@@ -36,6 +36,7 @@ on:
       - '.github/workflows/build-kotlin.yml'
       - '.github/actions/prepare-repo/*'
       - 'scripts/maven-proxy.init.gradle'
+      - 'patches/kotlin-js-tests-npmSetRegistry.patch'
 
 # default or global config
 env:
@@ -176,6 +177,20 @@ jobs:
           pr_number: ${{ steps.vars.outputs.pr_number }}
           workspace_dir: ${{ env.WORKSPACE_DIR }}
           local_reference_dir: ${{ env.LOCAL_REFERENCE_DIR }}
+
+      - name: Apply Kotlin patches (npmSetRegistry / cache redirector)
+        run: |
+          set -euo pipefail
+          PATCH="$GITHUB_WORKSPACE/kn-action/patches/kotlin-js-tests-npmSetRegistry.patch"
+          cd "$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}"
+          if patch -p1 < "$PATCH"; then
+            echo "Applied kotlin-js-tests-npmSetRegistry patch"
+          elif grep -q 'if (cacheRedirectorEnabled)' js/js.tests/build.gradle.kts; then
+            echo "kotlin-js-tests npmSetRegistry guard already in tree; skipping patch"
+          else
+            echo "ERROR: patch failed and js/js.tests/build.gradle.kts does not contain the expected guard" >&2
+            exit 1
+          fi
 
       - name: Configure Maven proxy
         if: steps.vars.outputs.maven_proxy_url != ''
