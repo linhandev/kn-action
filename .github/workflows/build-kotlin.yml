@@ -141,9 +141,10 @@ jobs:
             test -s "$HOME/.ssh/known_hosts"
             grep -qF 'gitcode.com' "$HOME/.ssh/known_hosts"
             chmod 644 "$HOME/.ssh/known_hosts"
-            # Git for Windows + OpenSSH sometimes ignore MSYS $HOME for UserKnownHostsFile; pin path and allow first-seen keys.
+            # Pin identity + known_hosts for Git's OpenSSH (avoids wrong agent keys and MSYS HOME quirks).
+            _id_mix="$(cygpath -m "$HOME/.ssh/id_ed25519" 2>/dev/null || echo "$HOME/.ssh/id_ed25519")"
             _kh_mix="$(cygpath -m "$HOME/.ssh/known_hosts" 2>/dev/null || echo "$HOME/.ssh/known_hosts")"
-            echo "GIT_SSH_COMMAND=ssh -o UserKnownHostsFile=${_kh_mix} -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
+            echo "GIT_SSH_COMMAND=ssh -i ${_id_mix} -o IdentitiesOnly=yes -o UserKnownHostsFile=${_kh_mix} -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
           fi
           CLEAN_CACHE_ROOT="${RUNNER_TEMP}/clean-cache"
           PERSISTED_CACHE_ROOT="$(echo "${{ env.PERSISTED_CACHE_ROOT }}/" | sed "s|^~|$HOME|")"
