@@ -5,14 +5,14 @@
 ## 目录说明
 
 
-| 路径                          | 说明                               |
-| --------------------------- | -------------------------------- |
+| 路径                          | 说明                                                     |
+| --------------------------- | ------------------------------------------------------ |
 | `configuration.shared.json` | 共享配置（`releases` Maven 聚合 + `gradle-distributions` 独立仓） |
-| `start.sh`                  | 启动脚本，工作目录固定为 `workspace/`        |
-| `workspace/reposilite.jar`  | 从 Release 下载后放到这里（勿提交）           |
-| `workspace/reposilite.db`   | SQLite 库，自动生成或从旧实例拷贝             |
-| `workspace/repositories/`   | Maven 缓存，自动生成或从旧实例拷贝             |
-| `com.kmp.reposilite.plist`  | macOS launchd 配置模板（见下方 macOS 安装） |
+| `start.sh`                  | 启动脚本，工作目录固定为 `workspace/`                              |
+| `workspace/reposilite.jar`  | 从 Release 下载后放到这里（勿提交）                                 |
+| `workspace/reposilite.db`   | SQLite 库，自动生成或从旧实例拷贝                                   |
+| `workspace/repositories/`   | Maven 缓存，自动生成或从旧实例拷贝                                   |
+| `com.kmp.reposilite.plist`  | macOS launchd 配置模板（见下方 macOS 安装）                       |
 
 
 ## 首次 setup
@@ -71,23 +71,26 @@ journalctl --user -u reposilite -f   # 看日志
   ```bash
    sed "s|REPOSILITE_DIR|$(pwd)|g" com.kmp.reposilite.plist > ~/Library/LaunchAgents/com.kmp.reposilite.plist
   ```
-3. **加载并启动服务**：
+3. **加载并启动服务**（macOS 较新系统上请用 `bootstrap`，不要再用无 domain 的 `load`）：
   ```bash
-   launchctl load ~/Library/LaunchAgents/com.kmp.reposilite.plist
-   launchctl start com.kmp.reposilite
+   UIDN="$(id -u)"
+   launchctl bootstrap "gui/$UIDN" ~/Library/LaunchAgents/com.kmp.reposilite.plist
   ```
    之后每次**用户登录**会自动加载并启动（plist 中 `RunAtLoad` 已开启），无需再手动操作。
 
-常用命令：
+常用命令（**务必带 `gui/$(id -u)/` 前缀**）：
 
 ```bash
-launchctl stop com.kmp.reposilite
-launchctl start com.kmp.reposilite
-launchctl list com.kmp.reposilite   # 状态
-launchctl unload ~/Library/LaunchAgents/com.kmp.reposilite.plist # 卸载/停用
+UIDN="$(id -u)"
+launchctl print "gui/$UIDN/com.kmp.reposilite"   # 是否在跑、路径、环境
+launchctl kickstart -k "gui/$UIDN/com.kmp.reposilite"   # 强制重启进程（改配置后常用）
+launchctl bootout "gui/$UIDN/com.kmp.reposilite"       # 停止并卸载该 job
+launchctl bootstrap "gui/$UIDN" ~/Library/LaunchAgents/com.kmp.reposilite.plist  # 重新注册并启动
 ```
 
-**临时用 `./start.sh` 测试时**：`launchctl stop` 可能不会立刻结束进程，8080 仍会被占用。需先执行 `**launchctl unload ...`** 卸掉服务再运行 `./start.sh`；测试完后若要恢复为服务，再 `launchctl load ...`。
+若 `launchctl unload ~/Library/LaunchAgents/...` / `load` 无效，多半是未在 `**gui/<你的 UID>**` 域下操作；按上面 `bootout` / `bootstrap` 即可。
+
+**临时用 `./start.sh` 测试时**：先 `launchctl bootout "gui/$(id -u)/com.kmp.reposilite"` 释放 8080，再 `./start.sh`；结束后再 `bootstrap` 装回服务。
 
 日志位置：`workspace/logs/reposilite-stdout.log`、`workspace/logs/reposilite-stderr.log`。
 
@@ -99,15 +102,15 @@ launchctl unload ~/Library/LaunchAgents/com.kmp.reposilite.plist # 卸载/停用
 wget http://localhost:8080/releases/org/apache/felix/maven-bundle-plugin/3.5.0/maven-bundle-plugin-3.5.0.pom
 # Kotlin bootstrap（proxied `reference` 必须以 `/` 结尾，否则拼接会变成 …/maven/org/jetbrains/… 而 404）
 wget -S -O /dev/null "http://localhost:8080/releases/org/jetbrains/kotlin/kotlin-stdlib-js/2.2.20-Beta2-71/kotlin-stdlib-js-2.2.20-Beta2-71.klib"
-# Gradle distribution（独立仓库，避免与 Maven 代理链混在一起；wrapper 用 `http://<host>:8080/gradle-distributions/distributions/...`）
-wget -S -O /dev/null "http://localhost:8080/gradle-distributions/distributions/gradle-8.5-bin.zip"
-wget -S -O /dev/null "http://localhost:8080/gradle-distributions/distributions/gradle-8.5-bin.zip.sha256"
+# Gradle distribution（wrapper：`http://<host>:8080/gradle-distributions/<文件名>`，与官方 `…/distributions/<文件名>` 一致）
+wget -S -O /dev/null "http://localhost:8080/gradle-distributions/gradle-8.5-bin.zip"
+wget -S -O /dev/null "http://localhost:8080/gradle-distributions/gradle-8.5-bin.zip.sha256"
 ```
 
 ### `releases` 与 `gradle-distributions`
 
 - **`releases`**：聚合 Maven 上游，供 `maven-proxy.init.gradle` 等使用（`/releases/...`）。
-- **`gradle-distributions`**：只代理 `https://services.gradle.org/`，给 Gradle Wrapper 的 `distributionUrl` 用（`/gradle-distributions/distributions/...`），与 Maven 解析链分开。
+- **`gradle-distributions`**：`.zip` 优先 `https://mirrors.cloud.tencent.com/gradle/`（大文件更稳；部分环境对 `downloads.gradle.org` 会出现 TLS 握手失败或读超时）；`.sha256` / `.sha512` / `.asc` 用 `https://downloads.gradle.org/distributions/`（Reposilite 会跳过不允许这些后缀的 mirror）。路径：`/gradle-distributions/gradle-8.5-bin.zip`。不用 `services.gradle.org` 拉 zip（307 到 GitHub release，Reposilite 常 `Cannot get`）。
 
 启动成功后日志中应出现 `+ releases (public)` 与 `+ gradle-distributions (public)`。若只有默认的 `snapshots` / `private`，说明未读到 `configuration.shared.json`（例如旧版 `start.sh` 在 `cd workspace` 后把相对路径指错；当前 `start.sh` 已用绝对路径传 `--shared-configuration`）。
 
