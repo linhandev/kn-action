@@ -76,17 +76,18 @@ Checklist for self-hosted **`llvm`** runners so [`.github/workflows/build-llvm.y
 
 | Item | Notes |
 |------|--------|
-| **Image** | **`ghcr.io/<repo-owner>/kn-action-linux-llvm-builder:<tag>`** — pin matches workflow `container_image`. |
+| **Image** | **`ghcr.io/<repo-owner>/kn-action-linux-llvm-builder:<tag>`** — pin in **`build-llvm.yml`** must match an image built from [`infra/docker/Dockerfile`](infra/docker/Dockerfile) (push under `infra/docker/**` runs [**Build Linux image**](.github/workflows/build-linux-image.yml)). |
 | **Volume** | Host **`${{ github.workspace }}/../../../artifact`** mounted at **`/home/runner/runner/artifact`** so the container can write the same artifact layout as other OSes. |
-| **Tools in image** | **bash**, **git**, **git-lfs**, **curl**; **Python 3 with `pip`** — `scripts/setup-repo-tool.sh` picks an interpreter that passes **`python -m pip`** (images that only have **`/usr/bin/python`** without pip must expose **`python3`** + pip). |
+| **Tools in image** | **bash**, **git**, **git-lfs**, **curl**; **Python 3** and **`python3-pip`** (required for **`scripts/setup-repo-tool.sh`**). |
 
 ### Windows (`llvm`)
 
 | Item | Notes |
 |------|--------|
 | **Shell** | Workflow **`defaults.run.shell`**: **`C:\PROGRA~1\Git\bin\bash.exe`** with **`--noprofile --norc -e -o pipefail`**. **Git for Windows** must be installed there (or adjust the workflow path). |
-| **Python 3.12+** | Must be usable with **`python -m pip`** for **`requests`**. The workflow prepends to **`GITHUB_PATH`**, in order: **`%LOCALAPPDATA%\Programs\Python\Python{314..310}`**, **`%ProgramFiles%\Python*`**, then **`/c/Users/lin/AppData/Local/Programs/Python/Python*`** — the last is **host-specific** for the current **win-llvm** machine; change the username in the workflow if your install user differs. |
-| **Service account vs interactive user** | The Actions listener often runs as **Network Service**; **`LOCALAPPDATA`** may **not** point at the user who installed Python — use a per-machine PATH probe (as above), **all-users** Python install, or run the service as a user account that has Python on PATH. |
+| **Git LFS** | Not installed by the workflow on Windows. If **`repo sync`** / LFS steps fail, install **Git LFS** and run **`git lfs install`** so **`git lfs`** is on **`PATH`** for the runner account. |
+| **Python 3.12+** | Must be usable with **`python -m pip`** for **`requests`**. The workflow prepends the first match to **`GITHUB_PATH`**, in order: **`%LOCALAPPDATA%\Programs\Python\Python{314..310}`**, **`%ProgramFiles%\Python*`**, then each **`/c/Users/*/AppData/Local/Programs/Python/Python{314..310}`** (every user under **`C:\Users`**) so the service account can still find an interactive user’s install. Prefer an **all-users** install or run the listener as the user that owns Python. |
+| **Service account vs interactive user** | The Actions listener often runs as **Network Service**; **`LOCALAPPDATA`** may **not** point at the user who installed Python — the **`Users/*`** scan above is the fallback. |
 | **Symlinks / Developer Mode** | **`repo`** and **git** expect to create symlinks under **`.repo`**. Turn on **Settings → System → For developers → Developer Mode**. Confirm **`AllowDevelopmentWithoutDevLicense`** = **`1`** under **`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock`**, or verify **`New-Item -ItemType SymbolicLink`** works without elevation. Without this, **`repo init` / `repo sync`** fails with symlink errors. |
 | **Stale `.repo` after policy changes** | If symlink mode or `repo` layout changed, remove **`…/llvm/.repo`** once on the runner or run **`workflow_dispatch`** with **`clean_build`**. |
 
