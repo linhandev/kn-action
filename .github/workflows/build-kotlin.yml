@@ -203,6 +203,12 @@ jobs:
           EOF
           echo "Maven: MAVEN_USER_HOME=$MAVEN_USER_HOME localRepository=$MAVEN_LOCAL_REPO mirror=$MAVEN_PROXY_URL"
 
+          # Kotlin upstream enables cache-redirector (gradle.properties). Its gradle.beforeProject hook runs
+          # after maven-proxy.init.gradle and rewrites repos back to cache-redirector.jetbrains.com, undoing the
+          # LAN mirror. Force project property so Settings skips registering that hook (see
+          # repo/gradle-settings-conventions/cache-redirector/.../cache-redirector.settings.gradle.kts).
+          echo "ORG_GRADLE_PROJECT_cacheRedirectorEnabled=false" >> "$GITHUB_ENV"
+
       - name: Build Kotlin
         env:
           GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
