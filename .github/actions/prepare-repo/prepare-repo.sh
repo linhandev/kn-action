@@ -77,11 +77,14 @@ git merge --abort 2>/dev/null || true
 git rebase --abort 2>/dev/null || true
 git cherry-pick --abort 2>/dev/null || true
 
+# Gitignored untracked paths (.idea/, etc.) block checkout unless removed (-x).
+git clean -ffdx
+
 if [[ -n "$COMMIT" ]]; then
   git fetch origin "$COMMIT"
   git checkout "$COMMIT"
   git reset --hard "$COMMIT"
-  git clean -dfx
+  git clean -ffdx
 elif [[ -n "$PR_NUMBER" && -n "$BRANCH" ]]; then
   MR_REF=$(printf "$MR_REF_TEMPLATE" "$PR_NUMBER")
   git fetch origin "$BRANCH"
