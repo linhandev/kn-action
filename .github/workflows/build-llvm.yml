@@ -172,15 +172,29 @@ jobs:
           # Windows: creating symlinks requires Developer Mode or admin; repo can use copies instead.
           if [ "$RUNNER_OS" = "Windows" ]; then
             export REPO_USE_SYMLINKS=false
+            # Persistent .repo from an older layout (symlinks on/off) skips init but breaks sync
+            # (missing manifests.git/HEAD). Drop .repo once until stamp matches this policy.
+            stamp="$LLVM_WORKSPACE/.repo/.kn_action_repo_symlinks"
+            if [ -d "$LLVM_WORKSPACE/.repo" ]; then
+              if [ ! -f "$stamp" ] || [ "$(tr -d '\r\n' < "$stamp")" != "false" ]; then
+                echo "::notice::Removing .repo for Windows REPO_USE_SYMLINKS=false (stamp missing or mismatch)"
+                rm -rf "$LLVM_WORKSPACE/.repo"
+              fi
+            fi
           fi
           # Init when .repo is missing (first run) or when doing a clean build
           if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
             cd "$LLVM_WORKSPACE"
             REFERENCE_FLAG=""
-            if [ -d "${{ env.LOCAL_REFERENCE_DIR }}" ]; then
-              REFERENCE_FLAG="--reference=${{ env.LOCAL_REFERENCE_DIR }}"
+            ref_dir="${{ env.LOCAL_REFERENCE_DIR }}"
+            ref_dir="${ref_dir/#\~/$HOME}"
+            if [ -d "$ref_dir" ]; then
+              REFERENCE_FLAG="--reference=$ref_dir"
             fi
             repo init -u "${{ env.MANIFEST_URL }}" -m "${{ env.MANIFEST_FILE }}" $REFERENCE_FLAG
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              printf '%s\n' false > "$LLVM_WORKSPACE/.repo/.kn_action_repo_symlinks"
+            fi
           fi
 
       - name: Sync source
