@@ -248,9 +248,9 @@ jobs:
         with:
           path: ${{ steps.archive.outputs.path }}
 
-  # When workflow_dispatch skip_build: three independent latest outer tars (pattern each); they need not share llvm/act SHA.
-  resolve-packages-from-disk:
-    name: resolve llvm-packages (skip_build)
+  # When workflow_dispatch skip_build: three independent latest outer tars (pattern each via download-artifact-local); they need not share llvm/act SHA.
+  resolve-packages-skip-build:
+    name: resolve llvm-packages (skip_build, artifact server)
     if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     outputs:
@@ -299,9 +299,12 @@ jobs:
   # Outer llvm-packages tar basenames for cross-copy / tests (same triple from one build, or three independent latest when skip_build).
   llvm-artifact-refs:
     name: LLVM package refs for downstream
-    needs: [build, resolve-packages-from-disk]
-    if: ${{ always() && (needs.build.result == 'success' || needs['resolve-packages-from-disk'].result == 'success') }}
+    needs: [build, resolve-packages-skip-build]
+    if: ${{ always() && (needs.build.result == 'success' || needs['resolve-packages-skip-build'].result == 'success') }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
+    env:
+      # Only workflow_dispatch + skip_build uses pattern-resolved latest tars; never fall back when a real build failed.
+      SKIP_BUILD_LATEST: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
     outputs:
       outer_linux_name: ${{ steps.pick.outputs.outer_linux_name }}
       outer_mac_arm_name: ${{ steps.pick.outputs.outer_mac_arm_name }}
@@ -310,16 +313,19 @@ jobs:
       - id: pick
         run: |
           set -euo pipefail
-          if [ "${{ needs.build.result }}" = "success" ]; then
+          if [ "${SKIP_BUILD_LATEST}" = "true" ]; then
+            echo "outer_linux_name=${{ needs['resolve-packages-skip-build'].outputs.outer_linux_name }}" >> "$GITHUB_OUTPUT"
+            echo "outer_mac_arm_name=${{ needs['resolve-packages-skip-build'].outputs.outer_mac_arm_name }}" >> "$GITHUB_OUTPUT"
+            echo "outer_mac_x64_name=${{ needs['resolve-packages-skip-build'].outputs.outer_mac_x64_name }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.build.result }}" = "success" ]; then
             L="${{ needs.build.outputs.llvm_sha_short }}"
             A="${{ needs.build.outputs.action_sha_short }}"
             echo "outer_linux_name=llvm-packages-${L}_act-${A}_Linux_X64.tar" >> "$GITHUB_OUTPUT"
             echo "outer_mac_arm_name=llvm-packages-${L}_act-${A}_macOS_ARM64.tar" >> "$GITHUB_OUTPUT"
             echo "outer_mac_x64_name=llvm-packages-${L}_act-${A}_macOS_X64.tar" >> "$GITHUB_OUTPUT"
           else
-            echo "outer_linux_name=${{ needs['resolve-packages-from-disk'].outputs.outer_linux_name }}" >> "$GITHUB_OUTPUT"
-            echo "outer_mac_arm_name=${{ needs['resolve-packages-from-disk'].outputs.outer_mac_arm_name }}" >> "$GITHUB_OUTPUT"
-            echo "outer_mac_x64_name=${{ needs['resolve-packages-from-disk'].outputs.outer_mac_x64_name }}" >> "$GITHUB_OUTPUT"
+            echo "::error::Build did not succeed; not using skip_build pattern-resolved artifacts (set skip_build only when intentionally skipping compile)."
+            exit 1
           fi
 
   cross-copy:
