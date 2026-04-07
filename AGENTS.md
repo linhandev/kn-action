@@ -125,6 +125,7 @@ Abstract goals the workflow should keep satisfying:
 6. **Branch / commit / MR modes** — Support building a **commit**, a **branch**, or **branch + merge-request** via `prepare-repo` inputs (see action README).
 7. **Artifacts** — Pack `build/repo` into a gzip archive named with Kotlin SHA + action SHA + OS/arch; deliver to **`~/runner/artifact`** via `upload-artifact-local`.
 8. **macOS toolchain check** — On macOS, verify **bitcode-build-tool** via `xcrun` early (`DEVELOPER_DIR` points at expected Xcode).
+9. **Local proxy mode** - network connection to upstream repos are flaky in all repos, when local proxy mode is enabled, aim to do no web request to upstream repos at all, make all dependency/plugin download go thru the lan proxy.
 
 ---
 
@@ -134,7 +135,7 @@ Abstract goals the workflow should keep satisfying:
 
 1. **Multi-platform LLVM builds** — Produce OH-oriented LLVM/packages on **macOS ARM64, macOS X64, Linux X64 (inside fixed Docker image), Windows X64**, labels **`llvm`**.
 2. **Linux isolation** — Linux job runs in **`container.image`** from `ghcr.io/<owner>/kn-action-linux-llvm-builder:…` with a **volume** into the host artifact area (`…/artifact` → `/home/runner/runner/artifact`) so Linux matches the same local-artifact contract as other OSes.
-3. **Incremental by default** — **`LLVM_WORKSPACE`** under the job workspace persists across runs; **`clean_build`** workflow input wipes it when a full rebuild is required.
+3. **Incremental by default** — **`LLVM_WORKSPACE`** under the job workspace persists across runs; **`clean_build`** workflow input wipes it when a full rebuild is required. Incremental build should be really incremental. Verify by going thru build log and inspecting build time. Subsequent builds with no code change should be sustentially faster.
 4. **Conditional env prepare** — Run `env_prepare.sh` only when **`prebuilts/cmake`** (or equivalent marker) is missing — skip when incremental tree is already bootstrapped.
 5. **Repo / GitCode** — **`scripts/setup-repo-tool.sh`** installs **repo** with a **wrapper** so Windows Git Bash does not rely on `#!/usr/bin/env python` alone. Sync uses **`GITCODE_TOKEN`** (repository environment **`env`**); URL rewrites in git config for GitCode HTTPS.
 6. **Windows shell** — Use a Git Bash invocation that survives self-hosted Windows (e.g. **`C:\PROGRA~1\Git\bin\bash.exe`** with `pipefail`) — avoid quoted `Program Files` paths that break runner/OpenSSH command parsing. **Windows** also needs **Developer Mode** (or equivalent) so **`repo`/git symlinks** work; see **Build LLVM — required runner environment** above.
