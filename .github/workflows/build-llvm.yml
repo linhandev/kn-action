@@ -461,13 +461,15 @@ jobs:
           ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
-          cp -a "$TC" "$STEM/"
+          # Flatten merged host tree: essentials root is the clang install (bin/, lib/, …), not clang_darwin-*-<date>/.
+          cp -a "$TC"/. "$STEM/"
+          [ -d "$STEM/bin" ] || { echo "::error::Expected $STEM/bin after flattening from $TC"; ls -la "$STEM"; exit 1; }
           # Use gzip via tar (not pigz): cross-copy job does not install brew deps; pigz may be absent on the llvm runner.
           GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
           first="$(tar -tzf "$ARCHIVE" | head -1)"
           [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-          echo "Packed $ARCHIVE (top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Packed $ARCHIVE (top-level dir $STEM, flattened from $(basename "$TC"))" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pack llvm-final macOS X64 OHOS toolchain
         id: pack_x64
@@ -485,12 +487,13 @@ jobs:
           ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
-          cp -a "$TC" "$STEM/"
+          cp -a "$TC"/. "$STEM/"
+          [ -d "$STEM/bin" ] || { echo "::error::Expected $STEM/bin after flattening from $TC"; ls -la "$STEM"; exit 1; }
           GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
           first="$(tar -tzf "$ARCHIVE" | head -1)"
           [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-          echo "Packed $ARCHIVE (top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Packed $ARCHIVE (top-level dir $STEM, flattened from $(basename "$TC"))" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload llvm-final Linux X64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
@@ -617,10 +620,10 @@ jobs:
               exit 1
             fi
           else
-            test -d "$(find "$ROOT" -maxdepth 1 -type d -name 'clang_darwin-*' | head -1)" || {
-              echo "::error::Expected clang_darwin-* under $ROOT"; ls -la "$ROOT" || true
+            if [ ! -d "$ROOT/bin" ]; then
+              echo "::error::Expected $ROOT/bin (flattened Darwin essentials layout)"; ls -la "$ROOT" || true
               exit 1
-            }
+            fi
           fi
 
       - name: Write OHOS test sources
@@ -642,7 +645,7 @@ jobs:
           }
           EOF
 
-      # llvm-*-essentials-*: Linux has clang-dev/bin (or clang/bin); Darwin has clang_darwin-*/bin inside the essentials folder.
+      # llvm-*-essentials-*: Linux has clang-dev/bin (or clang/bin); Darwin essentials are flattened (bin/ at essentials root).
       - name: Cross-compile OHOS aarch64 (C and C++)
         run: |
           set -euo pipefail
@@ -654,14 +657,8 @@ jobs:
               if [ -d "$d" ]; then BIN="$d"; break; fi
             done
           else
-            case "${{ matrix.platform }}" in
-              macos-arm64) PAT='clang_darwin-arm64-*' ;;
-              macos-x64) PAT='clang_darwin-x86_64-*' ;;
-              *) echo "::error::unexpected platform ${{ matrix.platform }}"; exit 1 ;;
-            esac
-            TC="$(find "$ROOT" -maxdepth 1 -type d -name "$PAT" | head -1)"
-            [ -n "$TC" ] && [ -d "$TC/bin" ] || { echo "::error::No llvm-final Darwin toolchain ($PAT) under $ROOT"; ls -la "$ROOT" || true; exit 1; }
-            BIN="$TC/bin"
+            BIN="$ROOT/bin"
+            [ -d "$BIN" ] || { echo "::error::No $ROOT/bin (flattened Darwin essentials)"; ls -la "$ROOT" || true; exit 1; }
           fi
           [ -n "$BIN" ] || { echo "::error::No toolchain bin under $W"; exit 1; }
           OHOS_CC="$BIN/aarch64-unknown-linux-ohos-clang"
