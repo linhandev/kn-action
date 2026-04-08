@@ -1,5 +1,5 @@
 # Build LLVM toolchain for OpenHarmony using repo-managed multi-repo checkout.
-# Linux (Docker) + macOS (ARM64/X64) on self-hosted runners. Windows matrix is disabled until upstream Windows host build is restored.
+# Linux (Docker) + macOS (ARM64/X64) on self-hosted runners. Windows host toolchain is produced in the Linux build (packages/clang-dev-windows-x86_64.tar.gz) and merged in cross-copy.
 # Linux: runs inside OpenHarmony build env Docker image (empty `container.image` skips Docker; see actions/runner#265).
 # Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
 # workflow_dispatch skip_build: three independent download-artifact-local pattern= calls (latest per OS via server); outer tars need not share the same llvm/act SHA.
@@ -359,6 +359,7 @@ jobs:
       archive_linux: ${{ steps.pack_linux_final.outputs.archive }}
       archive_mac_arm64: ${{ steps.pack_arm64.outputs.archive }}
       archive_mac_x64: ${{ steps.pack_x64.outputs.archive }}
+      archive_windows: ${{ steps.pack_windows.outputs.archive }}
     defaults:
       run:
         working-directory: ${{ github.workspace }}/cross-copy-work
@@ -397,7 +398,6 @@ jobs:
         id: merge
         env:
           CLANG_RESOURCE_VERSION: '19'
-          KN_ACTION_SKIP_WINDOWS_HOST: '1'
         run: |
           set -euo pipefail
           DL="$(pwd)/downloads"
@@ -411,9 +411,14 @@ jobs:
           cp -f extract-linux/packages/*.tar.gz staging/
           cp -f extract-mac-arm64/packages/clang-dev-darwin-arm64.tar.gz staging/
           cp -f extract-mac-x64/packages/clang-dev-darwin-x86_64.tar.gz staging/
+          if [ ! -f staging/clang-dev-windows-x86_64.tar.gz ]; then
+            echo "::error::Linux packages must include clang-dev-windows-x86_64.tar.gz (copy from extract-linux/packages failed?)"
+            ls -la extract-linux/packages || true
+            exit 1
+          fi
           ( cd staging && bash "$GITHUB_WORKSPACE/kn-action/scripts/platform_package.sh" )
           # OHOS sysroot for tests comes from Maven in ohos-test jobs, not build-produced ohos-sysroot-dev.tar.gz.
-          for p in clang_darwin-arm64 clang_darwin-x86_64; do
+          for p in clang_darwin-arm64 clang_darwin-x86_64 clang_windows-x86_64; do
             D="$(find staging -maxdepth 1 -type d -name "${p}-*" | head -1)"
             if [ -z "$D" ] || [ ! -d "$D" ]; then
               echo "::error::Missing merged $p tree under staging"
@@ -494,6 +499,30 @@ jobs:
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           echo "Packed $ARCHIVE (top-level dir $STEM, flattened from $(basename "$TC"))" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Pack llvm-final Windows X64 OHOS toolchain
+        id: pack_windows
+        env:
+          COPYFILE_DISABLE: 1
+        run: |
+          set -euo pipefail
+          TC="$(find staging -maxdepth 1 -type d -name 'clang_windows-x86_64-*' | head -1)"
+          if [ -z "$TC" ] || [ ! -d "$TC" ]; then
+            echo "::error::No merged clang_windows-x86_64-* directory under staging"
+            ls -la staging || true
+            exit 1
+          fi
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-windows-essentials-${LLVM_ESSENTIALS_ID}"
+          ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
+          rm -rf "$STEM"
+          mkdir -p "$STEM"
+          cp -a "$TC"/. "$STEM/"
+          [ -d "$STEM/bin" ] || { echo "::error::Expected $STEM/bin after flattening from $TC"; ls -la "$STEM"; exit 1; }
+          GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
+          first="$(tar -tzf "$ARCHIVE" | head -1)"
+          [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "Packed $ARCHIVE (top-level dir $STEM, flattened from $(basename "$TC"))" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload llvm-final Linux X64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
@@ -509,6 +538,11 @@ jobs:
         with:
           path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_x64.outputs.archive }}
 
+      - name: Upload llvm-final Windows X64 OHOS toolchain
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_windows.outputs.archive }}
+
   # Build OHOS aarch64 test programs on each self-hosted runner (host jobs; ~/runner/artifact + cache like the LLVM build matrix).
   ohos-test-build:
     name: ${{ format('ohos-test-build ({0})', matrix.platform) }}
@@ -522,7 +556,10 @@ jobs:
             runner: [self-hosted, linux, X64, llvm]
             host_suffix: Linux_X64
             shell: bash
-          # Windows host tar tests disabled while Windows LLVM build matrix is off.
+          - platform: windows-x64
+            runner: [self-hosted, Windows, X64, llvm]
+            host_suffix: Windows_X64
+            shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
           - platform: macos-arm64
             runner: [self-hosted, macOS, ARM64, llvm]
             host_suffix: macOS_ARM64
@@ -536,6 +573,7 @@ jobs:
       LLVM_FINAL_LINUX: ${{ needs.cross-copy.outputs.archive_linux }}
       LLVM_FINAL_MAC_ARM64: ${{ needs.cross-copy.outputs.archive_mac_arm64 }}
       LLVM_FINAL_MAC_X64: ${{ needs.cross-copy.outputs.archive_mac_x64 }}
+      LLVM_FINAL_WINDOWS: ${{ needs.cross-copy.outputs.archive_windows }}
     defaults:
       run:
         working-directory: ${{ github.workspace }}/ohos-test-work
@@ -572,6 +610,7 @@ jobs:
           set -euo pipefail
           case "${{ matrix.platform }}" in
             linux-x64) n="${LLVM_FINAL_LINUX}" ;;
+            windows-x64) n="${LLVM_FINAL_WINDOWS}" ;;
             macos-arm64) n="${LLVM_FINAL_MAC_ARM64}" ;;
             macos-x64) n="${LLVM_FINAL_MAC_X64}" ;;
             *) echo "::error::unexpected platform ${{ matrix.platform }}"; exit 1 ;;
@@ -620,7 +659,7 @@ jobs:
             fi
           else
             if [ ! -d "$ROOT/bin" ]; then
-              echo "::error::Expected $ROOT/bin (flattened Darwin essentials layout)"; ls -la "$ROOT" || true
+              echo "::error::Expected $ROOT/bin (flattened Darwin/Windows essentials layout)"; ls -la "$ROOT" || true
               exit 1
             fi
           fi
@@ -657,15 +696,23 @@ jobs:
             done
           else
             BIN="$ROOT/bin"
-            [ -d "$BIN" ] || { echo "::error::No $ROOT/bin (flattened Darwin essentials)"; ls -la "$ROOT" || true; exit 1; }
+            [ -d "$BIN" ] || { echo "::error::No $ROOT/bin (flattened Darwin/Windows essentials)"; ls -la "$ROOT" || true; exit 1; }
           fi
           [ -n "$BIN" ] || { echo "::error::No toolchain bin under $W"; exit 1; }
-          OHOS_CC="$BIN/aarch64-unknown-linux-ohos-clang"
-          [ -x "$OHOS_CC" ] || OHOS_CC="$BIN/aarch64-linux-ohos-clang"
-          [ -x "$OHOS_CC" ] || { echo "::error::No aarch64 OHOS clang in $BIN"; ls -la "$BIN"; exit 1; }
-          OHOS_CXX="$BIN/aarch64-unknown-linux-ohos-clang++"
-          [ -x "$OHOS_CXX" ] || OHOS_CXX="$BIN/aarch64-linux-ohos-clang++"
-          [ -x "$OHOS_CXX" ] || { echo "::error::No aarch64 OHOS clang++ in $BIN"; ls -la "$BIN"; exit 1; }
+          OHOS_CC=""
+          for cand in \
+            "$BIN/aarch64-unknown-linux-ohos-clang" "$BIN/aarch64-unknown-linux-ohos-clang.exe" \
+            "$BIN/aarch64-linux-ohos-clang" "$BIN/aarch64-linux-ohos-clang.exe"; do
+            if [ -x "$cand" ] || [ -f "$cand" ]; then OHOS_CC="$cand"; break; fi
+          done
+          [ -n "$OHOS_CC" ] || { echo "::error::No aarch64 OHOS clang in $BIN"; ls -la "$BIN"; exit 1; }
+          OHOS_CXX=""
+          for cand in \
+            "$BIN/aarch64-unknown-linux-ohos-clang++" "$BIN/aarch64-unknown-linux-ohos-clang++.exe" \
+            "$BIN/aarch64-linux-ohos-clang++" "$BIN/aarch64-linux-ohos-clang++.exe"; do
+            if [ -x "$cand" ] || [ -f "$cand" ]; then OHOS_CXX="$cand"; break; fi
+          done
+          [ -n "$OHOS_CXX" ] || { echo "::error::No aarch64 OHOS clang++ in $BIN"; ls -la "$BIN"; exit 1; }
           chmod +x "$OHOS_CC" "$OHOS_CXX" 2>/dev/null || true
           SR="${OHOS_SYSROOT_PATH:?}"
           OHOS_FLAGS=(--sysroot="$SR")
@@ -684,9 +731,9 @@ jobs:
           CXXLOG="$("$OHOS_CXX" "${OHOS_FLAGS[@]}" -std=c++17 -O2 -o src/hello_ohos_cpp src/test.cpp 2>&1)"; CXXRC=$?
           set -e
           if [ "$CXXRC" -ne 0 ]; then echo "::error::C++ compile failed: $CXXLOG"; exit 1; fi
-          # Docker/llvm Linux runner: `file` can hit seccomp (SIGSYS / exit 159); macOS hosts are fine.
-          if [ "${{ matrix.platform }}" = "linux-x64" ]; then
-            ls -la src/hello_ohos_c src/hello_ohos_cpp
+          # Docker/llvm Linux runner: `file` can hit seccomp (SIGSYS / exit 159); Windows may lack `file`.
+          if [ "${{ matrix.platform }}" = "linux-x64" ] || [ "${{ matrix.platform }}" = "windows-x64" ]; then
+            ls -la src/hello_ohos_c src/hello_ohos_cpp 2>/dev/null || ls -la src/hello_ohos_c.exe src/hello_ohos_cpp.exe 2>/dev/null || ls -la src
           elif command -v file >/dev/null 2>&1; then
             file src/hello_ohos_c src/hello_ohos_cpp
           else
@@ -698,7 +745,12 @@ jobs:
         run: |
           set -euo pipefail
           NAME="test-binaries-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz"
-          tar -czf "$NAME" -C src hello_ohos_c hello_ohos_cpp
+          members=()
+          for f in hello_ohos_c hello_ohos_cpp hello_ohos_c.exe hello_ohos_cpp.exe; do
+            [ -f "src/$f" ] && members+=("$f")
+          done
+          [ "${#members[@]}" -ge 2 ] || { echo "::error::Expected at least C and C++ binaries in src/"; ls -la src; exit 1; }
+          tar -czf "$NAME" -C src "${members[@]}"
           echo "archive_name=$NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload test binaries
@@ -720,6 +772,8 @@ jobs:
         include:
           - host_suffix: Linux_X64
             run_subdir: linux
+          - host_suffix: Windows_X64
+            run_subdir: win
           - host_suffix: macOS_ARM64
             run_subdir: arm64
           - host_suffix: macOS_X64
@@ -803,9 +857,13 @@ jobs:
           HDC_T() { "$HDC_BIN" -t "$HDC_TARGET" "$@"; }
           HDC_T shell mkdir -p "$REMOTE_BASE"
           for kind in c cpp; do
-            if [ "$kind" = c ]; then b=hello_ohos_c; exp="ok_ohos_c_${SUF}"; else b=hello_ohos_cpp; exp="ok_ohos_cpp_${SUF}"; fi
+            if [ "$kind" = c ]; then stem=hello_ohos_c; exp="ok_ohos_c_${SUF}"; else stem=hello_ohos_cpp; exp="ok_ohos_cpp_${SUF}"; fi
+            RDIR="$ROOT/run/${{ matrix.run_subdir }}"
+            if [ -f "$RDIR/$stem" ]; then b="$stem"
+            elif [ -f "$RDIR/${stem}.exe" ]; then b="${stem}.exe"
+            else echo "::error::Missing $stem under $RDIR"; ls -la "$RDIR"; exit 1; fi
             RPATH="$REMOTE_BASE/${SUF}_${kind}"
-            HDC_T file send "$ROOT/run/${{ matrix.run_subdir }}/$b" "$RPATH"
+            HDC_T file send "$RDIR/$b" "$RPATH"
             HDC_T shell chmod 755 "$RPATH"
             OUT=$(HDC_T shell "$RPATH" 2>&1) || true
             echo "output ($SUF $kind): $OUT"
