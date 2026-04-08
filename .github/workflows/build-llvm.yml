@@ -32,15 +32,15 @@ on:
         description: 'Custom title for this run (shown in Actions UI)'
         required: false
         type: string
-  push:
-    paths:
-      - '.github/workflows/build-llvm.yml'
-      - 'scripts/setup-repo-tool.sh'
-      - 'scripts/setup-llvm-ccache.sh'
-      - 'scripts/platform_package.sh'
-      # Windows LLVM scripts (not in active matrix):
-      # - 'scripts/ohos-env-prepare-windows.sh'
-      # - 'scripts/ohos-build-llvm-windows.sh'
+  # push:
+  #   paths:
+  #     - '.github/workflows/build-llvm.yml'
+  #     - 'scripts/setup-repo-tool.sh'
+  #     - 'scripts/setup-llvm-ccache.sh'
+  #     - 'scripts/platform_package.sh'
+  #     # Windows LLVM scripts (not in active matrix):
+  #     # - 'scripts/ohos-env-prepare-windows.sh'
+  #     # - 'scripts/ohos-build-llvm-windows.sh'
 
 env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
@@ -356,10 +356,10 @@ jobs:
       LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
       LLVM_MAJOR_FOR_PACKAGE: ${{ github.event.inputs.llvm_major_version || '19' }}
     outputs:
-      archive_linux: ${{ steps.pack_linux_final.outputs.archive }}
-      archive_mac_arm64: ${{ steps.pack_arm64.outputs.archive }}
-      archive_mac_x64: ${{ steps.pack_x64.outputs.archive }}
-      archive_windows: ${{ steps.pack_windows.outputs.archive }}
+      archive_linux: ${{ steps.finalize.outputs.archive_linux }}
+      archive_mac_arm64: ${{ steps.finalize.outputs.archive_mac_arm64 }}
+      archive_mac_x64: ${{ steps.finalize.outputs.archive_mac_x64 }}
+      archive_windows: ${{ steps.finalize.outputs.archive_windows }}
     defaults:
       run:
         working-directory: ${{ github.workspace }}/cross-copy-work
@@ -394,10 +394,12 @@ jobs:
           name: ${{ needs['llvm-artifact-refs'].outputs.outer_mac_x64_name }}
           path: ${{ github.workspace }}/cross-copy-work/downloads
 
-      - name: Extract outer tars and merge packages (scripts/platform_package.sh)
-        id: merge
+      - name: Extract outer tars, merge packages, and pack final artifacts
+        id: finalize
         env:
           CLANG_RESOURCE_VERSION: '19'
+          RUN_FINAL_PACKAGE: '1'
+          COPYFILE_DISABLE: 1
         run: |
           set -euo pipefail
           DL="$(pwd)/downloads"
@@ -416,8 +418,20 @@ jobs:
             ls -la extract-linux/packages || true
             exit 1
           fi
-          ( cd staging && bash "$GITHUB_WORKSPACE/kn-action/scripts/platform_package.sh" )
-          # OHOS sysroot for tests comes from Maven in ohos-test jobs, not build-produced ohos-sysroot-dev.tar.gz.
+          (
+            cd staging
+            LLVM_MAJOR_FOR_PACKAGE="${LLVM_MAJOR_FOR_PACKAGE}" \
+            LLVM_ESSENTIALS_ID="${LLVM_ESSENTIALS_ID}" \
+            GITHUB_RUN_ID="${GITHUB_RUN_ID}" \
+            GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+            GITHUB_STEP_SUMMARY="${GITHUB_STEP_SUMMARY}" \
+            RUN_FINAL_PACKAGE="${RUN_FINAL_PACKAGE}" \
+            CLANG_RESOURCE_VERSION="${CLANG_RESOURCE_VERSION}" \
+            bash "$GITHUB_WORKSPACE/kn-action/scripts/platform_package.sh"
+          )
+          # OHOS sysroot comes from deveco, hosted on maven, ohos-sysroot-dev.tar.gz isn't used.
+
+          # simple sanity
           for p in clang_darwin-arm64 clang_darwin-x86_64 clang_windows-x86_64; do
             D="$(find staging -maxdepth 1 -type d -name "${p}-*" | head -1)"
             if [ -z "$D" ] || [ ! -d "$D" ]; then
@@ -428,169 +442,25 @@ jobs:
             echo "Merged $p -> $D"
           done
 
-      - name: Overlay libcxx-ndk into merged host trees
-        run: |
-          set -euo pipefail
-          # Start Linux host tree from clang-dev-linux-x86_64 and flatten later at pack time.
-          rm -rf linux-host && mkdir -p linux-host
-          tar -xzf extract-linux/packages/clang-dev-linux-x86_64.tar.gz -C linux-host
-          if [ -d linux-host/clang-dev ]; then
-            LNX_HOST="linux-host/clang-dev"
-          elif [ -d linux-host/clang ]; then
-            LNX_HOST="linux-host/clang"
-          else
-            echo "::error::Expected linux-host/clang-dev or linux-host/clang after extracting clang-dev-linux-x86_64.tar.gz"
-            find linux-host -maxdepth 3 -type d | sed -n '1,80p'
-            exit 1
-          fi
-          DARWIN_ARM="$(find staging -maxdepth 1 -type d -name 'clang_darwin-arm64-*' | head -1)"
-          DARWIN_X64="$(find staging -maxdepth 1 -type d -name 'clang_darwin-x86_64-*' | head -1)"
-          WINDOWS_X64="$(find staging -maxdepth 1 -type d -name 'clang_windows-x86_64-*' | head -1)"
-          [ -d "$DARWIN_ARM" ] || { echo "::error::Missing merged Darwin ARM64 tree"; exit 1; }
-          [ -d "$DARWIN_X64" ] || { echo "::error::Missing merged Darwin X64 tree"; exit 1; }
-          [ -d "$WINDOWS_X64" ] || { echo "::error::Missing merged Windows X64 tree"; exit 1; }
-
-          overlay_from_tar() {
-            local tgz="$1"
-            local target="$2"
-            local tmp
-            [ -f "$tgz" ] || { echo "::error::Missing overlay tar $tgz"; exit 1; }
-            tmp="$(mktemp -d)"
-            tar -xzf "$tgz" -C "$tmp"
-            [ -d "$tmp/libcxx-ndk" ] || { echo "::error::$tgz does not contain libcxx-ndk/"; find "$tmp" -maxdepth 2 | sed -n '1,80p'; exit 1; }
-            cp -a "$tmp/libcxx-ndk"/. "$target"/
-            rm -rf "$tmp"
-          }
-
-          PKG="extract-linux/packages"
-          overlay_from_tar "$PKG/libcxx-ndk-dev-darwin-arm64.tar.gz" "$DARWIN_ARM"
-          overlay_from_tar "$PKG/libcxx-ndk-dev-darwin-x86_64.tar.gz" "$DARWIN_X64"
-          overlay_from_tar "$PKG/libcxx-ndk-dev-linux-aarch64.tar.gz" "$LNX_HOST"
-          overlay_from_tar "$PKG/libcxx-ndk-dev-linux-x86_64.tar.gz" "$LNX_HOST"
-          overlay_from_tar "$PKG/libcxx-ndk-dev-windows-x86_64.tar.gz" "$WINDOWS_X64"
-
-      # Linux: one tarball for ohos-test-build; archive root is flattened (bin/, lib/, include/, ...).
-      - name: Pack llvm-final Linux X64 OHOS toolchain
-        id: pack_linux_final
-        env:
-          COPYFILE_DISABLE: 1
-        run: |
-          set -euo pipefail
-          if [ -d linux-host/clang-dev ]; then
-            SRC="linux-host/clang-dev"
-          elif [ -d linux-host/clang ]; then
-            SRC="linux-host/clang"
-          else
-            echo "::error::Missing linux host tree at linux-host/clang-dev or linux-host/clang"
-            find linux-host -maxdepth 3 -type d | sed -n '1,80p'
-            exit 1
-          fi
-          # Inner dir: JetBrains/Konan dev stem only. Outer basename adds -run<id> for unique LAN artifact names.
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-dev-${LLVM_ESSENTIALS_ID}"
-          ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
-          rm -rf "$STEM"
-          mkdir -p "$STEM"
-          cp -a "$SRC"/. "$STEM/"
-          [ -d "$STEM/bin" ] || { echo "::error::Expected flattened linux layout with $STEM/bin"; ls -la "$STEM"; exit 1; }
-          GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
-          first="$(tar -tzf "$ARCHIVE" | head -1)"
-          [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
-          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-          echo "Packed $ARCHIVE (top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Pack llvm-final macOS ARM64 OHOS toolchain
-        id: pack_arm64
-        env:
-          COPYFILE_DISABLE: 1
-        run: |
-          set -euo pipefail
-          TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-arm64-*' | head -1)"
-          if [ -z "$TC" ] || [ ! -d "$TC" ]; then
-            echo "::error::No merged clang_darwin-arm64-* directory under staging"
-            ls -la staging || true
-            exit 1
-          fi
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-dev-${LLVM_ESSENTIALS_ID}"
-          ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
-          rm -rf "$STEM"
-          mkdir -p "$STEM"
-          # Flatten merged host tree: dev root is the clang install (bin/, lib/, ...), not clang_darwin-*-<date>/.
-          cp -a "$TC"/. "$STEM/"
-          [ -d "$STEM/bin" ] || { echo "::error::Expected $STEM/bin after flattening from $TC"; ls -la "$STEM"; exit 1; }
-          # Use gzip via tar (not pigz): cross-copy job does not install brew deps; pigz may be absent on the llvm runner.
-          GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
-          first="$(tar -tzf "$ARCHIVE" | head -1)"
-          [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
-          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-          echo "Packed $ARCHIVE (top-level dir $STEM, flattened from $(basename "$TC"))" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Pack llvm-final macOS X64 OHOS toolchain
-        id: pack_x64
-        env:
-          COPYFILE_DISABLE: 1
-        run: |
-          set -euo pipefail
-          TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-x86_64-*' | head -1)"
-          if [ -z "$TC" ] || [ ! -d "$TC" ]; then
-            echo "::error::No merged clang_darwin-x86_64-* directory under staging"
-            ls -la staging || true
-            exit 1
-          fi
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-dev-${LLVM_ESSENTIALS_ID}"
-          ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
-          rm -rf "$STEM"
-          mkdir -p "$STEM"
-          cp -a "$TC"/. "$STEM/"
-          [ -d "$STEM/bin" ] || { echo "::error::Expected $STEM/bin after flattening from $TC"; ls -la "$STEM"; exit 1; }
-          GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
-          first="$(tar -tzf "$ARCHIVE" | head -1)"
-          [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
-          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-          echo "Packed $ARCHIVE (top-level dir $STEM, flattened from $(basename "$TC"))" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Pack llvm-final Windows X64 OHOS toolchain
-        id: pack_windows
-        env:
-          COPYFILE_DISABLE: 1
-        run: |
-          set -euo pipefail
-          TC="$(find staging -maxdepth 1 -type d -name 'clang_windows-x86_64-*' | head -1)"
-          if [ -z "$TC" ] || [ ! -d "$TC" ]; then
-            echo "::error::No merged clang_windows-x86_64-* directory under staging"
-            ls -la staging || true
-            exit 1
-          fi
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-windows-dev-${LLVM_ESSENTIALS_ID}"
-          ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.zip"
-          rm -rf "$STEM"
-          mkdir -p "$STEM"
-          cp -a "$TC"/. "$STEM/"
-          [ -d "$STEM/bin" ] || { echo "::error::Expected $STEM/bin after flattening from $TC"; ls -la "$STEM"; exit 1; }
-          zip -qry "$ARCHIVE" "$STEM"
-          first="$(unzip -Z1 "$ARCHIVE" | head -1)"
-          [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
-          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-          echo "Packed $ARCHIVE (zip, top-level dir $STEM, flattened from $(basename "$TC"))" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Upload llvm-final Linux X64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
-          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_linux_final.outputs.archive }}
+          path: ${{ github.workspace }}/cross-copy-work/staging/${{ steps.finalize.outputs.archive_linux }}
 
       - name: Upload llvm-final macOS ARM64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
-          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_arm64.outputs.archive }}
+          path: ${{ github.workspace }}/cross-copy-work/staging/${{ steps.finalize.outputs.archive_mac_arm64 }}
 
       - name: Upload llvm-final macOS X64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
-          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_x64.outputs.archive }}
+          path: ${{ github.workspace }}/cross-copy-work/staging/${{ steps.finalize.outputs.archive_mac_x64 }}
 
       - name: Upload llvm-final Windows X64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
         with:
-          path: ${{ github.workspace }}/cross-copy-work/${{ steps.pack_windows.outputs.archive }}
+          path: ${{ github.workspace }}/cross-copy-work/staging/${{ steps.finalize.outputs.archive_windows }}
 
   # Build OHOS aarch64 test programs on each self-hosted runner (host jobs; ~/runner/artifact + cache like the LLVM build matrix).
   ohos-test-build:
@@ -910,7 +780,7 @@ jobs:
             RPATH="$REMOTE_BASE/${SUF}_${kind}"
             HDC_T file send "$RDIR/$b" "$RPATH"
             HDC_T shell chmod 755 "$RPATH"
-            OUT=$(HDC_T shell "$RPATH" 2>&1) || true
+            OUT=$(HDC_T shell "LD_PRELOAD=/data/app/el1/bundle/public/com.huawei.hmos.location/libs/arm64/libc++_shared.so $RPATH" 2>&1) || true
             echo "output ($SUF $kind): $OUT"
             echo "$OUT" | grep -q "$exp" || { echo "::error::Expected '$exp' in output"; exit 1; }
           done
