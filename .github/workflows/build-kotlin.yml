@@ -35,8 +35,7 @@ on:
     paths:
       - '.github/workflows/build-kotlin.yml'
       - '.github/actions/prepare-repo/*'
-      - 'scripts/maven-proxy.init.gradle'
-      - 'scripts/nodejs-dist-mirror.init.gradle'
+      - 'scripts/proxy.init.gradle'
       - 'scripts/rewrite-gradle-wrapper-reposlite.sh'
       - 'patches/kotlin-js-tests-npmSetRegistry.patch'
 
@@ -144,14 +143,9 @@ jobs:
           fi
           echo "PROXY_URL after network test: $PROXY_URL"
 
-          # Gradle Node plugin downloads tarballs from distributionUrl (default nodejs.org). Self-hosted
-          # networks often block that TLS; LAN should mirror https://nodejs.org/dist/ under this base.
-          if [ -n "$PROXY_URL" ]; then
-            echo "NODEJS_DIST_MIRROR=${PROXY_URL%/releases}/nodejs-dist" >> "$GITHUB_ENV"
-          elif [ "$RUNNER_OS" = "macOS" ]; then
-            # Fallback when no LAN proxy: npmmirror matches nodejs.org/dist layout (same paths as upstream).
-            echo "NODEJS_DIST_MIRROR=https://npmmirror.com/mirrors/node" >> "$GITHUB_ENV"
-          fi
+          # Gradle Node plugin fetches from nodejs.org by default; Reposilite mirrors Maven only, not npm/node
+          # dist. Use npmmirror (same /dist path layout as upstream).
+          echo "NODEJS_DIST_MIRROR=https://npmmirror.com/mirrors/node" >> "$GITHUB_ENV"
 
           echo "## Run Settings" >> "$GITHUB_STEP_SUMMARY"
 
@@ -180,12 +174,12 @@ jobs:
             "${{ steps.vars.outputs.maven_user_home }}/.m2" \
             "${{ steps.vars.outputs.artifact_local_path }}"
 
-      - name: Install Gradle nodejs-dist init script
+      - name: Install Gradle proxy init script
         run: |
           mkdir -p "${{ steps.vars.outputs.gradle_user_home }}/init.d"
-          cp "$GITHUB_WORKSPACE/kn-action/scripts/nodejs-dist-mirror.init.gradle" \
+          cp "$GITHUB_WORKSPACE/kn-action/scripts/proxy.init.gradle" \
             "${{ steps.vars.outputs.gradle_user_home }}/init.d/"
-          echo "Gradle: nodejs-dist-mirror init installed (no-op unless NODEJS_DIST_MIRROR is set)"
+          echo "Gradle: proxy.init.gradle installed (Node dist via NODEJS_DIST_MIRROR; Maven mirror when MAVEN_PROXY_URL is set)"
 
       - name: Clean Konan and Maven caches for clean build
         if: steps.vars.outputs.clean_build == 'true'
@@ -233,10 +227,6 @@ jobs:
           MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
           MAVEN_LOCAL_REPO: ${{ steps.vars.outputs.maven_local_repo }}
         run: |
-          mkdir -p "$GRADLE_USER_HOME/init.d"
-          cp "$GITHUB_WORKSPACE/kn-action/scripts/maven-proxy.init.gradle" "$GRADLE_USER_HOME/init.d/"
-          echo "Gradle: init script installed to $GRADLE_USER_HOME/init.d/"
-
           mkdir -p "$MAVEN_USER_HOME/.m2"
           # Drop stale "not found" metadata so archetype IT / nested Maven retries resolution after build/repo is populated.
           KREPO="$MAVEN_USER_HOME/.m2/repository/org/jetbrains/kotlin"
@@ -314,7 +304,7 @@ jobs:
           echo "Maven: MAVEN_USER_HOME=$MAVEN_USER_HOME localRepository=$MAVEN_LOCAL_REPO_FOR_XML mirror=$MAVEN_PROXY_URL fileRepo=$FILE_BUILD_REPO_URL (also copied to \$HOME/.m2 for nested mvn)"
 
           # Kotlin upstream enables cache-redirector (gradle.properties). Its gradle.beforeProject hook runs
-          # after maven-proxy.init.gradle and rewrites repos back to cache-redirector.jetbrains.com, undoing the
+          # after proxy.init.gradle and rewrites repos back to cache-redirector.jetbrains.com, undoing the
           # LAN mirror. Force project property so Settings skips registering that hook (see
           # repo/gradle-settings-conventions/cache-redirector/.../cache-redirector.settings.gradle.kts).
           echo "ORG_GRADLE_PROJECT_cacheRedirectorEnabled=false" >> "$GITHUB_ENV"

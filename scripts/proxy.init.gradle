@@ -1,0 +1,134 @@
+/*
+ * Gradle init for kn-action Kotlin builds:
+ *
+ * 1) Node Gradle plugin: when NODEJS_DIST_MIRROR is set (e.g. https://npmmirror.com/mirrors/node),
+ *    point node.distBaseUrl at that base. Layout must match https://nodejs.org/dist/.
+ *
+ * 2) Maven mirror: when -P maven.repository.mirror=... or env MAVEN_PROXY_URL is set, rewrite
+ *    Gradle repositories to that URL (Reposilite /releases, etc.). When neither is set, Maven
+ *    rewriting is skipped — do not assume a LAN default so proxy-off jobs stay on public repos.
+ */
+
+// --- Node.js distribution base (optional env) ---
+gradle.afterProject { proj ->
+    String mirror = System.getenv('NODEJS_DIST_MIRROR')?.trim()
+    if (!mirror) {
+        return
+    }
+    def nodeExt = proj.extensions.findByName('node')
+    if (nodeExt == null) {
+        return
+    }
+    try {
+        nodeExt.distBaseUrl.set(mirror)
+    } catch (Throwable ignored) {
+        try {
+            nodeExt.distBaseUrl = mirror
+        } catch (Throwable ignored2) {
+            println("[proxy] nodejs ${proj.path}: could not set distBaseUrl")
+        }
+    }
+}
+
+// --- Maven / Gradle repository mirror (optional prop or env) ---
+def proxyUrlProp = gradle.startParameter.projectProperties?.get('maven.repository.mirror')
+def proxyUrl = proxyUrlProp?.toString()?.trim()
+if (!proxyUrl) {
+    proxyUrl = System.getenv('MAVEN_PROXY_URL')?.trim()
+}
+
+if (proxyUrl) {
+    println("[proxy] Using Maven mirror → ${proxyUrl}")
+
+    /** Do not rewrite mavenLocal() / maven { url = uri("file:...") } to the HTTP proxy. */
+    def isLocalFileMavenRepo = { repo ->
+        if (!(repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository)) {
+            return false
+        }
+        def url = repo.url
+        if (url == null) {
+            return false
+        }
+        try {
+            def u = url instanceof URI ? url : URI.create(url.toString())
+            return 'file'.equalsIgnoreCase(u.scheme)
+        } catch (Throwable ignored) {
+            return false
+        }
+    }
+
+    def rewriteMavenRepoToProxy = { repo ->
+        if (!(repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) || isLocalFileMavenRepo(repo)) {
+            return
+        }
+        repo.setUrl(URI.create(proxyUrl))
+        repo.setAllowInsecureProtocol(true)
+    }
+
+    // Disable cache-redirector via startParameter for the root build
+    def props = new HashMap(gradle.startParameter.projectProperties ?: [:])
+    props.put('cacheRedirectorEnabled', 'false')
+    gradle.startParameter.setProjectProperties(props)
+
+    beforeSettings { settings ->
+        settings.pluginManagement {
+            repositories {
+                clear()
+                maven {
+                    url proxyUrl
+                    allowInsecureProtocol = true
+                }
+            }
+        }
+    }
+
+    gradle.settingsEvaluated { settings ->
+        def sp = new HashMap(settings.startParameter.projectProperties ?: [:])
+        sp.put('cacheRedirectorEnabled', 'false')
+        settings.startParameter.setProjectProperties(sp)
+
+        settings.pluginManagement.repositories.each { repo ->
+            if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+                rewriteMavenRepoToProxy(repo)
+            }
+        }
+        try {
+            settings.dependencyResolutionManagement.repositories.each { repo ->
+                if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+                    rewriteMavenRepoToProxy(repo)
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    gradle.beforeProject { project ->
+        try {
+            project.repositories.each { repo ->
+                if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+                    rewriteMavenRepoToProxy(repo)
+                }
+            }
+        } catch (Throwable t) {
+            println("[proxy] beforeProject ${project.path}: ${t.message}")
+        }
+    }
+
+    gradle.afterProject { project ->
+        try {
+            project.repositories.each { repo ->
+                if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+                    rewriteMavenRepoToProxy(repo)
+                }
+            }
+        } catch (Throwable t) {
+            println("[proxy] afterProject repos ${project.path}: ${t.message}")
+        }
+        try {
+            project.buildscript.repositories.each { repo ->
+                if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+                    rewriteMavenRepoToProxy(repo)
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+}

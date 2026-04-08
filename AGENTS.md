@@ -173,7 +173,7 @@ Goals the workflow should keep satisfying (details live in the workflow and scri
 
 1. **Prefer SSH verification** on `win` / `linux` / `mini` / this host before large workflow rewrites touching paths, shells, or Docker.
 2. **Keep design targets** in this file aligned when you change **`build-kotlin.yml`** or **`build-llvm.yml`** in ways that affect goals above or adds new goals.
-3. **Push path filters** — Build LLVM triggers on `build-llvm.yml` and `scripts/setup-repo-tool.sh`; Build Kotlin on its workflow, `prepare-repo`, and `maven-proxy.init.gradle`. If you add new shared scripts, extend `paths` when appropriate.
+3. **Push path filters** — Build LLVM triggers on `build-llvm.yml` and `scripts/setup-repo-tool.sh`; Build Kotlin on its workflow, `prepare-repo`, and `proxy.init.gradle`. If you add new shared scripts, extend `paths` when appropriate.
 4. **End-to-end** — After substantive workflow changes, push to **`develop`** and poll the relevant run until green or a enviromental issue you can't resolve, like runner offline.
 
 ---
