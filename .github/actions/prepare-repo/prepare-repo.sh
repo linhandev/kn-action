@@ -69,6 +69,35 @@ git_with_retry() {
   done
 }
 
+# Short retries for local git ops (clean/checkout/reset/merge) that are not covered by git_with_retry.
+# Reused self-hosted trees can still hit stale index.lock on these commands.
+git_lock_retry() {
+  local repo_dir="${1:?}" errf n=1 max=4 delay="${GIT_LOCK_RETRY_DELAY_SEC:-5}"
+  shift
+  errf="$(mktemp)"
+  while true; do
+    clear_stale_git_locks "$repo_dir"
+    if git -C "$repo_dir" "$@" 2>"$errf"; then
+      rm -f "$errf"
+      return 0
+    fi
+    if grep -E -q 'Another git process seems to be running|Unable to create .*\.lock|cannot lock ref' "$errf"; then
+      cat "$errf" >&2
+      rm -f "$errf"
+      if [[ "$n" -ge "$max" ]]; then
+        return 1
+      fi
+      echo "prepare-repo: git lock retry (${n}/$((max - 1))): git -C \"$repo_dir\" $*" >&2
+      sleep "$delay"
+      n=$((n + 1))
+      continue
+    fi
+    cat "$errf" >&2
+    rm -f "$errf"
+    return 1
+  done
+}
+
 # Git for Windows: Kotlin contains paths >260 chars; without this, clone/clean/checkout errors with
 # "Filename too long" and leaves a dirty tree ("untracked files would be overwritten by checkout").
 case "$(uname -s 2>/dev/null)" in
@@ -100,7 +129,7 @@ REFERENCE_REPO="${LOCAL_REFERENCE_DIR}/${REPO_NAME}"
 if [[ -d "$WORKSPACE_DIR/.git" ]]; then
   case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*)
-      if ! git -C "$WORKSPACE_DIR" clean -ffdx; then
+      if ! git_lock_retry "$WORKSPACE_DIR" clean -ffdx; then
         echo "prepare-repo: git clean failed in reused workspace; recloning: $WORKSPACE_DIR" >&2
         rm -rf "$WORKSPACE_DIR"
       fi
@@ -111,7 +140,7 @@ fi
 if [[ -d "$WORKSPACE_DIR/.git" ]]; then
   # Reuse existing clone: fetch and force to desired ref
   cd "$WORKSPACE_DIR"
-  git remote set-url origin "$REPO_URL"
+  git_lock_retry . remote set-url origin "$REPO_URL"
   git_with_retry git fetch origin
 else
   # Fresh clone (optionally with --reference-if-able / --reference)
@@ -156,35 +185,35 @@ git rebase --abort 2>/dev/null || true
 git cherry-pick --abort 2>/dev/null || true
 
 # Gitignored untracked paths (.idea/, etc.) block checkout unless removed (-x).
-git clean -ffdx
+git_lock_retry . clean -ffdx
 
 if [[ -n "$COMMIT" ]]; then
   git_with_retry git fetch origin "$COMMIT"
-  git checkout "$COMMIT"
-  git reset --hard "$COMMIT"
-  git clean -ffdx
+  git_lock_retry . checkout "$COMMIT"
+  git_lock_retry . reset --hard "$COMMIT"
+  git_lock_retry . clean -ffdx
 elif [[ -n "$PR_NUMBER" && -n "$BRANCH" ]]; then
   MR_REF=$(printf "$MR_REF_TEMPLATE" "$PR_NUMBER")
   git_with_retry git fetch origin "$BRANCH"
-  git checkout -B _ci_branch "origin/$BRANCH"
+  git_lock_retry . checkout -B _ci_branch "origin/$BRANCH"
   # checkout -B can leave local edits when HEAD already matches the remote; merge then conflicts.
-  git reset --hard "origin/$BRANCH"
-  git clean -ffdx
+  git_lock_retry . reset --hard "origin/$BRANCH"
+  git_lock_retry . clean -ffdx
   git_with_retry git fetch origin "+${MR_REF}:pr_${PR_NUMBER}"
   git config user.email "ci@localhost"
   git config user.name "CI"
-  git merge "pr_${PR_NUMBER}" --no-edit
+  git_lock_retry . merge "pr_${PR_NUMBER}" --no-edit
 else
   [[ -z "$BRANCH" ]] && { echo "BRANCH required for branch build" >&2; exit 1; }
   git_with_retry git fetch origin "$BRANCH"
-  git checkout -B _ci_branch "origin/$BRANCH"
-  git reset --hard "origin/$BRANCH"
-  git clean -ffdx
+  git_lock_retry . checkout -B _ci_branch "origin/$BRANCH"
+  git_lock_retry . reset --hard "origin/$BRANCH"
+  git_lock_retry . clean -ffdx
 fi
 
 # Force working tree to match HEAD (runner does not clean workspace between runs)
-git clean -ffdx
-git reset --hard HEAD
+git_lock_retry . clean -ffdx
+git_lock_retry . reset --hard HEAD
 
 # Output for workflow
 git rev-parse HEAD
