@@ -627,8 +627,17 @@ jobs:
       - name: Layout llvm-final toolchain + sysroot
         run: |
           set -euo pipefail
-          W="${{ github.workspace }}/ohos-test-work"
-          tar -xzf "${{ steps.dl_final.outputs.path }}" -C "$W"
+          # GNU tar in Git Bash mis-handles "C:\..." (treats C: as a remote device). Use MSYS paths.
+          win_paths() {
+            if [ "${RUNNER_OS:-}" = "Windows" ] && command -v cygpath >/dev/null 2>&1; then
+              cygpath -u "$1"
+            else
+              printf '%s' "$1"
+            fi
+          }
+          W="$(win_paths "${{ github.workspace }}")/ohos-test-work"
+          LLVM_TAR="$(win_paths "${{ steps.dl_final.outputs.path }}")"
+          tar -xzf "$LLVM_TAR" -C "$W"
           ROOT="$(find "$W" -maxdepth 1 -type d -name 'llvm-*-essentials-*' | head -1)"
           if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
             echo "::error::Expected one top-level llvm-*-essentials-* directory after extracting ${{ steps.llvm_tar.outputs.name }}"
@@ -638,6 +647,7 @@ jobs:
           echo "LLVM_ESS_ROOT=$ROOT" >> "$GITHUB_ENV"
           CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-~/runner/cache}"
           CACHE_BASE="${CACHE_BASE/#\~/$HOME}"
+          CACHE_BASE="$(win_paths "$CACHE_BASE")"
           mkdir -p "$CACHE_BASE"
           ARCHIVE="$CACHE_BASE/${OHOS_SYSROOT}.tar.gz"
           if [ ! -f "$ARCHIVE" ]; then curl -fsSL -o "$ARCHIVE" "$OHOS_SYSROOT_URL"; fi
