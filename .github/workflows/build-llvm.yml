@@ -21,7 +21,7 @@ on:
         default: false
         type: boolean
       final_llvm_artifact_version:
-        description: 'Essentials id for final OHOS LLVM tarballs (JetBrains-style). Published file is llvm-<major>-<triple>-essentials-<id>-run<run_id>.tar.gz; extracting yields one top-level dir llvm-<major>-<triple>-essentials-<id> (no -run suffix on the folder).'
+        description: 'Dev id for final OHOS LLVM artifacts (JetBrains-style). Linux/macOS publish llvm-<major>-<triple>-dev-<id>-run<run_id>.tar.gz, Windows publishes llvm-<major>-<triple>-dev-<id>-run<run_id>.zip; extracting yields one top-level dir llvm-<major>-<triple>-dev-<id> (no -run suffix on the folder).'
         default: '200'
         type: string
       llvm_major_version:
@@ -52,8 +52,8 @@ env:
   OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02
   OHOS_SYSROOT_URL: https://maven.eazytec-cloud.com/nexus/repository/file-storage/sysroot-ohos-aarch64-6.0.2.640-02.tar.gz
   OHOS_SYSROOT_CACHE_DIR: ~/runner/cache
-  # Upstream Kotlin/Native naming: https://download.jetbrains.com/kotlin/native/resources/llvm/<major>-<triple>/llvm-<major>-<triple>-essentials-<id>.tar.gz
-  # Untar yields a single top-level directory matching the essentials stem (see ~/.konan/dependencies). Published LAN artifacts use ...-essentials-<id>-run<run_id>.tar.gz for unique names; inner dir stays ...-essentials-<id>.
+  # Upstream Kotlin/Native naming pattern (adapted here to dev-stem artifacts): https://download.jetbrains.com/kotlin/native/resources/llvm/<major>-<triple>/llvm-<major>-<triple>-essentials-<id>.tar.gz
+  # Extracting yields a single top-level directory matching the dev stem (see ~/.konan/dependencies). Published LAN artifacts use ...-dev-<id>-run<run_id> (Linux/macOS .tar.gz, Windows .zip); inner dir stays ...-dev-<id>.
   LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
   LLVM_MAJOR_FOR_PACKAGE: ${{ github.event.inputs.llvm_major_version || '19' }}
 
@@ -428,21 +428,70 @@ jobs:
             echo "Merged $p -> $D"
           done
 
-      # Linux: one tarball for ohos-test-build (inner clang-dev only; outer .tar already extracted above).
+      - name: Overlay libcxx-ndk into merged host trees
+        run: |
+          set -euo pipefail
+          # Start Linux host tree from clang-dev-linux-x86_64 and flatten later at pack time.
+          rm -rf linux-host && mkdir -p linux-host
+          tar -xzf extract-linux/packages/clang-dev-linux-x86_64.tar.gz -C linux-host
+          if [ -d linux-host/clang-dev ]; then
+            LNX_HOST="linux-host/clang-dev"
+          elif [ -d linux-host/clang ]; then
+            LNX_HOST="linux-host/clang"
+          else
+            echo "::error::Expected linux-host/clang-dev or linux-host/clang after extracting clang-dev-linux-x86_64.tar.gz"
+            find linux-host -maxdepth 3 -type d | sed -n '1,80p'
+            exit 1
+          fi
+          DARWIN_ARM="$(find staging -maxdepth 1 -type d -name 'clang_darwin-arm64-*' | head -1)"
+          DARWIN_X64="$(find staging -maxdepth 1 -type d -name 'clang_darwin-x86_64-*' | head -1)"
+          WINDOWS_X64="$(find staging -maxdepth 1 -type d -name 'clang_windows-x86_64-*' | head -1)"
+          [ -d "$DARWIN_ARM" ] || { echo "::error::Missing merged Darwin ARM64 tree"; exit 1; }
+          [ -d "$DARWIN_X64" ] || { echo "::error::Missing merged Darwin X64 tree"; exit 1; }
+          [ -d "$WINDOWS_X64" ] || { echo "::error::Missing merged Windows X64 tree"; exit 1; }
+
+          overlay_from_tar() {
+            local tgz="$1"
+            local target="$2"
+            local tmp
+            [ -f "$tgz" ] || { echo "::error::Missing overlay tar $tgz"; exit 1; }
+            tmp="$(mktemp -d)"
+            tar -xzf "$tgz" -C "$tmp"
+            [ -d "$tmp/libcxx-ndk" ] || { echo "::error::$tgz does not contain libcxx-ndk/"; find "$tmp" -maxdepth 2 | sed -n '1,80p'; exit 1; }
+            cp -a "$tmp/libcxx-ndk"/. "$target"/
+            rm -rf "$tmp"
+          }
+
+          PKG="extract-linux/packages"
+          overlay_from_tar "$PKG/libcxx-ndk-dev-darwin-arm64.tar.gz" "$DARWIN_ARM"
+          overlay_from_tar "$PKG/libcxx-ndk-dev-darwin-x86_64.tar.gz" "$DARWIN_X64"
+          overlay_from_tar "$PKG/libcxx-ndk-dev-linux-aarch64.tar.gz" "$LNX_HOST"
+          overlay_from_tar "$PKG/libcxx-ndk-dev-linux-x86_64.tar.gz" "$LNX_HOST"
+          overlay_from_tar "$PKG/libcxx-ndk-dev-windows-x86_64.tar.gz" "$WINDOWS_X64"
+
+      # Linux: one tarball for ohos-test-build; archive root is flattened (bin/, lib/, include/, ...).
       - name: Pack llvm-final Linux X64 OHOS toolchain
         id: pack_linux_final
         env:
           COPYFILE_DISABLE: 1
         run: |
           set -euo pipefail
-          mkdir -p linux-final
-          tar -xzf extract-linux/packages/clang-dev-linux-x86_64.tar.gz -C linux-final
-          # Inner dir: JetBrains/Konan essentials stem only. Outer basename adds -run<id> for unique LAN artifact names.
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-essentials-${LLVM_ESSENTIALS_ID}"
+          if [ -d linux-host/clang-dev ]; then
+            SRC="linux-host/clang-dev"
+          elif [ -d linux-host/clang ]; then
+            SRC="linux-host/clang"
+          else
+            echo "::error::Missing linux host tree at linux-host/clang-dev or linux-host/clang"
+            find linux-host -maxdepth 3 -type d | sed -n '1,80p'
+            exit 1
+          fi
+          # Inner dir: JetBrains/Konan dev stem only. Outer basename adds -run<id> for unique LAN artifact names.
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-dev-${LLVM_ESSENTIALS_ID}"
           ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
-          cp -a linux-final/. "$STEM/"
+          cp -a "$SRC"/. "$STEM/"
+          [ -d "$STEM/bin" ] || { echo "::error::Expected flattened linux layout with $STEM/bin"; ls -la "$STEM"; exit 1; }
           GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
           first="$(tar -tzf "$ARCHIVE" | head -1)"
           [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
@@ -461,11 +510,11 @@ jobs:
             ls -la staging || true
             exit 1
           fi
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-essentials-${LLVM_ESSENTIALS_ID}"
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-dev-${LLVM_ESSENTIALS_ID}"
           ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
-          # Flatten merged host tree: essentials root is the clang install (bin/, lib/, …), not clang_darwin-*-<date>/.
+          # Flatten merged host tree: dev root is the clang install (bin/, lib/, ...), not clang_darwin-*-<date>/.
           cp -a "$TC"/. "$STEM/"
           [ -d "$STEM/bin" ] || { echo "::error::Expected $STEM/bin after flattening from $TC"; ls -la "$STEM"; exit 1; }
           # Use gzip via tar (not pigz): cross-copy job does not install brew deps; pigz may be absent on the llvm runner.
@@ -487,7 +536,7 @@ jobs:
             ls -la staging || true
             exit 1
           fi
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-essentials-${LLVM_ESSENTIALS_ID}"
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-dev-${LLVM_ESSENTIALS_ID}"
           ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
@@ -511,17 +560,17 @@ jobs:
             ls -la staging || true
             exit 1
           fi
-          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-windows-essentials-${LLVM_ESSENTIALS_ID}"
-          ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
+          STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-windows-dev-${LLVM_ESSENTIALS_ID}"
+          ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.zip"
           rm -rf "$STEM"
           mkdir -p "$STEM"
           cp -a "$TC"/. "$STEM/"
           [ -d "$STEM/bin" ] || { echo "::error::Expected $STEM/bin after flattening from $TC"; ls -la "$STEM"; exit 1; }
-          GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
-          first="$(tar -tzf "$ARCHIVE" | head -1)"
+          zip -qry "$ARCHIVE" "$STEM"
+          first="$(unzip -Z1 "$ARCHIVE" | head -1)"
           [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
-          echo "Packed $ARCHIVE (top-level dir $STEM, flattened from $(basename "$TC"))" >> "$GITHUB_STEP_SUMMARY"
+          echo "Packed $ARCHIVE (zip, top-level dir $STEM, flattened from $(basename "$TC"))" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload llvm-final Linux X64 OHOS toolchain
         uses: ./kn-action/.github/actions/upload-artifact-local
@@ -603,7 +652,7 @@ jobs:
           rm -rf "${{ github.workspace }}/ohos-test-work"
           mkdir -p "${{ github.workspace }}/ohos-test-work"
 
-      - name: Select llvm-final artifact name (JetBrains-style essentials tarball)
+      - name: Select llvm-final artifact name (JetBrains-style dev artifact)
         id: llvm_tar
         working-directory: ${{ github.workspace }}/ohos-test-work
         run: |
@@ -637,10 +686,14 @@ jobs:
           }
           W="$(win_paths "${{ github.workspace }}")/ohos-test-work"
           LLVM_TAR="$(win_paths "${{ steps.dl_final.outputs.path }}")"
-          tar -xzf "$LLVM_TAR" -C "$W"
-          ROOT="$(find "$W" -maxdepth 1 -type d -name 'llvm-*-essentials-*' | head -1)"
+          if [[ "$LLVM_TAR" = *.zip ]]; then
+            unzip -q "$LLVM_TAR" -d "$W"
+          else
+            tar -xzf "$LLVM_TAR" -C "$W"
+          fi
+          ROOT="$(find "$W" -maxdepth 1 -type d -name 'llvm-*-dev-*' | head -1)"
           if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
-            echo "::error::Expected one top-level llvm-*-essentials-* directory after extracting ${{ steps.llvm_tar.outputs.name }}"
+            echo "::error::Expected one top-level llvm-*-dev-* directory after extracting ${{ steps.llvm_tar.outputs.name }}"
             ls -la "$W" || true
             exit 1
           fi
@@ -658,20 +711,9 @@ jobs:
             exit 1
           fi
           echo "OHOS_SYSROOT_PATH=$SYSROOT" >> "$GITHUB_ENV"
-          if [ "${{ matrix.platform }}" = "linux-x64" ]; then
-            if [ ! -d "$ROOT/clang-dev" ] && [ ! -d "$ROOT/clang" ]; then
-              echo "::error::Expected clang-dev/ or clang/ under $ROOT"; ls -la "$ROOT"
-              exit 1
-            fi
-            if [ ! -d "$ROOT/clang-dev/bin" ] && [ ! -d "$ROOT/clang/bin" ]; then
-              echo "::error::Expected clang-dev/bin or clang/bin under $ROOT"; find "$ROOT" -maxdepth 5 | head -80
-              exit 1
-            fi
-          else
-            if [ ! -d "$ROOT/bin" ]; then
-              echo "::error::Expected $ROOT/bin (flattened Darwin/Windows essentials layout)"; ls -la "$ROOT" || true
-              exit 1
-            fi
+          if [ ! -d "$ROOT/bin" ]; then
+            echo "::error::Expected $ROOT/bin (flattened dev layout)"; ls -la "$ROOT" || true
+            exit 1
           fi
 
       - name: Write OHOS test sources
@@ -693,21 +735,14 @@ jobs:
           }
           EOF
 
-      # llvm-*-essentials-*: Linux has clang-dev/bin (or clang/bin); Darwin essentials are flattened (bin/ at essentials root).
+      # llvm-*-dev-*: all hosts are flattened (bin/ at dev root).
       - name: Cross-compile OHOS aarch64 (C and C++)
         run: |
           set -euo pipefail
           W="$(pwd)"
           ROOT="${LLVM_ESS_ROOT:?}"
-          BIN=""
-          if [ "${{ matrix.platform }}" = "linux-x64" ]; then
-            for d in "$ROOT/clang-dev/bin" "$ROOT/clang/bin"; do
-              if [ -d "$d" ]; then BIN="$d"; break; fi
-            done
-          else
-            BIN="$ROOT/bin"
-            [ -d "$BIN" ] || { echo "::error::No $ROOT/bin (flattened Darwin/Windows essentials)"; ls -la "$ROOT" || true; exit 1; }
-          fi
+          BIN="$ROOT/bin"
+          [ -d "$BIN" ] || { echo "::error::No $ROOT/bin (flattened dev layout)"; ls -la "$ROOT" || true; exit 1; }
           [ -n "$BIN" ] || { echo "::error::No toolchain bin under $W"; exit 1; }
           OHOS_CC=""
           for cand in \
