@@ -12,23 +12,18 @@ on:
     inputs:
       branch:
         description: 'Branch to build'
-        required: false
         default: develop-2.2.21-OH
       pr_number:
         description: 'PR number to merge into branch (use with branch)'
-        required: false
         default: ""
       commit:
         description: 'Commit SHA to build (if set, overrides branch/pr)'
-        required: false
       clean_build:
         description: 'Discard Gradle/Konan caches and rebuild from scratch'
-        required: false
-        default: true
+        default: false
         type: boolean
       use_maven_proxy:
         description: 'Use local maven proxy to speed up build'
-        required: true
         default: true
         type: boolean
   push:
