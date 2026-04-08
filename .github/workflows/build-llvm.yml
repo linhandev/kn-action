@@ -32,16 +32,15 @@ on:
         description: 'Custom title for this run (shown in Actions UI)'
         required: false
         type: string
-  # Re-enable after essentials .tar.gz layout is validated on real runners (workflow_dispatch only for now).
-  # push:
-  #   paths:
-  #     - '.github/workflows/build-llvm.yml'
-  #     - 'scripts/setup-repo-tool.sh'
-  #     - 'scripts/setup-llvm-ccache.sh'
-  #     - 'scripts/platform_package.sh'
-  #     # Windows LLVM scripts (not in active matrix):
-  #     # - 'scripts/ohos-env-prepare-windows.sh'
-  #     # - 'scripts/ohos-build-llvm-windows.sh'
+  push:
+    paths:
+      - '.github/workflows/build-llvm.yml'
+      - 'scripts/setup-repo-tool.sh'
+      - 'scripts/setup-llvm-ccache.sh'
+      - 'scripts/platform_package.sh'
+      # Windows LLVM scripts (not in active matrix):
+      # - 'scripts/ohos-env-prepare-windows.sh'
+      # - 'scripts/ohos-build-llvm-windows.sh'
 
 env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
