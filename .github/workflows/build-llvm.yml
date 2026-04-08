@@ -21,7 +21,7 @@ on:
         default: false
         type: boolean
       final_llvm_artifact_version:
-        description: 'Essentials id for final OHOS LLVM tarballs (JetBrains-style), e.g. 200 -> llvm-19-aarch64-macos-essentials-200.tar.gz'
+        description: 'Essentials id for final OHOS LLVM tarballs (JetBrains-style). Published file is llvm-<major>-<triple>-essentials-<id>-run<run_id>.tar.gz; extracting yields one top-level dir llvm-<major>-<triple>-essentials-<id> (no -run suffix on the folder).'
         default: '200'
         type: string
       llvm_major_version:
@@ -32,15 +32,16 @@ on:
         description: 'Custom title for this run (shown in Actions UI)'
         required: false
         type: string
-  push:
-    paths:
-      - '.github/workflows/build-llvm.yml'
-      - 'scripts/setup-repo-tool.sh'
-      - 'scripts/setup-llvm-ccache.sh'
-      - 'scripts/platform_package.sh'
-      # Windows LLVM scripts (not in active matrix):
-      # - 'scripts/ohos-env-prepare-windows.sh'
-      # - 'scripts/ohos-build-llvm-windows.sh'
+  # Re-enable after essentials .tar.gz layout is validated on real runners (workflow_dispatch only for now).
+  # push:
+  #   paths:
+  #     - '.github/workflows/build-llvm.yml'
+  #     - 'scripts/setup-repo-tool.sh'
+  #     - 'scripts/setup-llvm-ccache.sh'
+  #     - 'scripts/platform_package.sh'
+  #     # Windows LLVM scripts (not in active matrix):
+  #     # - 'scripts/ohos-env-prepare-windows.sh'
+  #     # - 'scripts/ohos-build-llvm-windows.sh'
 
 env:
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
@@ -53,7 +54,7 @@ env:
   OHOS_SYSROOT_URL: https://maven.eazytec-cloud.com/nexus/repository/file-storage/sysroot-ohos-aarch64-6.0.2.640-02.tar.gz
   OHOS_SYSROOT_CACHE_DIR: ~/runner/cache
   # Upstream Kotlin/Native naming: https://download.jetbrains.com/kotlin/native/resources/llvm/<major>-<triple>/llvm-<major>-<triple>-essentials-<id>.tar.gz
-  # Untar yields a single top-level directory matching the archive basename (see ~/.konan/dependencies).
+  # Untar yields a single top-level directory matching the essentials stem (see ~/.konan/dependencies). Published LAN artifacts use ...-essentials-<id>-run<run_id>.tar.gz for unique names; inner dir stays ...-essentials-<id>.
   LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
   LLVM_MAJOR_FOR_PACKAGE: ${{ github.event.inputs.llvm_major_version || '19' }}
 
@@ -352,6 +353,9 @@ jobs:
     needs: llvm-artifact-refs
     if: ${{ !cancelled() && needs['llvm-artifact-refs'].result == 'success' }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
+    env:
+      LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
+      LLVM_MAJOR_FOR_PACKAGE: ${{ github.event.inputs.llvm_major_version || '19' }}
     outputs:
       archive_linux: ${{ steps.pack_linux_final.outputs.archive }}
       archive_mac_arm64: ${{ steps.pack_arm64.outputs.archive }}
@@ -423,45 +427,68 @@ jobs:
       # Linux: one tarball for ohos-test-build (inner clang-dev only; outer .tar already extracted above).
       - name: Pack llvm-final Linux X64 OHOS toolchain
         id: pack_linux_final
+        env:
+          COPYFILE_DISABLE: 1
         run: |
           set -euo pipefail
           mkdir -p linux-final
           tar -xzf extract-linux/packages/clang-dev-linux-x86_64.tar.gz -C linux-final
-          # Inner dir: JetBrains/Konan essentials stem only. Tar.gz basename adds -run<id> so LAN artifact server accepts re-runs.
+          # Inner dir: JetBrains/Konan essentials stem only. Outer basename adds -run<id> for unique LAN artifact names.
           STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-essentials-${LLVM_ESSENTIALS_ID}"
           ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
           cp -a linux-final/. "$STEM/"
-          tar -czf "$ARCHIVE" "$STEM"
+          GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
+          first="$(tar -tzf "$ARCHIVE" | head -1)"
+          [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           echo "Packed $ARCHIVE (top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pack llvm-final macOS ARM64 OHOS toolchain
         id: pack_arm64
+        env:
+          COPYFILE_DISABLE: 1
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-arm64-*' | head -1)"
+          if [ -z "$TC" ] || [ ! -d "$TC" ]; then
+            echo "::error::No merged clang_darwin-arm64-* directory under staging"
+            ls -la staging || true
+            exit 1
+          fi
           STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-essentials-${LLVM_ESSENTIALS_ID}"
           ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
           cp -a "$TC" "$STEM/"
-          tar -cf - "$STEM" | pigz -9 > "$ARCHIVE"
+          # Use gzip via tar (not pigz): cross-copy job does not install brew deps; pigz may be absent on the llvm runner.
+          GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
+          first="$(tar -tzf "$ARCHIVE" | head -1)"
+          [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           echo "Packed $ARCHIVE (top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pack llvm-final macOS X64 OHOS toolchain
         id: pack_x64
+        env:
+          COPYFILE_DISABLE: 1
         run: |
           set -euo pipefail
           TC="$(find staging -maxdepth 1 -type d -name 'clang_darwin-x86_64-*' | head -1)"
+          if [ -z "$TC" ] || [ ! -d "$TC" ]; then
+            echo "::error::No merged clang_darwin-x86_64-* directory under staging"
+            ls -la staging || true
+            exit 1
+          fi
           STEM="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-essentials-${LLVM_ESSENTIALS_ID}"
           ARCHIVE="${STEM}-run${GITHUB_RUN_ID}.tar.gz"
           rm -rf "$STEM"
           mkdir -p "$STEM"
           cp -a "$TC" "$STEM/"
-          tar -cf - "$STEM" | pigz -9 > "$ARCHIVE"
+          GZIP=-9 tar -czf "$ARCHIVE" "$STEM"
+          first="$(tar -tzf "$ARCHIVE" | head -1)"
+          [ "$first" = "${STEM}/" ] || { echo "::error::Expected first member ${STEM}/, got $first"; exit 1; }
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           echo "Packed $ARCHIVE (top-level dir $STEM)" >> "$GITHUB_STEP_SUMMARY"
 
