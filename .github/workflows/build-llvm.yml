@@ -79,10 +79,6 @@ jobs:
           - runner: [self-hosted, linux, X64, llvm]
             container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:bc3de27
             shell: bash
-          # Windows LLVM build disabled (upstream build.py host prebuilts / CI cost).
-          # - runner: [self-hosted, Windows, X64, llvm]
-          #   container_image: ''
-          #   shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ matrix.container_image }}
@@ -745,19 +741,8 @@ jobs:
           echo "HDC_TARGET=$TARGET" >> "$GITHUB_ENV"
           echo "### hdc (${{ matrix.host_suffix }})" >> "$GITHUB_STEP_SUMMARY"
           echo "- Selected target (${n} available): \`$TARGET\`" >> "$GITHUB_STEP_SUMMARY"
-          API=""
-          for _try in \
-            "param get const.product.os.dist.apiname" \
-            "param get const.ohos.apiversion" \
-            "param get const.build.os.apiversion"; do
-            API="$("$HDC_BIN" -t "$TARGET" shell $_try 2>/dev/null | tr -d '\r' | head -1)" || true
-            [ -n "$API" ] && break
-          done
-          if [ -n "$API" ]; then
-            echo "- API / OS info: \`$API\`" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- API / OS info: (could not read via \`param get\`; device may restrict shell)" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          API="$("$HDC_BIN" -t "$TARGET" shell param get const.ohos.apiversion 2>/dev/null | tr -d '\r' | head -1)"
+          echo "- API / OS info (\`param get const.ohos.apiversion\`): \`$API\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Extract and run OHOS ELFs
         run: |
