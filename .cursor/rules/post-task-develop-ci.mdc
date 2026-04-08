@@ -1,0 +1,16 @@
+---
+description: After completing work, commit on develop, push, poll CI run, fix, iterate
+alwaysApply: true
+---
+
+# Post-task: commit, push, and close the CI loop
+
+When a task or mode of work is **finished** and there is **nothing ambiguous** that requires asking the user (scope, product intent, secrets, or irreversible actions), **do not stop at a local change**. Drive it to a green workflow on `develop`:
+
+1. **Commit** on branch `develop` with a clear message describing what changed and why.
+2. **Push** to GitHub (`origin`).
+3. **CI**: If a relevant workflow is not already running for that push, **trigger** it (e.g. empty commit only if the repo convention allows, or the appropriate `workflow_dispatch` / documented trigger). Otherwise rely on the push-triggered run.
+4. **Poll** the workflow run until it **concludes** (success, failure, or cancelled). Prefer this repo’s `scripts/poll-workflow-run.py` with the run ID from `gh`, or GitHub MCP / `gh run watch` as appropriate.
+5. If the run **failed**, **diagnose**, **fix** in-repo, and **iterate**: commit → push → poll again until green or until you hit something that must be resolved with the user.
+
+Skip this loop when the user explicitly asked for a draft-only change, no push, or when git/remote state is unknown or unsafe to modify without confirmation.
