@@ -22,7 +22,7 @@ on:
         type: boolean
       final_llvm_artifact_version:
         description: 'Dev id for final OHOS LLVM artifacts (JetBrains-style). Linux/macOS publish llvm-<major>-<triple>-dev-<id>-run<run_id>.tar.gz, Windows publishes llvm-<major>-<triple>-dev-<id>-run<run_id>.zip; extracting yields one top-level dir llvm-<major>-<triple>-dev-<id> (no -run suffix on the folder).'
-        default: '200'
+        default: '203'
         type: string
       llvm_major_version:
         description: 'LLVM major version segment in published names (matches CLANG_RESOURCE_VERSION / konan layout)'

@@ -81,7 +81,7 @@ jobs:
           java-version: '8'
 
       - name: Set up Java 11
-        if: runner.os == 'macOS' && runner.arch == 'X64'
+        if: (runner.os == 'macOS' && runner.arch == 'X64') || runner.os == 'Windows'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
