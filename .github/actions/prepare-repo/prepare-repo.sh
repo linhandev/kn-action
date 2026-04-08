@@ -13,16 +13,56 @@
 
 set -euo pipefail
 
+# Remove stale lock files in an existing git worktree.
+# Self-hosted runners reuse workspace directories; interrupted jobs can leave .lock files behind.
+clear_stale_git_locks() {
+  local repo_dir="${1:-.}" git_dir lock
+  git_dir="$(git -C "$repo_dir" rev-parse --git-dir 2>/dev/null || true)"
+  [[ -z "$git_dir" ]] && return 0
+
+  for lock in \
+    "$git_dir/index.lock" \
+    "$git_dir/shallow.lock" \
+    "$git_dir/packed-refs.lock" \
+    "$git_dir/config.lock" \
+    "$git_dir/HEAD.lock" \
+    "$git_dir/FETCH_HEAD.lock" \
+    "$git_dir/refs/heads/"*.lock \
+    "$git_dir/refs/remotes/"*.lock; do
+    [[ -e "$lock" ]] || continue
+    echo "prepare-repo: removing stale lock: $lock" >&2
+    rm -f "$lock"
+  done
+}
+
 # GitCode SSH clones occasionally drop mid-transfer on long fetches; retry a few times.
 git_with_retry() {
   local max="${GIT_RETRY_MAX:-4}" delay="${GIT_RETRY_DELAY_SEC:-45}" n=1
+  local errf repo_dir
+  errf="$(mktemp)"
+
+  repo_dir="."
+  if [[ "$1" == "-C" && $# -ge 2 ]]; then
+    repo_dir="$2"
+  fi
+
+  # Pre-clean stale locks in reused worktrees before the first attempt.
+  clear_stale_git_locks "$repo_dir"
+
   while true; do
-    if "$@"; then
+    if "$@" 2>"$errf"; then
+      rm -f "$errf"
       return 0
     fi
+    if grep -E -q 'Another git process seems to be running|Unable to create .*\.lock|cannot lock ref' "$errf"; then
+      clear_stale_git_locks "$repo_dir"
+    fi
     if [ "$n" -ge "$max" ]; then
+      cat "$errf" >&2
+      rm -f "$errf"
       return 1
     fi
+    cat "$errf" >&2
     echo "prepare-repo: git failed (${n}/$((max - 1))), retry in ${delay}s: $*" >&2
     sleep "$delay"
     n=$((n + 1))
