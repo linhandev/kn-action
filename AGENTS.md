@@ -1,6 +1,6 @@
 # Agent guide — kn-action
 
-This file is for humans and coding agents working on **kn-action**: reusable GitHub Actions workflows, composite actions, and scripts for **Kotlin Multiplatform (KMP)** and **OpenHarmony (OH)**-related CI (Kotlin compiler builds, LLVM toolchain builds, local artifact plumbing). A **self-hosted GitLab** instance on the LAN is also documented below for future **GitLab CI** migration or hybrid use; primary automation in-repo remains GitHub Actions until `.gitlab-ci.yml` exists.
+This file is for humans and coding agents working on **kn-action**: reusable GitHub Actions workflows, composite actions, and scripts for **Kotlin Multiplatform (KMP)** and **OpenHarmony (OH)**-related CI (Kotlin compiler builds, LLVM toolchain builds, local artifact plumbing). A **self-hosted GitLab** instance on the LAN is documented below. **`.gitlab-ci.yml`** runs **`prepare-repo`** tests on self-hosted runners; GitHub Actions workflows remain until fully migrated.
 
 ---
 
@@ -232,6 +232,20 @@ Use **`http://192.168.3.6:8929`** (not `localhost`) so job containers and other 
 
 **API automation:** Short-lived **root PATs** can create runners via `POST /api/v4/user/runners`; **revoke the PAT immediately** after use. Do not store tokens in this repo.
 
+### Test `prepare-repo` (`.gitlab-ci.yml`)
+
+Jobs **`test:prepare-repo:linux`**, **`test:prepare-repo:macos`**, **`test:prepare-repo:windows`** run [`.github/actions/prepare-repo/test.sh`](.github/actions/prepare-repo/test.sh) — same coverage as [`.github/workflows/test-prepare-repo.yml`](.github/workflows/test-prepare-repo.yml) (SSH + HTTPS against `linhandev/test-prepare-repo` on GitCode).
+
+| Item | Notes |
+|------|--------|
+| **Trigger** | **`workflow:rules`**: `schedule`, **`web`** (Run pipeline), **`push`/`merge_request_event`** only when **`.github/actions/prepare-repo/**`** or **`.gitlab-ci.yml`** changes. Add a **Pipeline schedule** in GitLab for nightly parity with the GitHub cron. |
+| **Runner tags** | **Linux:** `linux`, `amd64`, `shell` (Kotlin-style shell runner on physical Linux). **macOS:** `macos`, `arm64`, `shell`. **Windows:** `windows`, `amd64`, `shell` (Git Bash; configure runner `shell`). |
+| **`GITCODE_SSH_PRIVATE_KEY`** | CI/CD variable (masked); same role as GitHub **`env`** secret for SSH clones. |
+| **`GITCODE_TOKEN`** | Optional; if set, **`git config url.…insteadOf`** enables the **HTTPS** leg of `test.sh`. Omit if the test repo is public and HTTPS works anonymously. |
+| **Work dirs** | Ephemeral under **`$CI_PROJECT_DIR/.ci-tmp/`** (workspace + reference clone), not `runner.temp`. |
+
+Copy this project to GitLab (remote mirror or import) so pipelines run there; GitHub workflow can remain until you retire it.
+
 ### Overlap with `~/runner`
 
 The same **`~/runner/{artifact,cache,kotlin,llvm}`** directory layout can exist on a host for **disk organization** (caches, optional `builds_dir`), but **CI routing** must still use **separate runner registrations** for Kotlin vs LLVM (see **Kotlin vs LLVM — separate runners**). **Kotlin** on **Linux** uses a **shell** executor on a **Kotlin-tagged** runner; **LLVM** on **Linux** uses a **Docker** executor on an **LLVM-tagged** runner. **GitCode** remains the source of truth for Kotlin/LLVM sources (no GitLab mirror required for now). **Large artifacts** use the **LAN artifact server** and **`~/runner/artifact`**; GitLab-native artifacts are optional later.
@@ -289,3 +303,4 @@ So you do **not** need separate GitLab projects for “workflow per concern” u
 
 - [README.md](README.md) — Kotlin workflow summary, poll script, Maven proxy URLs.
 - [`.github/actions/prepare-repo/README.md`](.github/actions/prepare-repo/README.md) — Clone modes and outputs.
+- [`.gitlab-ci.yml`](.gitlab-ci.yml) — GitLab CI (prepare-repo tests).
