@@ -1,6 +1,6 @@
 # Agent guide — kn-action
 
-This file is for humans and coding agents working on **kn-action**: reusable GitHub Actions workflows, composite actions, and scripts for **Kotlin Multiplatform (KMP)** and **OpenHarmony (OH)**-related CI (Kotlin compiler builds, LLVM toolchain builds, local artifact plumbing).
+This file is for humans and coding agents working on **kn-action**: reusable GitHub Actions workflows, composite actions, and scripts for **Kotlin Multiplatform (KMP)** and **OpenHarmony (OH)**-related CI (Kotlin compiler builds, LLVM toolchain builds, local artifact plumbing). A **self-hosted GitLab** instance on the LAN is also documented below for future **GitLab CI** migration or hybrid use; primary automation in-repo remains GitHub Actions until `.gitlab-ci.yml` exists.
 
 ---
 
@@ -175,6 +175,47 @@ Goals the workflow should keep satisfying (details live in the workflow and scri
 2. **Keep design targets** in this file aligned when you change **`build-kotlin.yml`** or **`build-llvm.yml`** in ways that affect goals above or adds new goals.
 3. **Push path filters** — Build LLVM triggers on `build-llvm.yml` and `scripts/setup-repo-tool.sh`; Build Kotlin on its workflow, `prepare-repo`, and `proxy.init.gradle`. If you add new shared scripts, extend `paths` when appropriate.
 4. **End-to-end** — After substantive workflow changes, push to **`develop`** and poll the relevant run until green or a enviromental issue you can't resolve, like runner offline.
+
+---
+
+## Self-hosted GitLab (LAN)
+
+GitLab CE and runners are **LAN-only** (no public domain or WAN IP required). All URLs use the GitLab host’s **static LAN IP** so clone links, the web UI, and runner registration stay consistent.
+
+### GitLab server (host: `linux`)
+
+| Item | Value |
+|------|--------|
+| **Web UI** | `http://192.168.3.6:8929` |
+| **Git over SSH** | `git@192.168.3.6`, port **2222** (GitLab shell inside Docker; host SSH stays on **22**) |
+| **Deployment** | Docker container `gitlab` (`gitlab/gitlab-ce:latest`), data under **`~/gitlab/`** on `linux` (`config`, `logs`, `data`) |
+| **Operator notes** | `~/gitlab/SETUP.txt` on `linux` — restart: `docker restart gitlab`; initial root password: `docker exec gitlab grep '^Password:' /etc/gitlab/initial_root_password` |
+
+`external_url` is set to the **:8929** HTTP URL so it does not collide with other services on port 80/8080.
+
+### Runners
+
+| Host | Executor | Config / service | Tags (example) |
+|------|-----------|------------------|----------------|
+| **`linux`** | **Docker** (socket mounted) | Docker container `gitlab-runner`, config **`~/gitlab-runner/config`** | Created in GitLab UI / API (e.g. `linux`, `docker`) |
+| **This Mac** (primary dev machine) | **Shell** (user-mode) | **`~/.gitlab-runner/config.toml`**, **`brew services start gitlab-runner`** | **`macos`**, **`ARM64`**, **`shell`**, **`dev`** — use these in `.gitlab-ci.yml` `tags:` until you align with `kotlin` / `llvm` naming |
+
+**Registering another runner** (any host): In GitLab go to **Admin area → CI/CD → Runners → New instance runner** (or project/group runner), copy the **`glrt-…`** token, then:
+
+```bash
+# macOS (Homebrew), shell executor — typical for Xcode / KMP-style jobs
+brew install gitlab-runner   # once
+gitlab-runner register --url "http://192.168.3.6:8929" --token "glrt-…" --executor shell --description "my-mac-shell"
+brew services start gitlab-runner
+```
+
+Use **`http://192.168.3.6:8929`** (not `localhost`) so job containers and other machines resolve the same URL as developers.
+
+**API automation:** Short-lived **root PATs** can create runners via `POST /api/v4/user/runners`; **revoke the PAT immediately** after use. Do not store tokens in this repo.
+
+### Overlap with `~/runner`
+
+The same **`~/runner/{artifact,cache,kotlin,llvm}`** layout is intended for long-lived build hosts whether the CI system is GitHub Actions or GitLab CI; only the YAML and variable names differ.
 
 ---
 
