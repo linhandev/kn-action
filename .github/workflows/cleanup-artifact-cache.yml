@@ -1,0 +1,36 @@
+# Cleanup artifact cache: delete files in ~/runner/artifact (used by download-artifact-local
+# and upload-artifact-local) that are older than 1 hour. Runs on each Kotlin self-hosted runner.
+name: Cleanup artifact cache
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    name: cleanup (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: [self-hosted, macOS, ARM64, kotlin]
+          - runner: [self-hosted, macOS, X64, kotlin]
+          - runner: [self-hosted, linux, X64, kotlin]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Delete artifacts older than 1 hour
+        run: |
+          cache_dir="${HOME}/runner/artifact"
+          echo "Cleaning cache dir: $cache_dir" >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -d "$cache_dir" ]; then
+            echo "$cache_dir does not exist, nothing to clean." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          count=$(find "$cache_dir" -maxdepth 1 -type f -mmin +60 -print 2>/dev/null | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "No artifacts older than 1 hour in $cache_dir" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "Removing $count artifact(s) older than 1 hour from $cache_dir" >> "$GITHUB_STEP_SUMMARY"
+          find "$cache_dir" -maxdepth 1 -type f -mmin +60 -print -delete

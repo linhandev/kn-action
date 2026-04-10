@@ -1,0 +1,792 @@
+# Build LLVM toolchain for OpenHarmony using repo-managed multi-repo checkout.
+# Linux (Docker) + macOS (ARM64/X64) on self-hosted runners. Windows host toolchain is produced in the Linux build (packages/clang-dev-windows-x86_64.tar.gz) and merged in cross-copy.
+# Linux: runs inside OpenHarmony build env Docker image (empty `container.image` skips Docker; see actions/runner#265).
+# Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
+# workflow_dispatch skip_build: three independent download-artifact-local pattern= calls (latest per OS via server); outer tars need not share the same llvm/act SHA.
+# Requires: environment "env" with secret GITCODE_TOKEN (GitCode PAT with read access) for repo sync from gitcode.com.
+
+name: Build LLVM
+
+run-name: ${{ github.event.inputs.run_name || 'Build LLVM' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      clean_build:
+        description: 'Wipe workspace and build from scratch'
+        default: false
+        type: boolean
+      skip_build:
+        description: 'Skip the compile matrix; cross-copy uses latest-per-OS llvm-packages outer tars from the artifact server (need not be the same build)'
+        default: false
+        type: boolean
+      final_llvm_artifact_version:
+        description: 'Dev id for final OHOS LLVM artifacts (JetBrains-style). Linux/macOS publish llvm-<major>-<triple>-dev-<id>-run<run_id>.tar.gz, Windows publishes llvm-<major>-<triple>-dev-<id>-run<run_id>.zip; extracting yields one top-level dir llvm-<major>-<triple>-dev-<id> (no -run suffix on the folder).'
+        default: '203'
+        type: string
+      llvm_major_version:
+        description: 'LLVM major version segment in published names (matches CLANG_RESOURCE_VERSION / konan layout)'
+        default: '19'
+        type: string
+      run_name:
+        description: 'Custom title for this run (shown in Actions UI)'
+        required: false
+        type: string
+  # push:
+  #   paths:
+  #     - '.github/workflows/build-llvm.yml'
+  #     - 'scripts/setup-repo-tool.sh'
+  #     - 'scripts/setup-llvm-ccache.sh'
+  #     - 'scripts/platform_package.sh'
+  #     # Windows LLVM scripts (not in active matrix):
+  #     # - 'scripts/ohos-env-prepare-windows.sh'
+  #     # - 'scripts/ohos-build-llvm-windows.sh'
+
+env:
+  # Unique per workflow run; scripts (e.g. platform_package.sh) use this like GitLab CI_PIPELINE_ID.
+  CI_PIPELINE_ID: ${{ github.run_id }}
+  MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
+  MANIFEST_FILE: llvm-toolchain.xml
+  LOCAL_REFERENCE_DIR: ~/git/ci/llvm-project-kmp
+  LLVM_WORKSPACE: ${{ github.workspace }}/llvm
+  REPO_DIR: ${{ github.workspace }}/bin
+  ARTIFACT_LOCAL_PATH: ~/runner/artifact
+  OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02
+  OHOS_SYSROOT_URL: https://maven.eazytec-cloud.com/nexus/repository/file-storage/sysroot-ohos-aarch64-6.0.2.640-02.tar.gz
+  OHOS_SYSROOT_CACHE_DIR: ~/runner/cache
+  # Upstream Kotlin/Native naming pattern (adapted here to dev-stem artifacts): https://download.jetbrains.com/kotlin/native/resources/llvm/<major>-<triple>/llvm-<major>-<triple>-essentials-<id>.tar.gz
+  # Extracting yields a single top-level directory matching the dev stem (see ~/.konan/dependencies). Published LAN artifacts use ...-dev-<id>-run<run_id> (Linux/macOS .tar.gz, Windows .zip); inner dir stays ...-dev-<id>.
+  LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
+  LLVM_MAJOR_FOR_PACKAGE: ${{ github.event.inputs.llvm_major_version || '19' }}
+
+jobs:
+  build:
+    name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
+    # gh/API often pass booleans as the string "true"; accept both.
+    if: ${{ !(github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true')) }}
+    environment: env
+    env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
+    outputs:
+      llvm_sha_short: ${{ steps.archive.outputs.llvm_sha_short }}
+      action_sha_short: ${{ steps.archive.outputs.action_sha_short }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: [self-hosted, macOS, ARM64, llvm]
+            container_image: ''
+            shell: bash
+          - runner: [self-hosted, macOS, X64, llvm]
+            container_image: ''
+            shell: bash
+          - runner: [self-hosted, linux, X64, llvm]
+            container_image: ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:bc3de27
+            shell: bash
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.container_image }}
+      volumes:
+        - ${{ github.workspace }}/../../../artifact:/home/runner/runner/artifact
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Setup environment
+        id: vars
+        run: |
+          AP="${{ env.ARTIFACT_LOCAL_PATH }}"
+          AP="${AP/#\~/$HOME}"
+          if command -v realpath >/dev/null 2>&1; then
+            echo "$(realpath "$AP" 2>/dev/null || echo "$AP")"
+          else
+            echo "$AP"
+          fi
+          CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
+
+          if [ "$CLEAN_BUILD" = "true" ]; then
+            # Wipe the entire Actions work dir for this repo (e.g. .../_work/kn-action), not just llvm/.
+            WORK_ROOT="$(dirname "$GITHUB_WORKSPACE")"
+            cd /
+            rm -rf "$WORK_ROOT"
+            mkdir -p "$GITHUB_WORKSPACE"
+          fi
+          mkdir -p "$LLVM_WORKSPACE"
+
+          NEED_ENV_PREPARE="false"
+          if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
+            NEED_ENV_PREPARE="true"
+          fi
+
+          {
+            echo "LLVM_WORKSPACE=$LLVM_WORKSPACE"
+            echo "clean_build=$CLEAN_BUILD"
+            echo "need_env_prepare=$NEED_ENV_PREPARE"
+            echo "repo_dir=$REPO_DIR"
+          } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_ENV_HINTS: 1
+          CI: 1
+        run: |
+          set -euo pipefail
+          echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python, ccache)…"
+          brew install swig git-lfs java coreutils wget pigz python ccache
+
+      - name: Re-checkout kn-action after clean workspace wipe
+        if: steps.vars.outputs.clean_build == 'true'
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Setup git
+        env:
+          LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
+        run: |
+          git config --global --add safe.directory "$LLVM_WORKSPACE/build"
+          git config --global --add safe.directory "$LLVM_WORKSPACE/third_party/musl"
+          # only set if not already
+          git config --global user.email &>/dev/null || git config --global user.email "ci@ci.ci"
+          git config --global user.name &>/dev/null || git config --global user.name "ci"
+
+      - name: Setup git credentials for GitCode
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          if [ -z "${GITCODE_TOKEN}" ]; then
+            echo "::error::GITCODE_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (read-only access is sufficient)."
+            exit 1
+          fi
+          git config --global credential.helper ''
+          git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
+          git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
+          git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
+
+      - name: Setup repo tool
+        run: bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
+
+      - name: Init repo manifest
+        env:
+          LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
+        run: |
+          export PATH="$CI_PROJECT_DIR/bin:$PATH"
+          # Init when .repo is missing (first run) or when doing a clean build
+          if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
+            cd "$LLVM_WORKSPACE"
+            REFERENCE_FLAG=""
+            ref_dir="${{ env.LOCAL_REFERENCE_DIR }}"
+            ref_dir="${ref_dir/#\~/$HOME}"
+            if [ -d "$ref_dir" ]; then
+              REFERENCE_FLAG="--reference=$ref_dir"
+            fi
+            repo init -u "${{ env.MANIFEST_URL }}" -m "${{ env.MANIFEST_FILE }}" $REFERENCE_FLAG
+          fi
+
+      - name: Sync source
+        env:
+          GIT_TERMINAL_PROMPT: 0
+        run: |
+          export PATH="$CI_PROJECT_DIR/bin:$PATH"
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
+          repo sync -c -v -j 16
+          # Do not quote: -c git lfs pull must be three argv words (Windows/cmd caveat when Windows matrix is enabled).
+          repo forall -c git lfs pull
+
+      - name: Restore git config (remove GitCode credentials)
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          if [ -n "${GITCODE_TOKEN}" ]; then
+            git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
+          fi
+          git config --global --unset credential.helper 2>/dev/null || true
+
+      - name: Prepare build environment (Linux / macOS)
+        if: steps.vars.outputs.need_env_prepare == 'true'
+        run: |
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
+          bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
+
+      - name: Build LLVM
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          set -euo pipefail
+          # Incremental ninja/cmake objects live under LLVM_WORKSPACE (persists on self-hosted unless clean_build).
+          # ccache speeds recompiles after repo sync / header churn; Linux keeps CCACHE_DIR under CI_PROJECT_DIR (Docker mount).
+          source "$CI_PROJECT_DIR/scripts/setup-llvm-ccache.sh"
+          cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
+          bash toolchain/llvm-project/llvm-build/build.sh
+          if command -v ccache >/dev/null 2>&1; then
+            {
+              echo "### ccache (${RUNNER_OS}-${RUNNER_ARCH})"
+              ccache -s || true
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Archive llvm/packages
+        id: archive
+        env:
+          ARTIFACT_LOCAL_PATH: ${{ env.ARTIFACT_LOCAL_PATH }}
+          LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
+        run: |
+          ARTIFACT_LOCAL_PATH="$(echo "$ARTIFACT_LOCAL_PATH" | sed "s|^~|$HOME|")"
+          mkdir -p "$ARTIFACT_LOCAL_PATH"
+
+          LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
+          LLVM_SHA="$(git -C "$LLVM_PROJECT_DIR" rev-parse HEAD)"
+          LLVM_SHA_SHORT="${LLVM_SHA:0:7}"
+          GITHUB_SHA_SHORT="${GITHUB_SHA:0:7}"
+
+          PACKAGES_DIR="$LLVM_WORKSPACE/packages"
+          if [ ! -d "$PACKAGES_DIR" ] || [ -z "$(ls -A "$PACKAGES_DIR" 2>/dev/null)" ]; then
+            echo "::error::Expected non-empty directory at $PACKAGES_DIR (e.g. .../llvm/packages on the runner)."
+            exit 1
+          fi
+
+          ARCHIVE_NAME="llvm-packages-${LLVM_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar"
+          OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
+          tar -cf "$OUT_PATH" -C "$LLVM_WORKSPACE" packages
+          echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
+          echo "name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+          echo "llvm_sha_short=$LLVM_SHA_SHORT" >> "$GITHUB_OUTPUT"
+          echo "action_sha_short=$GITHUB_SHA_SHORT" >> "$GITHUB_OUTPUT"
+          echo "Uploaded artifact: $OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload llvm/packages to local server
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ steps.archive.outputs.path }}
+
+  # When workflow_dispatch skip_build: three independent latest outer tars (pattern each via download-artifact-local); they need not share llvm/act SHA.
+  resolve-packages-skip-build:
+    name: Get latest artifacts names
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
+    runs-on: [self-hosted, macOS, ARM64, llvm]
+    env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
+    outputs:
+      outer_linux_name: ${{ steps.collect.outputs.outer_linux_name }}
+      outer_mac_arm_name: ${{ steps.collect.outputs.outer_mac_arm_name }}
+      outer_mac_x64_name: ${{ steps.collect.outputs.outer_mac_x64_name }}
+    steps:
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Latest Linux X64 outer tar (pattern)
+        id: dl_linux
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          pattern: 'llvm-packages-.*_Linux_X64\.tar$'
+          path: ${{ github.workspace }}/skip-build-resolve
+
+      - name: Latest macOS ARM64 outer tar (pattern)
+        id: dl_mac_arm
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          pattern: 'llvm-packages-.*_macOS_ARM64\.tar$'
+          path: ${{ github.workspace }}/skip-build-resolve
+
+      - name: Latest macOS X64 outer tar (pattern)
+        id: dl_mac_x64
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          pattern: 'llvm-packages-.*_macOS_X64\.tar$'
+          path: ${{ github.workspace }}/skip-build-resolve
+
+      - name: Collect outer tar basenames
+        id: collect
+        run: |
+          set -euo pipefail
+          echo "outer_linux_name=$(basename "${{ steps.dl_linux.outputs.path }}")" >> "$GITHUB_OUTPUT"
+          echo "outer_mac_arm_name=$(basename "${{ steps.dl_mac_arm.outputs.path }}")" >> "$GITHUB_OUTPUT"
+          echo "outer_mac_x64_name=$(basename "${{ steps.dl_mac_x64.outputs.path }}")" >> "$GITHUB_OUTPUT"
+          echo "### Using latest artifacts (not built from this workflow run)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Linux: \`$(basename "${{ steps.dl_linux.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- macOS ARM64: \`$(basename "${{ steps.dl_mac_arm.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- macOS X64: \`$(basename "${{ steps.dl_mac_x64.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # Outer llvm-packages tar basenames for cross-copy / tests (same triple from one build, or three independent latest when skip_build).
+  llvm-artifact-refs:
+    name: Resolve artifact names
+    needs: [build, resolve-packages-skip-build]
+    if: ${{ always() && (needs.build.result == 'success' || needs['resolve-packages-skip-build'].result == 'success') }}
+    runs-on: ubuntu-latest
+    env:
+      # Only workflow_dispatch + skip_build uses pattern-resolved latest tars; never fall back when a real build failed.
+      SKIP_BUILD_LATEST: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
+    outputs:
+      outer_linux_name: ${{ steps.pick.outputs.outer_linux_name }}
+      outer_mac_arm_name: ${{ steps.pick.outputs.outer_mac_arm_name }}
+      outer_mac_x64_name: ${{ steps.pick.outputs.outer_mac_x64_name }}
+    steps:
+      - id: pick
+        run: |
+          set -euo pipefail
+          if [ "${SKIP_BUILD_LATEST}" = "true" ]; then
+            echo "outer_linux_name=${{ needs['resolve-packages-skip-build'].outputs.outer_linux_name }}" >> "$GITHUB_OUTPUT"
+            echo "outer_mac_arm_name=${{ needs['resolve-packages-skip-build'].outputs.outer_mac_arm_name }}" >> "$GITHUB_OUTPUT"
+            echo "outer_mac_x64_name=${{ needs['resolve-packages-skip-build'].outputs.outer_mac_x64_name }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.build.result }}" = "success" ]; then
+            L="${{ needs.build.outputs.llvm_sha_short }}"
+            A="${{ needs.build.outputs.action_sha_short }}"
+            echo "outer_linux_name=llvm-packages-${L}_act-${A}_Linux_X64.tar" >> "$GITHUB_OUTPUT"
+            echo "outer_mac_arm_name=llvm-packages-${L}_act-${A}_macOS_ARM64.tar" >> "$GITHUB_OUTPUT"
+            echo "outer_mac_x64_name=llvm-packages-${L}_act-${A}_macOS_X64.tar" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Build did not succeed; not using skip_build pattern-resolved artifacts (set skip_build only when intentionally skipping compile)."
+            exit 1
+          fi
+
+  cross-copy:
+    name: cross copy on mac arm
+    needs: llvm-artifact-refs
+    if: ${{ !cancelled() && needs['llvm-artifact-refs'].result == 'success' }}
+    runs-on: [self-hosted, macOS, ARM64, llvm]
+    env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
+      LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
+      LLVM_MAJOR_FOR_PACKAGE: ${{ github.event.inputs.llvm_major_version || '19' }}
+    outputs:
+      archive_linux: ${{ steps.finalize.outputs.archive_linux }}
+      archive_mac_arm64: ${{ steps.finalize.outputs.archive_mac_arm64 }}
+      archive_mac_x64: ${{ steps.finalize.outputs.archive_mac_x64 }}
+      archive_windows: ${{ steps.finalize.outputs.archive_windows }}
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/cross-copy-work
+    steps:
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Prepare workspace
+        # Must not inherit defaults.run.working-directory (cross-copy-work): it does not exist until this step creates it.
+        working-directory: ${{ github.workspace }}
+        run: |
+          rm -rf "${{ github.workspace }}/cross-copy-work"
+          mkdir -p "${{ github.workspace }}/cross-copy-work/downloads"
+
+      - name: Download llvm-packages (Linux X64)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: ${{ needs['llvm-artifact-refs'].outputs.outer_linux_name }}
+          path: ${{ github.workspace }}/cross-copy-work/downloads
+
+      - name: Download llvm-packages (macOS ARM64)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: ${{ needs['llvm-artifact-refs'].outputs.outer_mac_arm_name }}
+          path: ${{ github.workspace }}/cross-copy-work/downloads
+
+      - name: Download llvm-packages (macOS X64)
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: ${{ needs['llvm-artifact-refs'].outputs.outer_mac_x64_name }}
+          path: ${{ github.workspace }}/cross-copy-work/downloads
+
+      - name: Extract outer tars, merge packages, and pack final artifacts
+        id: finalize
+        env:
+          CLANG_RESOURCE_VERSION: '19'
+          RUN_FINAL_PACKAGE: '1'
+          COPYFILE_DISABLE: 1
+        run: |
+          set -euo pipefail
+          DL="$(pwd)/downloads"
+          LNX="${{ needs['llvm-artifact-refs'].outputs.outer_linux_name }}"
+          ARM="${{ needs['llvm-artifact-refs'].outputs.outer_mac_arm_name }}"
+          X64="${{ needs['llvm-artifact-refs'].outputs.outer_mac_x64_name }}"
+          mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 staging
+          tar -xf "$DL/$LNX" -C extract-linux
+          tar -xf "$DL/$ARM" -C extract-mac-arm64
+          tar -xf "$DL/$X64" -C extract-mac-x64
+          cp -f extract-linux/packages/*.tar.gz staging/
+          cp -f extract-mac-arm64/packages/clang-dev-darwin-arm64.tar.gz staging/
+          cp -f extract-mac-x64/packages/clang-dev-darwin-x86_64.tar.gz staging/
+          if [ ! -f staging/clang-dev-windows-x86_64.tar.gz ]; then
+            echo "::error::Linux packages must include clang-dev-windows-x86_64.tar.gz (copy from extract-linux/packages failed?)"
+            ls -la extract-linux/packages || true
+            exit 1
+          fi
+          (
+            cd staging
+            LLVM_MAJOR_FOR_PACKAGE="${LLVM_MAJOR_FOR_PACKAGE}" \
+            LLVM_ESSENTIALS_ID="${LLVM_ESSENTIALS_ID}" \
+            CI_PIPELINE_ID="${CI_PIPELINE_ID}" \
+            KNACTION_DOTENV_FILE="${GITHUB_OUTPUT}" \
+            KNACTION_STEP_SUMMARY="${GITHUB_STEP_SUMMARY}" \
+            RUN_FINAL_PACKAGE="${RUN_FINAL_PACKAGE}" \
+            CLANG_RESOURCE_VERSION="${CLANG_RESOURCE_VERSION}" \
+            bash "$CI_PROJECT_DIR/scripts/platform_package.sh"
+          )
+          # OHOS sysroot comes from deveco, hosted on maven, ohos-sysroot-dev.tar.gz isn't used.
+
+          # simple sanity
+          for p in clang_darwin-arm64 clang_darwin-x86_64 clang_windows-x86_64; do
+            D="$(find staging -maxdepth 1 -type d -name "${p}-*" | head -1)"
+            if [ -z "$D" ] || [ ! -d "$D" ]; then
+              echo "::error::Missing merged $p tree under staging"
+              ls -la staging
+              exit 1
+            fi
+            echo "Merged $p -> $D"
+          done
+
+      - name: Upload llvm-final Linux X64 OHOS toolchain
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/cross-copy-work/staging/${{ steps.finalize.outputs.archive_linux }}
+
+      - name: Upload llvm-final macOS ARM64 OHOS toolchain
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/cross-copy-work/staging/${{ steps.finalize.outputs.archive_mac_arm64 }}
+
+      - name: Upload llvm-final macOS X64 OHOS toolchain
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/cross-copy-work/staging/${{ steps.finalize.outputs.archive_mac_x64 }}
+
+      - name: Upload llvm-final Windows X64 OHOS toolchain
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/cross-copy-work/staging/${{ steps.finalize.outputs.archive_windows }}
+
+  # Build OHOS aarch64 test programs on each self-hosted runner (host jobs; ~/runner/artifact + cache like the LLVM build matrix).
+  ohos-test-build:
+    name: ${{ format('ohos-test-build ({0})', matrix.platform) }}
+    needs: [llvm-artifact-refs, cross-copy]
+    if: ${{ !cancelled() && needs['cross-copy'].result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: [self-hosted, linux, X64, llvm]
+            host_suffix: Linux_X64
+            shell: bash
+          - platform: windows-x64
+            runner: [self-hosted, Windows, X64, llvm]
+            host_suffix: Windows_X64
+            shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
+          - platform: macos-arm64
+            runner: [self-hosted, macOS, ARM64, llvm]
+            host_suffix: macOS_ARM64
+            shell: bash
+          - platform: macos-x64
+            runner: [self-hosted, macOS, X64, llvm]
+            host_suffix: macOS_X64
+            shell: bash
+    runs-on: ${{ matrix.runner }}
+    env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
+      LLVM_FINAL_LINUX: ${{ needs.cross-copy.outputs.archive_linux }}
+      LLVM_FINAL_MAC_ARM64: ${{ needs.cross-copy.outputs.archive_mac_arm64 }}
+      LLVM_FINAL_MAC_X64: ${{ needs.cross-copy.outputs.archive_mac_x64 }}
+      LLVM_FINAL_WINDOWS: ${{ needs.cross-copy.outputs.archive_windows }}
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/ohos-test-work
+        shell: ${{ matrix.shell }}
+    steps:
+      # Move aside any stale workspace/kn-action (e.g. root-owned .cursor) so checkout can recreate it.
+      # Renaming only needs write access on the parent dir; rm -rf inside may still fail with EACCES.
+      - name: Retire stale kn-action clone
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          d="${GITHUB_WORKSPACE}/kn-action"
+          if [ -e "$d" ]; then
+            grave="${GITHUB_WORKSPACE}/.kn-action-retired-${{ github.run_id }}-${RANDOM}"
+            mv "$d" "$grave" || { rm -rf "$d" || sudo -n rm -rf "$d" || true; }
+          fi
+
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Prepare workspace
+        # Must not inherit defaults.run.working-directory (ohos-test-work): it does not exist until this step creates it.
+        working-directory: ${{ github.workspace }}
+        run: |
+          rm -rf "${{ github.workspace }}/ohos-test-work"
+          mkdir -p "${{ github.workspace }}/ohos-test-work"
+
+      - name: Select llvm-final artifact name (JetBrains-style dev artifact)
+        id: llvm_tar
+        working-directory: ${{ github.workspace }}/ohos-test-work
+        run: |
+          set -euo pipefail
+          case "${{ matrix.platform }}" in
+            linux-x64) n="${LLVM_FINAL_LINUX}" ;;
+            windows-x64) n="${LLVM_FINAL_WINDOWS}" ;;
+            macos-arm64) n="${LLVM_FINAL_MAC_ARM64}" ;;
+            macos-x64) n="${LLVM_FINAL_MAC_X64}" ;;
+            *) echo "::error::unexpected platform ${{ matrix.platform }}"; exit 1 ;;
+          esac
+          echo "name=$n" >> "$GITHUB_OUTPUT"
+
+      - name: Download llvm-final OHOS toolchain
+        id: dl_final
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: ${{ steps.llvm_tar.outputs.name }}
+          path: ${{ github.workspace }}/ohos-test-work/dl
+
+      - name: Layout llvm-final toolchain + sysroot
+        run: |
+          set -euo pipefail
+          # GNU tar in Git Bash mis-handles "C:\..." (treats C: as a remote device). Use MSYS paths.
+          win_paths() {
+            if [ "${RUNNER_OS:-}" = "Windows" ] && command -v cygpath >/dev/null 2>&1; then
+              cygpath -u "$1"
+            else
+              printf '%s' "$1"
+            fi
+          }
+          W="$(win_paths "${{ github.workspace }}")/ohos-test-work"
+          LLVM_TAR="$(win_paths "${{ steps.dl_final.outputs.path }}")"
+          if [[ "$LLVM_TAR" = *.zip ]]; then
+            unzip -q "$LLVM_TAR" -d "$W"
+          else
+            tar -xzf "$LLVM_TAR" -C "$W"
+          fi
+          ROOT="$(find "$W" -maxdepth 1 -type d -name 'llvm-*-dev-*' | head -1)"
+          if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
+            echo "::error::Expected one top-level llvm-*-dev-* directory after extracting ${{ steps.llvm_tar.outputs.name }}"
+            ls -la "$W" || true
+            exit 1
+          fi
+          echo "LLVM_ESS_ROOT=$ROOT" >> "$GITHUB_ENV"
+          CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-~/runner/cache}"
+          CACHE_BASE="${CACHE_BASE/#\~/$HOME}"
+          CACHE_BASE="$(win_paths "$CACHE_BASE")"
+          mkdir -p "$CACHE_BASE"
+          ARCHIVE="$CACHE_BASE/${OHOS_SYSROOT}.tar.gz"
+          if [ ! -f "$ARCHIVE" ]; then curl -fsSL -o "$ARCHIVE" "$OHOS_SYSROOT_URL"; fi
+          if [ ! -d "$CACHE_BASE/${OHOS_SYSROOT}" ]; then tar -xzf "$ARCHIVE" -C "$CACHE_BASE"; fi
+          SYSROOT="$CACHE_BASE/${OHOS_SYSROOT}"
+          if [ ! -d "$SYSROOT" ]; then
+            echo "::error::Missing sysroot directory $SYSROOT"
+            exit 1
+          fi
+          echo "OHOS_SYSROOT_PATH=$SYSROOT" >> "$GITHUB_ENV"
+          if [ ! -d "$ROOT/bin" ]; then
+            echo "::error::Expected $ROOT/bin (flattened dev layout)"; ls -la "$ROOT" || true
+            exit 1
+          fi
+
+      - name: Write OHOS test sources
+        run: |
+          SUF="${{ matrix.host_suffix }}"
+          mkdir -p src
+          cat > src/test.c << EOF
+          #include <stdio.h>
+          int main(void) {
+            printf("ok_ohos_c_${SUF}\\n");
+            return 0;
+          }
+          EOF
+          cat > src/test.cpp << EOF
+          #include <iostream>
+          int main() {
+            std::cout << "ok_ohos_cpp_${SUF}\\n";
+            return 0;
+          }
+          EOF
+
+      # llvm-*-dev-*: all hosts are flattened (bin/ at dev root).
+      - name: Cross-compile OHOS aarch64 (C and C++)
+        run: |
+          set -euo pipefail
+          W="$(pwd)"
+          ROOT="${LLVM_ESS_ROOT:?}"
+          BIN="$ROOT/bin"
+          [ -d "$BIN" ] || { echo "::error::No $ROOT/bin (flattened dev layout)"; ls -la "$ROOT" || true; exit 1; }
+          [ -n "$BIN" ] || { echo "::error::No toolchain bin under $W"; exit 1; }
+          OHOS_CC=""
+          for cand in \
+            "$BIN/aarch64-unknown-linux-ohos-clang" "$BIN/aarch64-unknown-linux-ohos-clang.exe" \
+            "$BIN/aarch64-linux-ohos-clang" "$BIN/aarch64-linux-ohos-clang.exe"; do
+            if [ -x "$cand" ] || [ -f "$cand" ]; then OHOS_CC="$cand"; break; fi
+          done
+          [ -n "$OHOS_CC" ] || { echo "::error::No aarch64 OHOS clang in $BIN"; ls -la "$BIN"; exit 1; }
+          OHOS_CXX=""
+          for cand in \
+            "$BIN/aarch64-unknown-linux-ohos-clang++" "$BIN/aarch64-unknown-linux-ohos-clang++.exe" \
+            "$BIN/aarch64-linux-ohos-clang++" "$BIN/aarch64-linux-ohos-clang++.exe"; do
+            if [ -x "$cand" ] || [ -f "$cand" ]; then OHOS_CXX="$cand"; break; fi
+          done
+          [ -n "$OHOS_CXX" ] || { echo "::error::No aarch64 OHOS clang++ in $BIN"; ls -la "$BIN"; exit 1; }
+          chmod +x "$OHOS_CC" "$OHOS_CXX" 2>/dev/null || true
+          SR="${OHOS_SYSROOT_PATH:?}"
+          OHOS_FLAGS=(--sysroot="$SR")
+          [ -d "$SR/usr/include" ] && OHOS_FLAGS+=(-I"$SR/usr/include")
+          [ -d "$SR/usr/lib" ] && OHOS_FLAGS+=(-L"$SR/usr/lib")
+          for triple in aarch64-unknown-linux-ohos aarch64-linux-ohos; do
+            [ -d "$SR/usr/include/$triple" ] && OHOS_FLAGS+=(-I"$SR/usr/include/$triple")
+            [ -d "$SR/usr/lib/$triple" ] && OHOS_FLAGS+=(-L"$SR/usr/lib/$triple")
+          done
+          echo "OHOS_CC=$OHOS_CC OHOS_CXX=$OHOS_CXX SYSROOT=$SR"
+          set +e
+          CLOG="$("$OHOS_CC" "${OHOS_FLAGS[@]}" -O2 -o src/hello_ohos_c src/test.c 2>&1)"; CRC=$?
+          set -e
+          if [ "$CRC" -ne 0 ]; then echo "::error::C compile failed: $CLOG"; exit 1; fi
+          set +e
+          CXXLOG="$("$OHOS_CXX" "${OHOS_FLAGS[@]}" -std=c++17 -O2 -o src/hello_ohos_cpp src/test.cpp 2>&1)"; CXXRC=$?
+          set -e
+          if [ "$CXXRC" -ne 0 ]; then echo "::error::C++ compile failed: $CXXLOG"; exit 1; fi
+          # Docker/llvm Linux runner: `file` can hit seccomp (SIGSYS / exit 159); Windows may lack `file`.
+          if [ "${{ matrix.platform }}" = "linux-x64" ] || [ "${{ matrix.platform }}" = "windows-x64" ]; then
+            ls -la src/hello_ohos_c src/hello_ohos_cpp 2>/dev/null || ls -la src/hello_ohos_c.exe src/hello_ohos_cpp.exe 2>/dev/null || ls -la src
+          elif command -v file >/dev/null 2>&1; then
+            file src/hello_ohos_c src/hello_ohos_cpp
+          else
+            ls -la src/hello_ohos_c src/hello_ohos_cpp
+          fi
+
+      - name: Pack test binaries
+        id: test_pack
+        run: |
+          set -euo pipefail
+          NAME="test-binaries-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz"
+          members=()
+          for f in hello_ohos_c hello_ohos_cpp hello_ohos_c.exe hello_ohos_cpp.exe; do
+            [ -f "src/$f" ] && members+=("$f")
+          done
+          [ "${#members[@]}" -ge 2 ] || { echo "::error::Expected at least C and C++ binaries in src/"; ls -la src; exit 1; }
+          tar -czf "$NAME" -C src "${members[@]}"
+          echo "archive_name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload test binaries
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ github.workspace }}/ohos-test-work/${{ steps.test_pack.outputs.archive_name }}
+
+  hdc-ohos-verify:
+    name: Execute test artifacts (${{ matrix.host_suffix }})
+    needs: [ohos-test-build]
+    # always(): skip_build skips `build`; implicit success() would skip this job even when ohos-test-build matrix succeeds.
+    if: ${{ always() && !cancelled() && needs['ohos-test-build'].result == 'success' }}
+    runs-on: [self-hosted, macOS, ARM64, llvm]
+    env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
+    strategy:
+      fail-fast: false
+      # One leg at a time: same runner + hdc session; avoids concurrent file send / shell to one device.
+      max-parallel: 1
+      matrix:
+        include:
+          - host_suffix: Linux_X64
+            run_subdir: linux
+          - host_suffix: Windows_X64
+            run_subdir: win
+          - host_suffix: macOS_ARM64
+            run_subdir: arm64
+          - host_suffix: macOS_X64
+            run_subdir: x64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Retire stale kn-action clone
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          d="${GITHUB_WORKSPACE}/kn-action"
+          if [ -e "$d" ]; then
+            grave="${GITHUB_WORKSPACE}/.kn-action-retired-${{ github.run_id }}-${RANDOM}"
+            mv "$d" "$grave" || { rm -rf "$d" || sudo -n rm -rf "$d" || true; }
+          fi
+
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Download test binaries
+        uses: ./kn-action/.github/actions/download-artifact-local
+        with:
+          name: test-binaries-ohos-${{ matrix.host_suffix }}-${{ github.run_id }}.tar.gz
+          path: ${{ github.workspace }}/hdc-verify/dl
+
+      - name: Pick hdc target and record API level
+        run: |
+          set -euo pipefail
+          HDC_BIN="$(command -v hdc || true)"
+          if [ -z "$HDC_BIN" ] || [ ! -x "$HDC_BIN" ]; then
+            echo "::error::hdc not found in PATH (see AGENTS.md — macOS llvm runner local env: hdc on PATH)"
+            exit 1
+          fi
+          echo "HDC_BIN=$HDC_BIN" >> "$GITHUB_ENV"
+          T=()
+          while IFS= read -r line; do
+            T+=("$line")
+          done < <("$HDC_BIN" list targets 2>/dev/null | sed '/^\s*$/d')
+          n="${#T[@]}"
+          if [ "$n" -lt 1 ]; then
+            echo "::error::No hdc targets (connect one device)."
+            "$HDC_BIN" list targets || true
+            exit 1
+          fi
+          idx=0
+          TARGET="${T[$idx]}"
+          # First column if hdc prints "SN\tName\tStatus"
+          TARGET="${TARGET%%$'\t'*}"
+          TARGET="$(echo "$TARGET" | tr -d '\r')"
+          echo "HDC_TARGET=$TARGET" >> "$GITHUB_ENV"
+          echo "### hdc (${{ matrix.host_suffix }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Selected target (${n} available): \`$TARGET\`" >> "$GITHUB_STEP_SUMMARY"
+          API="$("$HDC_BIN" -t "$TARGET" shell param get const.ohos.apiversion 2>/dev/null | tr -d '\r' | head -1)"
+          echo "- API / OS info (\`param get const.ohos.apiversion\`): \`$API\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Extract and run OHOS ELFs
+        run: |
+          set -euo pipefail
+          SUF="${{ matrix.host_suffix }}"
+          ROOT="${{ github.workspace }}/hdc-verify"
+          DL="$ROOT/dl"
+          RID="${{ github.run_id }}"
+          mkdir -p "$ROOT/run/${{ matrix.run_subdir }}"
+          tar -xzf "$DL/test-binaries-ohos-${SUF}-${RID}.tar.gz" -C "$ROOT/run/${{ matrix.run_subdir }}"
+          REMOTE_BASE=/data/local/tmp/llvm-ci-${{ github.run_id }}
+          HDC_T() { "$HDC_BIN" -t "$HDC_TARGET" "$@"; }
+          HDC_T shell mkdir -p "$REMOTE_BASE"
+          for kind in c cpp; do
+            if [ "$kind" = c ]; then stem=hello_ohos_c; exp="ok_ohos_c_${SUF}"; else stem=hello_ohos_cpp; exp="ok_ohos_cpp_${SUF}"; fi
+            RDIR="$ROOT/run/${{ matrix.run_subdir }}"
+            if [ -f "$RDIR/$stem" ]; then b="$stem"
+            elif [ -f "$RDIR/${stem}.exe" ]; then b="${stem}.exe"
+            else echo "::error::Missing $stem under $RDIR"; ls -la "$RDIR"; exit 1; fi
+            RPATH="$REMOTE_BASE/${SUF}_${kind}"
+            HDC_T file send "$RDIR/$b" "$RPATH"
+            HDC_T shell chmod 755 "$RPATH"
+            OUT=$(HDC_T shell "LD_PRELOAD=/data/app/el1/bundle/public/com.huawei.hmos.location/libs/arm64/libc++_shared.so $RPATH" 2>&1) || true
+            echo "output ($SUF $kind): $OUT"
+            echo "$OUT" | grep -q "$exp" || { echo "::error::Expected '$exp' in output"; exit 1; }
+          done
+          echo "OHOS smoke checks passed for ${SUF}." >> "$GITHUB_STEP_SUMMARY"
+
+  actions-timeline:
+    # Runs after hdc sink; if: always() so the timeline still renders when hdc is skipped.
+    needs: [hdc-ohos-verify]
+    if: always()
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+    steps:
+      - uses: Kesin11/actions-timeline@v3

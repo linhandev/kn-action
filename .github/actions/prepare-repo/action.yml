@@ -1,0 +1,56 @@
+# Reusable composite action: clone or reuse a git repo, resolve branch/commit/PR, force clean state.
+# Outputs HEAD sha and workspace_dir for downstream steps.
+# Use from any workflow: uses: ./.github/actions/prepare-repo (same repo) or uses: owner/repo/.github/actions/prepare-repo@ref (other repo).
+name: Prepare repo
+description: Clone or reuse workspace (optional local reference), resolve branch/commit/PR, force to expected state. Outputs HEAD sha.
+inputs:
+  repo_url:
+    description: 'Git clone URL (required)'
+    required: true
+  branch:
+    description: 'Branch to build (required for branch or branch+PR mode)'
+    required: false
+  commit:
+    description: 'Commit SHA to build (overrides branch/PR)'
+    required: false
+  pr_number:
+    description: 'Merge/pull request number to merge into branch'
+    required: false
+  workspace_dir:
+    description: 'Directory to clone into'
+    required: false
+    default: 'ci-workspace'
+  local_reference_dir:
+    description: 'Base dir for local reference repo (reference = this dir + repo name from URL)'
+    required: false
+    default: '$HOME/git/ci/'
+  mr_ref_template:
+    description: 'Ref template for merge request fetch (%s = PR number). GitLab/GitCode default; use refs/pull/%s/head for GitHub'
+    required: false
+    default: 'refs/merge-requests/%s/head'
+outputs:
+  sha:
+    description: 'HEAD commit SHA of the prepared repo'
+    value: ${{ steps.prepare.outputs.sha }}
+  workspace_dir:
+    description: 'Directory where the repo was cloned (for cd in next steps)'
+    value: ${{ steps.prepare.outputs.workspace_dir }}
+runs:
+  using: composite
+  steps:
+    - name: Prepare repo
+      id: prepare
+      # Composite steps do not inherit the caller workflow shell; self-hosted Windows often has no `bash` on PATH.
+      shell: ${{ runner.os == 'Windows' && 'C:/PROGRA~1/Git/bin/bash.exe --noprofile --norc -e -o pipefail {0}' || 'bash' }}
+      env:
+        REPO_URL: ${{ inputs.repo_url }}
+        BRANCH: ${{ inputs.branch }}
+        COMMIT: ${{ inputs.commit }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        WORKSPACE_DIR: ${{ inputs.workspace_dir }}
+        LOCAL_REFERENCE_DIR: ${{ inputs.local_reference_dir }}
+        MR_REF_TEMPLATE: ${{ inputs.mr_ref_template }}
+      run: |
+        source "$GITHUB_ACTION_PATH/prepare-repo.sh"
+        echo "sha=$(cd ${{ inputs.workspace_dir }} && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        echo "workspace_dir=${{ inputs.workspace_dir }}" >> "$GITHUB_OUTPUT"

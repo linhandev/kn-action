@@ -1,0 +1,16 @@
+--- a/js/js.tests/build.gradle.kts
++++ b/js/js.tests/build.gradle.kts
+@@ -267,8 +267,11 @@
+     from(packageJsonFile)
+     into(node.nodeProjectDir)
+ }
+-tasks.named("npmSetRegistry").configure {
+-    mustRunAfter(prepareNpmTestData)
++// npmSetRegistry exists only when configureJsCacheRedirector() runs (same flag as root build.gradle.kts).
++if (cacheRedirectorEnabled) {
++    tasks.named("npmSetRegistry").configure {
++        mustRunAfter(prepareNpmTestData)
++    }
+ }
+ 
+ val npmInstall by tasks.getting(NpmTask::class) {

@@ -1,0 +1,394 @@
+# Build Kotlin for OpenHarmony: clone CPF-KMP-CMP/kotlin from GitCode and run scripts/build-ohos.sh
+# Target: Mac ARM64 self-hosted runner. Build steps per: linhandev.github.io/_posts/KMP/2026-02-11-Building-Kotlin (mac arm)
+# Requires: runner env has GitCode SSH access configured (no secrets used).
+# Incremental by default: caches in $HOME/runner/cache/. Clean build uses a fresh RUNNER_TEMP dir for Gradle/Konan.
+
+name: Build Kotlin
+
+on:
+  schedule:
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build'
+        default: develop-2.2.21-OH
+      pr_number:
+        description: 'PR number to merge into branch (use with branch)'
+        default: ""
+      commit:
+        description: 'Commit SHA to build (if set, overrides branch/pr)'
+      clean_build:
+        description: 'Discard Gradle/Konan caches and rebuild from scratch'
+        default: false
+        type: boolean
+      use_maven_proxy:
+        description: 'Use local maven proxy to speed up build'
+        default: true
+        type: boolean
+  push:
+    paths:
+      - '.github/workflows/build-kotlin.yml'
+      - '.github/actions/prepare-repo/*'
+      - 'scripts/proxy.init.gradle'
+      - 'scripts/rewrite-gradle-wrapper-reposlite.sh'
+      - 'patches/kotlin-js-tests-npmSetRegistry.patch'
+
+# default or global config
+env:
+  DEFAULT_KOTLIN_BRANCH: develop-2.2.21-OH
+  DEFAULT_CLEAN_BUILD: false
+  DEFAULT_MAVEN_PROXY_URL: http://192.168.3.5:8080/releases
+  # Same Reposilite host as DEFAULT_MAVEN_PROXY_URL; used when maven proxy URL is not …/releases
+  DEFAULT_GRADLE_DISTRIBUTIONS_URL: http://192.168.3.5:8080/distributions
+  REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
+  WORKSPACE_DIR: ci-workspace
+  LOCAL_REFERENCE_DIR: ~/git/ci/
+  PERSISTED_CACHE_ROOT: ~/runner/cache
+  ARTIFACT_LOCAL_PATH: ~/runner/artifact
+
+jobs:
+  build:
+    name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
+    env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
+      CI_PIPELINE_ID: ${{ github.run_id }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: [self-hosted, macOS, ARM64, kotlin]
+            shell: bash
+          - runner: [self-hosted, macOS, X64, kotlin]
+            shell: bash
+          - runner: [self-hosted, linux, X64, kotlin]
+            shell: bash
+          # Self-hosted Windows: `shell: bash` is not on PATH; use Git for Windows bash (see build-llvm.yml).
+          - runner: [self-hosted, Windows, X64, kotlin]
+            shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+        with:
+          path: kn-action
+
+      - name: Set up Java 8
+        id: java8
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '8'
+
+      - name: Set up Java 11
+        if: (runner.os == 'macOS' && runner.arch == 'X64') || runner.os == 'Windows'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Set up Java 17
+        if: runner.os == 'Linux' || (runner.os == 'macOS' && runner.arch == 'ARM64')
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Java 21
+        # Kotlin build-ohos Gradle step uses a Java 21 toolchain; Linux and Windows need it on PATH (Windows cannot auto-provision from Gradle).
+        if: runner.os == 'Linux' || runner.os == 'Windows'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup environment
+        id: vars
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            /usr/bin/xcrun -f bitcode-build-tool
+          fi
+          # Windows: Git for Windows OpenSSH needs explicit paths; host prep is AGENTS.md § Windows kotlin GitCode SSH.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            test -f "$HOME/.ssh/id_ed25519" && test -f "$HOME/.ssh/known_hosts"
+            idf="$(cygpath -m "$HOME/.ssh/id_ed25519" 2>/dev/null || echo "$HOME/.ssh/id_ed25519")"
+            khf="$(cygpath -m "$HOME/.ssh/known_hosts" 2>/dev/null || echo "$HOME/.ssh/known_hosts")"
+            echo "GIT_SSH_COMMAND=ssh -i ${idf} -o IdentitiesOnly=yes -o UserKnownHostsFile=${khf} -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+          fi
+          CLEAN_CACHE_ROOT="${RUNNER_TEMP}/clean-cache"
+          PERSISTED_CACHE_ROOT="$(echo "${{ env.PERSISTED_CACHE_ROOT }}/" | sed "s|^~|$HOME|")"
+          CLEAN_BUILD="${{ github.event_name == 'schedule' && 'true' || github.event.inputs.clean_build || env.DEFAULT_CLEAN_BUILD }}"
+          if [ "$CLEAN_BUILD" = "true" ]; then
+            CI_CACHE_ROOT="${CLEAN_CACHE_ROOT}/"
+          else
+            CI_CACHE_ROOT="${PERSISTED_CACHE_ROOT}"
+          fi
+
+          PROXY_URL="${{ github.event.inputs.use_maven_proxy != 'false' && env.DEFAULT_MAVEN_PROXY_URL || '' }}"
+          echo "PROXY_URL from setting: $PROXY_URL"
+          if [ -n "$PROXY_URL" ]; then
+            # Require only that the host responds (any HTTP status); -f would fail on 4xx/5xx (e.g. 404 on /releases)
+            HTTP_CODE=$(curl -so /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 "$PROXY_URL" || true)
+            if [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" = "000" ]; then
+              echo "Proxy unreachable (no response or connection failed), clearing PROXY_URL"
+              PROXY_URL=""
+            else
+              echo "Proxy reachable (HTTP $HTTP_CODE)"
+            fi
+          fi
+          echo "PROXY_URL after network test: $PROXY_URL"
+
+          # Gradle Node plugin fetches from nodejs.org by default; Reposilite mirrors Maven only, not npm/node
+          # dist. Use npmmirror (same /dist path layout as upstream).
+          echo "NODEJS_DIST_MIRROR=https://npmmirror.com/mirrors/node" >> "$GITHUB_ENV"
+
+          echo "## Run Settings" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "java_version=$(java -version 2>&1 | head -1)" >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "branch=${{ github.event.inputs.branch || env.DEFAULT_KOTLIN_BRANCH }}"
+            echo "commit=${{ github.event.inputs.commit }}"
+            echo "pr_number=${{ github.event.inputs.pr_number }}"
+            echo "clean_build=$CLEAN_BUILD"
+            echo "persisted_cache_root=$PERSISTED_CACHE_ROOT"
+            echo "ci_cache_root=$CI_CACHE_ROOT"
+            echo "artifact_local_path="$(echo "${{ env.ARTIFACT_LOCAL_PATH }}" | sed "s|^~|$HOME|")""
+            echo "gradle_user_home=${CI_CACHE_ROOT}gradle_user_home"
+            echo "konan_data_dir=${CI_CACHE_ROOT}/konan_data"
+            echo "maven_user_home=${CI_CACHE_ROOT}maven_user_home"
+            echo "maven_local_repo=${CI_CACHE_ROOT}maven_user_home/.m2/repository"
+            echo "maven_proxy_url=$PROXY_URL"
+          } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create cache directories
+        run: |
+          mkdir -p \
+            "${{ steps.vars.outputs.gradle_user_home }}" \
+            "${{ steps.vars.outputs.konan_data_dir }}" \
+            "${{ steps.vars.outputs.maven_user_home }}/.m2" \
+            "${{ steps.vars.outputs.artifact_local_path }}"
+
+      - name: Install Gradle proxy init script
+        run: |
+          mkdir -p "${{ steps.vars.outputs.gradle_user_home }}/init.d"
+          cp "$CI_PROJECT_DIR/scripts/proxy.init.gradle" \
+            "${{ steps.vars.outputs.gradle_user_home }}/init.d/"
+          echo "Gradle: proxy.init.gradle installed (Node dist via NODEJS_DIST_MIRROR; Maven mirror when MAVEN_PROXY_URL is set)"
+
+      - name: Clean Konan and Maven caches for clean build
+        if: steps.vars.outputs.clean_build == 'true'
+        env:
+          KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
+          MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
+        run: |
+          echo "Removing contents of KONAN_DATA_DIR and Maven user home (same layout as GRADLE_USER_HOME)..."
+          rm -rf "$KONAN_DATA_DIR"
+          mkdir -p "$KONAN_DATA_DIR"
+          rm -rf "$MAVEN_USER_HOME"
+          mkdir -p "$MAVEN_USER_HOME/.m2"
+
+      - name: Prepare Kotlin repo
+        id: kotlin
+        uses: ./kn-action/.github/actions/prepare-repo
+        with:
+          repo_url: ${{ env.REPO_URL }}
+          branch: ${{ steps.vars.outputs.branch }}
+          commit: ${{ steps.vars.outputs.commit }}
+          pr_number: ${{ steps.vars.outputs.pr_number }}
+          workspace_dir: ${{ env.WORKSPACE_DIR }}
+          local_reference_dir: ${{ env.LOCAL_REFERENCE_DIR }}
+
+      - name: Apply Kotlin patches (npmSetRegistry / cache redirector)
+        run: |
+          set -euo pipefail
+          PATCH="$CI_PROJECT_DIR/patches/kotlin-js-tests-npmSetRegistry.patch"
+          cd "$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}"
+          if patch -p1 < "$PATCH"; then
+            echo "Applied kotlin-js-tests-npmSetRegistry patch"
+          elif grep -q 'if (cacheRedirectorEnabled)' js/js.tests/build.gradle.kts; then
+            echo "kotlin-js-tests npmSetRegistry guard already in tree; skipping patch"
+          else
+            echo "ERROR: patch failed and js/js.tests/build.gradle.kts does not contain the expected guard" >&2
+            exit 1
+          fi
+
+      - name: Configure Maven proxy
+        if: steps.vars.outputs.maven_proxy_url != ''
+        id: maven_proxy
+        env:
+          GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
+          MAVEN_PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
+          MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
+          MAVEN_LOCAL_REPO: ${{ steps.vars.outputs.maven_local_repo }}
+        run: |
+          mkdir -p "$MAVEN_USER_HOME/.m2"
+          # Drop stale "not found" metadata so archetype IT / nested Maven retries resolution after build/repo is populated.
+          KREPO="$MAVEN_USER_HOME/.m2/repository/org/jetbrains/kotlin"
+          if [[ -d "$KREPO" ]]; then
+            find "$KREPO" \( -name '*.lastUpdated' -o -name '_remote.repositories' \) -delete 2>/dev/null || true
+          fi
+          # OH Kotlin GAVs (2.2.21-OH-001, …) live under build/repo (file). Settings profiles inject *before*
+          # POM repos (sourceDominant), so file must be listed first. Use mirrorOf external:* only — combining
+          # external:* with ,!repoId can confuse some Maven versions and route file repos through the mirror;
+          # external:* already leaves file: repositories unmirrorable. Also copy settings to job $HOME/.m2 so
+          # nested mvn (e.g. kotlin-archetype-jvm IT) that does not inherit MAVEN_OPTS user.home still resolves
+          # kotlin-maven-plugin deps from build/repo before Central/JetBrains (mirrored to LAN).
+          KOTLIN_WS="$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}"
+          BUILD_REPO_ABS="$(cd "$KOTLIN_WS" && pwd -P)/build/repo"
+          # Windows: Java/Maven do not treat MSYS paths (/c/...) as file: URLs; use cygpath -m → file:///C:/...
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            FILE_BUILD_REPO_URL="file:///$(cygpath -m "$BUILD_REPO_ABS")"
+            MAVEN_LOCAL_REPO_FOR_XML="$(cygpath -m "$MAVEN_LOCAL_REPO")"
+          else
+            FILE_BUILD_REPO_URL="file://${BUILD_REPO_ABS}"
+            MAVEN_LOCAL_REPO_FOR_XML="$MAVEN_LOCAL_REPO"
+          fi
+          LOCAL_BUILD_REPO_ID="kn-action-local-build-repo"
+          LAN_RELEASES_ID="kn-action-lan-releases"
+          cat > "$MAVEN_USER_HOME/.m2/settings.xml" <<EOF
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+            <localRepository>$MAVEN_LOCAL_REPO_FOR_XML</localRepository>
+            <mirrors>
+              <mirror>
+                <id>maven-proxy</id>
+                <mirrorOf>external:*</mirrorOf>
+                <url>$MAVEN_PROXY_URL</url>
+              </mirror>
+            </mirrors>
+            <profiles>
+              <profile>
+                <id>kn-action-kotlin-build-repo</id>
+                <activation><activeByDefault>true</activeByDefault></activation>
+                <repositories>
+                  <repository>
+                    <id>${LOCAL_BUILD_REPO_ID}</id>
+                    <url>${FILE_BUILD_REPO_URL}</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
+                  <repository>
+                    <id>${LAN_RELEASES_ID}</id>
+                    <url>$MAVEN_PROXY_URL</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
+                </repositories>
+                <pluginRepositories>
+                  <repository>
+                    <id>${LOCAL_BUILD_REPO_ID}</id>
+                    <url>${FILE_BUILD_REPO_URL}</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
+                  <repository>
+                    <id>${LAN_RELEASES_ID}</id>
+                    <url>$MAVEN_PROXY_URL</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                  </repository>
+                </pluginRepositories>
+              </profile>
+            </profiles>
+          </settings>
+          EOF
+          mkdir -p "$HOME/.m2"
+          cp "$MAVEN_USER_HOME/.m2/settings.xml" "$HOME/.m2/settings.xml"
+          echo "Maven: MAVEN_USER_HOME=$MAVEN_USER_HOME localRepository=$MAVEN_LOCAL_REPO_FOR_XML mirror=$MAVEN_PROXY_URL fileRepo=$FILE_BUILD_REPO_URL (also copied to \$HOME/.m2 for nested mvn)"
+
+          # Kotlin upstream enables cache-redirector (gradle.properties). Its gradle.beforeProject hook runs
+          # after proxy.init.gradle and rewrites repos back to cache-redirector.jetbrains.com, undoing the
+          # LAN mirror. Force project property so Settings skips registering that hook (see
+          # repo/gradle-settings-conventions/cache-redirector/.../cache-redirector.settings.gradle.kts).
+          echo "ORG_GRADLE_PROJECT_cacheRedirectorEnabled=false" >> "$GITHUB_ENV"
+
+      - name: Point Gradle wrapper at Reposilite (distributions)
+        if: steps.vars.outputs.maven_proxy_url != ''
+        run: |
+          set -euo pipefail
+          MP="${{ steps.vars.outputs.maven_proxy_url }}"
+          if [[ "$MP" == */releases ]]; then
+            GRADLE_DIST_BASE="${MP%/releases}/distributions"
+          else
+            GRADLE_DIST_BASE="${{ env.DEFAULT_GRADLE_DISTRIBUTIONS_URL }}"
+          fi
+          "$BASH" "$CI_PROJECT_DIR/scripts/rewrite-gradle-wrapper-reposlite.sh" \
+            "$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}" \
+            "$GRADLE_DIST_BASE"
+          echo "Gradle wrapper → Reposilite \`$GRADLE_DIST_BASE\` (same /distributions/ layout as services.gradle.org)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build Kotlin
+        env:
+          # Gradle publishToMavenLocal uses JVM user.home (from HOME), while Maven uses MAVEN_OPTS -Duser.home.
+          # If they differ, OH artifacts land in the runner's real ~/.m2 but Maven (and archetype IT subprocesses)
+          # use the isolated localRepository — resolution falls through to the LAN mirror and fails. Align HOME.
+          HOME: ${{ steps.vars.outputs.maven_user_home }}
+          GRADLE_USER_HOME: ${{ steps.vars.outputs.gradle_user_home }}
+          MAVEN_USER_HOME: ${{ steps.vars.outputs.maven_user_home }}
+          MAVEN_PROXY_URL: ${{ steps.vars.outputs.maven_proxy_url }}
+          # When set, kotlin scripts/build-ohos.sh uses -s with Aliyun (mirrorOf *), ignoring MAVEN_USER_HOME settings.
+          USE_CN_MIRROR: ${{ steps.vars.outputs.maven_proxy_url != '' && 'false' || 'true' }}
+          KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
+          # Xcode toolchain for macOS only; do not set globally (Windows would inherit a bogus macOS path).
+          DEVELOPER_DIR: ${{ runner.os == 'macOS' && '/Applications/Xcode-26.2.app/Contents/Developer/' || '' }}
+          JDK_18: ${{ steps.java8.outputs.path }}
+          MAVEN_OPTS: -Duser.home=${{ steps.vars.outputs.maven_user_home }}
+          GRADLE_OPTS: "-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000"
+        run: |
+          cd "${{ env.WORKSPACE_DIR }}"
+          "$BASH" scripts/build-ohos.sh
+          ./gradlew --stop
+
+      - name: Promote clean build cache to persisted Gradle home
+        if: success() && steps.vars.outputs.clean_build == 'true'
+        env:
+          CI_CACHE_ROOT: ${{ steps.vars.outputs.ci_cache_root }}
+          PERSISTED_CACHE_ROOT: ${{ steps.vars.outputs.persisted_cache_root }}
+        run: |
+          if [ ! -d "$CI_CACHE_ROOT" ]; then
+            echo "Clean cache dir not found, skipping promotion."
+            exit 0
+          fi
+          ls -la "$CI_CACHE_ROOT"
+
+          echo "Removing existing persisted cache at $PERSISTED_CACHE_ROOT"
+          rm -rf "$PERSISTED_CACHE_ROOT"
+          mkdir -p "$PERSISTED_CACHE_ROOT"
+
+          echo "Moving contents of $CI_CACHE_ROOT to $PERSISTED_CACHE_ROOT"
+          mv "$CI_CACHE_ROOT"/* "$PERSISTED_CACHE_ROOT/"
+
+          echo "Clean build cache promoted from $CI_CACHE_ROOT to $PERSISTED_CACHE_ROOT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive build output
+        id: archive
+        env:
+          ARTIFACT_LOCAL_PATH: ${{ steps.vars.outputs.artifact_local_path }}
+        run: |
+          KOTLIN_SHA="${{ steps.kotlin.outputs.sha }}"
+          KOTLIN_SHA_SHORT="${KOTLIN_SHA:0:7}"
+          GITHUB_SHA_SHORT="${GITHUB_SHA:0:7}"
+          ARCHIVE_NAME="kotlin-${KOTLIN_SHA_SHORT}_act-${GITHUB_SHA_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar.gz"
+
+          OUT_PATH="$ARTIFACT_LOCAL_PATH/$ARCHIVE_NAME"
+          tar -cf - -C "${{ env.WORKSPACE_DIR }}" build/repo | gzip -9 > "$OUT_PATH"
+          echo "path=$OUT_PATH" >> "$GITHUB_STEP_SUMMARY"
+          echo "path=$OUT_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: ./kn-action/.github/actions/upload-artifact-local
+        with:
+          path: ${{ steps.archive.outputs.path }}
+
+  actions-timeline:
+    needs: [build]
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+    steps:
+      - uses: Kesin11/actions-timeline@v3

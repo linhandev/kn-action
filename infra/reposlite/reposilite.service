@@ -1,0 +1,16 @@
+[Unit]
+Description=Reposilite Maven repository server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=REPOSILITE_DIR
+ExecStart=REPOSILITE_DIR/start.sh
+Restart=on-failure
+RestartSec=5
+# Optional: Java path if not in default location
+# Environment=JAVA=/usr/lib/jvm/java-21-openjdk/bin/java
+
+[Install]
+WantedBy=default.target
