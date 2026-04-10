@@ -212,7 +212,7 @@ GitLab CE and runners are **LAN-only** (no public domain or WAN IP required). Al
 
 ### Four-host GitLab runner matrix (full fleet)
 
-SSH **`Host`** names match your dev config: **`linux`**, **`win`**, **`mini`**, **studio** (this Mac). **Eight** runner registrations total: **Kotlin + LLVM on every host** — none omitted.
+SSH **`Host`** names match your dev config: **`linux`**, **`win`**, **`mini`**, **studio** (this Mac). **Eight** runner registrations total: **Kotlin + LLVM on every host** — none omitted. **`prepare-repo`** tests in **`.gitlab-ci.yml`** use **Kotlin** runners only (see **Test `prepare-repo`**).
 
 **Naming (`gitlab-runner register --description "…"`):** use **`{kotlin|llvm}-{ssh-host}-{os}-{arch}`** — do **not** append executor type (`shell`, `docker`) to the name.
 
@@ -255,12 +255,12 @@ Use **`http://192.168.3.6:8929`** (not `localhost`) from every host. For **LLVM 
 
 ### Test `prepare-repo` (`.gitlab-ci.yml`)
 
-Eight jobs mirror the matrix: **each host × (kotlin | llvm)**. All run [`.github/actions/prepare-repo/test.sh`](.github/actions/prepare-repo/test.sh) (SSH + HTTPS to `linhandev/test-prepare-repo` on GitCode). **Linux LLVM** uses a job-level **`image: ubuntu:22.04`** and **`apt-get`** for `git` / `openssh-client` because the runner is Docker-based.
+**Four** jobs — **Kotlin runners only** (`kotlin` + OS/arch + `host-mini` / `host-studio` on Macs). LLVM runners are **not** used for this test (they stay for LLVM build pipelines). All jobs run [`.github/actions/prepare-repo/test.sh`](.github/actions/prepare-repo/test.sh) (SSH + HTTPS to `linhandev/test-prepare-repo` on GitCode).
 
 | Item | Notes |
 |------|--------|
 | **Trigger** | **`workflow:rules`**: `schedule`, **`web`**, **`push`/`merge_request_event`** when **`.github/actions/prepare-repo/**`**, **`.github/workflows/test-prepare-repo.yml`**, or **`.gitlab-ci.yml`** changes. |
-| **Tags** | Match the table above (`kotlin` / `llvm`, OS, arch, `host-mini` / `host-studio`, and **`docker`** on Linux LLVM only). |
+| **Tags** | **`test:prepare-repo:kotlin:linux`** → `kotlin`, `linux`, `amd64`. **`…:win`** → `kotlin`, `windows`, `amd64`. **`…:mini`** / **`…:studio`** → `kotlin`, `macos`, `arm64`, **`host-mini`** or **`host-studio`**. |
 | **`GITCODE_SSH_PRIVATE_KEY`** | CI/CD variable (masked). |
 | **`GITCODE_TOKEN`** | Optional; enables HTTPS leg of `test.sh`. |
 | **Work dirs** | Ephemeral under **`$CI_PROJECT_DIR/.ci-tmp/`**. |
