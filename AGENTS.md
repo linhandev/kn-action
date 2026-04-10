@@ -178,6 +178,125 @@ Goals the workflow should keep satisfying (details live in the workflow and scri
 
 ---
 
+## Self-hosted GitLab (LAN)
+
+GitLab CE and runners are **LAN-only** (no public domain or WAN IP required). All URLs use the GitLab host’s **static LAN IP** so clone links, the web UI, and runner registration stay consistent.
+
+### GitLab server (host: `linux`)
+
+| Item | Value |
+|------|--------|
+| **Web UI** | `http://192.168.3.6:8929` |
+| **Git over SSH** | `git@192.168.3.6`, port **2222** (GitLab shell inside Docker; host SSH stays on **22**) |
+| **Deployment** | Docker container `gitlab` (`gitlab/gitlab-ce:latest`), data under **`~/gitlab/`** on `linux` (`config`, `logs`, `data`) |
+| **Operator notes** | `~/gitlab/SETUP.txt` on `linux` — restart: `docker restart gitlab`; initial root password: `docker exec gitlab grep '^Password:' /etc/gitlab/initial_root_password` |
+
+`external_url` is set to the **:8929** HTTP URL so it does not collide with other services on port 80/8080.
+
+### Four-host GitLab runner matrix (full fleet)
+
+SSH **`Host`** names match your dev config: **`linux`**, **`win`**, **`mini`**, **studio** (this Mac). **Eight** runner registrations total: **Kotlin + LLVM on every host** — none omitted. **`prepare-repo`** tests in **`.gitlab-ci.yml`** use **Kotlin** runners only (see **Test `prepare-repo`**).
+
+**Naming (`gitlab-runner register --description "…"`):** **`{kotlin|llvm}-{os}-{arch}`** only — e.g. **`kotlin-linux-amd64`**, **`kotlin-macos-arm64`**, **`kotlin-windows-amd64`**. Do **not** put SSH host names (**`mini`**, **`studio`**, **`linux`**, **`win`**) in the description. Do **not** append executor type (`shell`, `docker`) to the name.
+
+**Tags:** exactly **three** per registration: **role** (`kotlin` or `llvm`), **OS** (`linux`, `windows`, `macos`), **arch** (`amd64` or `arm64`). Do **not** add a **`docker`** tag — LLVM Linux still uses **`executor = "docker"`** in **`config.toml`**; jobs with **`image:`** pick runners with that executor and the same **`llvm`, `linux`, `amd64`** tags.
+
+| SSH host | Runner name | Tags (exactly 3) | Executor | `builds_dir` (set in `config.toml`) |
+|----------|-------------|------------------|----------|-------------------------------------|
+| **`linux`** | `kotlin-linux-amd64` | `kotlin`, `linux`, `amd64` | **shell** | e.g. **`$HOME/gitlab-runner/builds-kotlin`** or **`~/runner/kotlin/builds`** |
+| **`linux`** | `llvm-linux-amd64` | `llvm`, `linux`, `amd64` | **docker** | default or **`~/runner/llvm/builds`**; mount **`~/runner/artifact`** etc. |
+| **`win`** | `kotlin-windows-amd64` | `kotlin`, `windows`, `amd64` | **shell** (Git Bash) | **`%USERPROFILE%\gitlab-runner\builds-kotlin`** |
+| **`win`** | `llvm-windows-amd64` | `llvm`, `windows`, `amd64` | **shell** (Git Bash) | **`%USERPROFILE%\gitlab-runner\builds-llvm`** |
+| **`mini`** | `kotlin-macos-arm64` | `kotlin`, `macos`, `arm64` | **shell** | e.g. **`~/.gitlab-runner/builds-kotlin`** on that Mac |
+| **`mini`** | `llvm-macos-arm64` | `llvm`, `macos`, `arm64` | **shell** | e.g. **`~/.gitlab-runner/builds-llvm`** |
+| **`studio`** | `kotlin-macos-arm64` | `kotlin`, `macos`, `arm64` | **shell** | e.g. **`~/.gitlab-runner/builds-kotlin`** on this Mac |
+| **`studio`** | `llvm-macos-arm64` | `llvm`, `macos`, `arm64` | **shell** | e.g. **`~/.gitlab-runner/builds-llvm`** |
+
+**Windows — keep under user profile (not `C:\` root):** install the runner and config under **`%USERPROFILE%\gitlab-runner\`** (e.g. **`C:\Users\<RunnerUser>\gitlab-runner\config.toml`**). Set each stanza’s **`builds_dir`** to **`C:\Users\<RunnerUser>\gitlab-runner\builds-kotlin`** and **`…\builds-llvm`** (or forward slashes in `config.toml`). Run the GitLab Runner service as that same user so **`%USERPROFILE%`** resolves consistently.
+
+**Linux (`linux` host):** `gitlab-runner` may run in Docker; config on the host is typically **`~/gitlab-runner/config/config.toml`** (two `[[runners]]` stanzas).
+
+**macOS (`mini`, `studio`):** Homebrew install → **`~/.gitlab-runner/config.toml`**; four stanzas total across the two machines (two per Mac). Both Macs use the **same** runner **name** and **tags**; only **`builds_dir`** and machine differ.
+
+**Registering:** **Admin area → CI/CD → Runners → New instance runner** → copy **`glrt-…`**, then:
+
+```bash
+gitlab-runner register \
+  --url "http://192.168.3.6:8929" \
+  --token "glrt-…" \
+  --executor shell \
+  --description "kotlin-macos-arm64" \
+  --tag-list "kotlin,macos,arm64" \
+  --builds-dir "$HOME/.gitlab-runner/builds-kotlin"
+```
+
+If your **`gitlab-runner register`** build lacks **`--builds-dir`**, set **`builds_dir`** in **`config.toml`** after registration.
+
+Use **`http://192.168.3.6:8929`** (not `localhost`) from every host. For **LLVM Linux Docker** executor, add **`--executor docker`**, **`--docker-image alpine:latest`** (overridable in CI), and **`--tag-list "llvm,linux,amd64"`** (same three tags; executor is **docker** in `config.toml`).
+
+**API automation:** Short-lived **root PATs** can create runners via `POST /api/v4/user/runners`; **revoke the PAT immediately** after use. Do not store tokens in this repo.
+
+### Test `prepare-repo` (`.gitlab-ci.yml`)
+
+**Three** jobs — **Kotlin runners only**, **three tags** each (`kotlin` + OS + arch). LLVM runners are **not** used. All jobs run [`.github/actions/prepare-repo/test.sh`](.github/actions/prepare-repo/test.sh) (SSH + HTTPS to `linhandev/test-prepare-repo` on GitCode). One **macOS** job matches **both** Macs (same tag set on **`mini`** and **`studio`**).
+
+| Item | Notes |
+|------|--------|
+| **Trigger** | **`workflow:rules`**: `schedule`, **`web`**, **`push`/`merge_request_event`** when **`.github/actions/prepare-repo/**`**, **`.github/workflows/test-prepare-repo.yml`**, or **`.gitlab-ci.yml`** changes. |
+| **Tags** | **`test:prepare-repo:kotlin:linux`** → `kotlin`, `linux`, `amd64`. **`…:windows`** → `kotlin`, `windows`, `amd64`. **`…:macos`** → `kotlin`, `macos`, `arm64`. |
+| **`GITCODE_SSH_PRIVATE_KEY`** | CI/CD variable (masked). |
+| **`GITCODE_TOKEN`** | Optional; enables HTTPS leg of `test.sh`. |
+| **Work dirs** | Ephemeral under **`$CI_PROJECT_DIR/.ci-tmp/`**. |
+
+Copy this project to GitLab so pipelines run there; the GitHub workflow can remain until retired.
+
+### Overlap with `~/runner`
+
+The same **`~/runner/{artifact,cache,kotlin,llvm}`** directory layout can exist on a host for **disk organization** (caches, optional `builds_dir`), but **CI routing** must still use **separate runner registrations** for Kotlin vs LLVM (see **Kotlin vs LLVM — separate runners**). **Kotlin** on **Linux** uses a **shell** executor on a **Kotlin-tagged** runner; **LLVM** on **Linux** uses a **Docker** executor on an **LLVM-tagged** runner. **GitCode** remains the source of truth for Kotlin/LLVM sources (no GitLab mirror required for now). **Large artifacts** use the **LAN artifact server** and **`~/runner/artifact`**; GitLab-native artifacts are optional later.
+
+### CI variable contract (shell scripts)
+
+Scripts under **`scripts/`** and **`upload.sh` / `download.sh`** are CI-agnostic and follow **GitLab-style names**:
+
+| Variable | Meaning |
+|----------|---------|
+| **`CI_PROJECT_DIR`** | Root of the **kn-action** checkout (GitLab sets this). Locally: `export CI_PROJECT_DIR="$(git rev-parse --show-toplevel)"`. |
+| **`CI_PIPELINE_ID`** | Unique pipeline/run id used in archive suffixes (e.g. `platform_package.sh`). GitLab sets it; legacy GitHub workflows set **`CI_PIPELINE_ID: ${{ github.run_id }}`**. |
+| **`KNACTION_DOTENV_FILE`** | Optional path to a **`key=value`** file (GitLab **`artifacts:reports:dotenv`**, or GitHub Actions step output file). |
+| **`KNACTION_STEP_SUMMARY`** | Optional path for human-readable build notes (else discarded). |
+| **`KNACTION_PIPELINE_ID`** | Optional override when **`CI_PIPELINE_ID`** is unset (local runs). |
+
+### Runner tags (GitLab convention + OS/arch)
+
+Use **exactly three** tags per registration, as in the matrix: **`kotlin`** or **`llvm`**, then **`linux` / `windows` / `macos`**, then **`amd64` / `arm64`**. Never **`kotlin`** and **`llvm`** on the same runner. Do **not** add **`docker`**, **`shell`**, **`host-mini`**, or **`host-studio`** tags — executor type is **`executor =`** in **`config.toml`**; two Macs share the same tag triple and differ only by machine and **`builds_dir`**.
+
+### Incremental builds on GitLab (vs GitHub self-hosted)
+
+GitHub Actions often leaves the **job workspace** on disk between runs, so trees under **`$GITHUB_WORKSPACE`** persist. GitLab Runner behavior depends on **executor** and **git strategy**:
+
+| Mechanism | Effect |
+|-----------|--------|
+| **`GIT_STRATEGY`** | **`fetch`** (default): reuse build dir, update refs — closest to “persistent workdir”. **`clone`**: clean clone each job — slow, good for hermetic jobs. **`none`**: you manage `git` yourself. |
+| **`GIT_CLEAN_FLAGS`** | Controls whether **`git clean`** runs before the job (default can remove untracked files). Set to **`none`** or adjust if you need dirty-tree incremental behavior. |
+| **Shell executor + same `builds_dir`** | Checkouts live under the runner’s **`builds/`** tree; the same project path is often **reused** across pipelines, similar to Actions — **incremental** if you do not wipe it. |
+| **Docker executor** | Container filesystem is usually **ephemeral** per job unless you mount volumes. **LLVM Linux:** keep **`CCACHE_DIR`** (and any large trees) on a **bind-mounted** path under **`CI_PROJECT_DIR`** or **`~/runner/cache`**, matching [`scripts/setup-llvm-ccache.sh`](scripts/setup-llvm-ccache.sh). |
+| **`cache:` in `.gitlab-ci.yml`** | Keyed archives (Gradle, Maven, etc.) for **speed**; complementary to a persistent checkout. |
+
+**Kotlin** incremental Gradle/Konan layout should keep using **`~/runner/cache`** (or `CI_PROJECT_DIR`-relative clean trees) exactly like the GitHub workflow — GitLab only changes how env vars are injected.
+
+### Multiple “workflows” in one GitLab project
+
+Yes. A single project can run **many pipeline layouts**:
+
+- **`include:`** — split into **`.gitlab/ci/kotlin.yml`**, **`.gitlab/ci/llvm.yml`**, etc., all included from **`.gitlab-ci.yml`**.
+- **`workflow:rules:`** — different pipelines by **branch**, **path**, **`CI_PIPELINE_SOURCE`**, or **pipeline variable**.
+- **`rules:` on jobs** — enable/disable jobs per **schedule**, **web trigger**, or **variable** (e.g. LLVM-only vs Kotlin-only).
+- **Downstream / child pipelines** — optional second **`gitlab-ci.yml`** in another project or **generated** config for isolation.
+
+So you do **not** need separate GitLab projects for “workflow per concern” unless you want hard isolation.
+
+---
+
 ## Related docs
 
 - [README.md](README.md) — Kotlin workflow summary, poll script, Maven proxy URLs.

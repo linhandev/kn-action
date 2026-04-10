@@ -1,0 +1,70 @@
+# GitLab CI — kn-action (LAN). Runner fleet: AGENTS.md → "Four-host GitLab runner matrix".
+# prepare-repo tests: Kotlin runners only, three tags each (kotlin + OS + arch).
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - .github/actions/prepare-repo/**/*
+        - .github/workflows/test-prepare-repo.yml
+        - .gitlab-ci.yml
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - .github/actions/prepare-repo/**/*
+        - .github/workflows/test-prepare-repo.yml
+        - .gitlab-ci.yml
+    - when: never
+
+stages:
+  - test
+
+.prepare-repo-test:
+  stage: test
+  interruptible: true
+  variables:
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: "0"
+  before_script:
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >> ~/.ssh/known_hosts 2>/dev/null || true
+    - |
+      if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
+        printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        eval "$(ssh-agent -s)"
+        ssh-add ~/.ssh/id_ed25519
+      fi
+    - |
+      if [ -n "${GITCODE_TOKEN:-}" ]; then
+        git config --global url."https://oauth2:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
+      fi
+    - mkdir -p "${CI_PROJECT_DIR}/.ci-tmp"
+  script:
+    - export WORKSPACE_DIR="${CI_PROJECT_DIR}/.ci-tmp/prepare-repo-workspace"
+    - export LOCAL_REFERENCE_DIR="${CI_PROJECT_DIR}/.ci-tmp/git-ci"
+    - rm -rf "$WORKSPACE_DIR" || true
+    - mkdir -p "$LOCAL_REFERENCE_DIR"
+    - bash .github/actions/prepare-repo/test.sh
+
+test:prepare-repo:kotlin:linux:
+  extends: .prepare-repo-test
+  tags:
+    - kotlin
+    - linux
+    - amd64
+
+test:prepare-repo:kotlin:windows:
+  extends: .prepare-repo-test
+  tags:
+    - kotlin
+    - windows
+    - amd64
+
+test:prepare-repo:kotlin:macos:
+  extends: .prepare-repo-test
+  tags:
+    - kotlin
+    - macos
+    - arm64
