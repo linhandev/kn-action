@@ -1,6 +1,6 @@
 # Agent guide — kn-action
 
-This file is for humans and coding agents working on **kn-action**: reusable GitHub Actions workflows, composite actions, and scripts for **Kotlin Multiplatform (KMP)** and **OpenHarmony (OH)**-related CI (Kotlin compiler builds, LLVM toolchain builds, local artifact plumbing). A **self-hosted GitLab** instance on the LAN is documented below. **`.gitlab-ci.yml`** runs **`prepare-repo`** tests on self-hosted runners; GitHub Actions workflows remain until fully migrated.
+This file is for humans and coding agents working on **kn-action**: reusable **GitHub Actions** workflows, composite actions, and scripts for **Kotlin Multiplatform (KMP)** and **OpenHarmony (OH)**-related CI (Kotlin compiler builds, LLVM toolchain builds, local artifact plumbing). A **self-hosted GitLab** instance on the LAN is documented below. **`.gitlab-ci.yml`** runs **`prepare-repo`** tests on self-hosted runners; GitHub Actions workflows remain until fully migrated.
 
 ---
 
@@ -210,41 +210,62 @@ GitLab CE and runners are **LAN-only** (no public domain or WAN IP required). Al
 
 `external_url` is set to the **:8929** HTTP URL so it does not collide with other services on port 80/8080.
 
-### Runners
+### Four-host GitLab runner matrix (full fleet)
 
-Register **distinct** runners for **Kotlin** vs **LLVM** (see **Kotlin vs LLVM — separate runners** above). Do not merge `kotlin` and `llvm` tags on one registration.
+SSH **`Host`** names match your dev config: **`linux`**, **`win`**, **`mini`**, **studio** (this Mac). **Eight** runner registrations total: **Kotlin + LLVM on every host** — none omitted.
 
-| Host | Executor | Config / service | Tags (example) |
-|------|-----------|------------------|----------------|
-| **`linux`** | **Docker** (LLVM) or **shell** (Kotlin) | Docker container `gitlab-runner`, config **`~/gitlab-runner/config`** | **LLVM:** `llvm`, `linux`, `amd64`, `docker`. **Kotlin:** separate registration: `kotlin`, `linux`, `amd64`, `shell`. |
-| **This Mac** (primary dev machine) | **Shell** (user-mode) | **`~/.gitlab-runner/config.toml`**, **`brew services start gitlab-runner`** | Use **either** a **Kotlin**-only or **LLVM**-only registration per policy; if both exist on one Mac, use **two stanzas** + different **`builds_dir`**. Example tags: `kotlin`, `macos`, `arm64` / `llvm`, `macos`, `arm64`. |
+**Naming (`gitlab-runner register --description "…"`):** use **`{kotlin|llvm}-{ssh-host}-{os}-{arch}`** — do **not** append executor type (`shell`, `docker`) to the name.
 
-**Registering another runner** (any host): In GitLab go to **Admin area → CI/CD → Runners → New instance runner** (or project/group runner), copy the **`glrt-…`** token, then:
+| SSH host | GitLab runner name | Role tags (`.gitlab-ci.yml`) | Executor | `builds_dir` (set in `config.toml`) |
+|----------|-------------------|------------------------------|----------|-------------------------------------|
+| **`linux`** | `kotlin-linux-amd64` | `kotlin`, `linux`, `amd64` | **shell** | e.g. **`$HOME/gitlab-runner/builds-kotlin`** or **`~/runner/kotlin/builds`** |
+| **`linux`** | `llvm-linux-amd64` | `llvm`, `linux`, `amd64`, **`docker`** | **docker** | default or under **`~/runner/llvm/builds`**; mount **`~/runner/artifact`** etc. per LLVM Docker layout |
+| **`win`** | `kotlin-win-amd64` | `kotlin`, `windows`, `amd64` | **shell** (Git Bash) | **`%USERPROFILE%\gitlab-runner\builds-kotlin`** — see Windows row below |
+| **`win`** | `llvm-win-amd64` | `llvm`, `windows`, `amd64` | **shell** (Git Bash) | **`%USERPROFILE%\gitlab-runner\builds-llvm`** |
+| **`mini`** | `kotlin-mini-macos-arm64` | `kotlin`, `macos`, `arm64`, **`host-mini`** | **shell** | e.g. **`~/.gitlab-runner/builds-kotlin-mini`** |
+| **`mini`** | `llvm-mini-macos-arm64` | `llvm`, `macos`, `arm64`, **`host-mini`** | **shell** | e.g. **`~/.gitlab-runner/builds-llvm-mini`** |
+| **`studio`** | `kotlin-studio-macos-arm64` | `kotlin`, `macos`, `arm64`, **`host-studio`** | **shell** | e.g. **`~/.gitlab-runner/builds-kotlin-studio`** |
+| **`studio`** | `llvm-studio-macos-arm64` | `llvm`, `macos`, `arm64`, **`host-studio`** | **shell** | e.g. **`~/.gitlab-runner/builds-llvm-studio`** |
+
+**Windows — keep under user profile (not `C:\` root):** install the runner and config under **`%USERPROFILE%\gitlab-runner\`** (e.g. **`C:\Users\<RunnerUser>\gitlab-runner\config.toml`**). Set each stanza’s **`builds_dir`** to **`C:\Users\<RunnerUser>\gitlab-runner\builds-kotlin`** and **`…\builds-llvm`** (or forward slashes in `config.toml`). Run the GitLab Runner service as that same user so **`%USERPROFILE%`** resolves consistently.
+
+**Linux (`linux` host):** `gitlab-runner` may run in Docker; config on the host is typically **`~/gitlab-runner/config/config.toml`** (two `[[runners]]` stanzas).
+
+**macOS (`mini`, `studio`):** Homebrew install → **`~/.gitlab-runner/config.toml`**; four stanzas total across the two machines (two per Mac).
+
+**Tag `docker`:** only on **`llvm-linux-amd64`** so jobs that use **`image:`** route to the Docker executor; do not put **`docker`** on shell-only runners.
+
+**Registering:** **Admin area → CI/CD → Runners → New instance runner** → copy **`glrt-…`**, then:
 
 ```bash
-# macOS (Homebrew), shell executor — typical for Xcode / KMP-style jobs
-brew install gitlab-runner   # once
-gitlab-runner register --url "http://192.168.3.6:8929" --token "glrt-…" --executor shell --description "my-mac-shell"
-brew services start gitlab-runner
+gitlab-runner register \
+  --url "http://192.168.3.6:8929" \
+  --token "glrt-…" \
+  --executor shell \
+  --description "kotlin-studio-macos-arm64" \
+  --tag-list "kotlin,macos,arm64,host-studio" \
+  --builds-dir "$HOME/.gitlab-runner/builds-kotlin-studio"
 ```
 
-Use **`http://192.168.3.6:8929`** (not `localhost`) so job containers and other machines resolve the same URL as developers.
+If your **`gitlab-runner register`** build lacks **`--builds-dir`**, set **`builds_dir`** in **`config.toml`** after registration.
+
+Use **`http://192.168.3.6:8929`** (not `localhost`) from every host. For **LLVM Linux Docker** executor, add **`--executor docker`**, **`--docker-image alpine:latest`** (default job image can be overridden in CI), and **`--tag-list "llvm,linux,amd64,docker"`**.
 
 **API automation:** Short-lived **root PATs** can create runners via `POST /api/v4/user/runners`; **revoke the PAT immediately** after use. Do not store tokens in this repo.
 
 ### Test `prepare-repo` (`.gitlab-ci.yml`)
 
-Jobs **`test:prepare-repo:linux`**, **`test:prepare-repo:macos`**, **`test:prepare-repo:windows`** run [`.github/actions/prepare-repo/test.sh`](.github/actions/prepare-repo/test.sh) — same coverage as [`.github/workflows/test-prepare-repo.yml`](.github/workflows/test-prepare-repo.yml) (SSH + HTTPS against `linhandev/test-prepare-repo` on GitCode).
+Eight jobs mirror the matrix: **each host × (kotlin | llvm)**. All run [`.github/actions/prepare-repo/test.sh`](.github/actions/prepare-repo/test.sh) (SSH + HTTPS to `linhandev/test-prepare-repo` on GitCode). **Linux LLVM** uses a job-level **`image: ubuntu:22.04`** and **`apt-get`** for `git` / `openssh-client` because the runner is Docker-based.
 
 | Item | Notes |
 |------|--------|
-| **Trigger** | **`workflow:rules`**: `schedule`, **`web`** (Run pipeline), **`push`/`merge_request_event`** only when **`.github/actions/prepare-repo/**`** or **`.gitlab-ci.yml`** changes. Add a **Pipeline schedule** in GitLab for nightly parity with the GitHub cron. |
-| **Runner tags** | **Linux:** `linux`, `amd64`, `shell` (Kotlin-style shell runner on physical Linux). **macOS:** `macos`, `arm64`, `shell`. **Windows:** `windows`, `amd64`, `shell` (Git Bash; configure runner `shell`). |
-| **`GITCODE_SSH_PRIVATE_KEY`** | CI/CD variable (masked); same role as GitHub **`env`** secret for SSH clones. |
-| **`GITCODE_TOKEN`** | Optional; if set, **`git config url.…insteadOf`** enables the **HTTPS** leg of `test.sh`. Omit if the test repo is public and HTTPS works anonymously. |
-| **Work dirs** | Ephemeral under **`$CI_PROJECT_DIR/.ci-tmp/`** (workspace + reference clone), not `runner.temp`. |
+| **Trigger** | **`workflow:rules`**: `schedule`, **`web`**, **`push`/`merge_request_event`** when **`.github/actions/prepare-repo/**`**, **`.github/workflows/test-prepare-repo.yml`**, or **`.gitlab-ci.yml`** changes. |
+| **Tags** | Match the table above (`kotlin` / `llvm`, OS, arch, `host-mini` / `host-studio`, and **`docker`** on Linux LLVM only). |
+| **`GITCODE_SSH_PRIVATE_KEY`** | CI/CD variable (masked). |
+| **`GITCODE_TOKEN`** | Optional; enables HTTPS leg of `test.sh`. |
+| **Work dirs** | Ephemeral under **`$CI_PROJECT_DIR/.ci-tmp/`**. |
 
-Copy this project to GitLab (remote mirror or import) so pipelines run there; GitHub workflow can remain until you retire it.
+Copy this project to GitLab so pipelines run there; the GitHub workflow can remain until retired.
 
 ### Overlap with `~/runner`
 
@@ -264,13 +285,14 @@ Scripts under **`scripts/`** and **`upload.sh` / `download.sh`** are CI-agnostic
 
 ### Runner tags (GitLab convention + OS/arch)
 
-Use **lowercase** OS and explicit **CPU** tags so `.gitlab-ci.yml` stays readable:
+Canonical tag sets are the **Role tags** column in **Four-host GitLab runner matrix** above. In short:
 
-- **Linux x86_64:** `linux`, `amd64` (or `x86_64` if you prefer; GitLab docs often use **amd64**).
-- **Windows x86_64:** `windows`, `amd64`.
-- **macOS:** always include **both** **`macos`** and an arch tag so you can target Apple Silicon vs Intel: **`macos`**, **`arm64`** (Apple Silicon) or **`macos`**, **`amd64`** (Intel). Example tag sets: `kotlin`, `macos`, `arm64` / `llvm`, `macos`, `amd64`.
+- **Role:** **`kotlin`** or **`llvm`** (never both on one registration).
+- **OS / arch:** **`linux`/`amd64`**, **`windows`/`amd64`**, **`macos`/`arm64`** (this fleet uses **arm64** on both Macs; add **`amd64`** if you introduce an Intel Mac).
+- **Host disambiguation (two Macs):** **`host-mini`**, **`host-studio`**.
+- **Linux LLVM (Docker executor):** add **`docker`** so `image:` jobs match only that runner.
 
-Add role tags **`kotlin`** / **`llvm`** on top of OS/arch when mirroring the old matrix. **Never** put both role tags on the **same** runner registration; use two registrations (and different **`builds_dir`** if they share a machine).
+Do not use **`shell`** or **`docker`** as tag names for naming clarity; executor type belongs in **`config.toml`**, not in tags (except **`docker`** on Linux LLVM for routing).
 
 ### Incremental builds on GitLab (vs GitHub self-hosted)
 

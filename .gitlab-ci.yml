@@ -1,5 +1,5 @@
-# GitLab CI — kn-action (LAN). Runner tags and secrets: see AGENTS.md.
-# Test prepare-repo mirrors .github/workflows/test-prepare-repo.yml.
+# GitLab CI — kn-action (LAN). Eight runners: kotlin + llvm × linux, win, mini, studio.
+# Tags and names: AGENTS.md → "Four-host GitLab runner matrix".
 
 workflow:
   rules:
@@ -20,7 +20,7 @@ workflow:
 stages:
   - test
 
-# SSH: GITCODE_SSH_PRIVATE_KEY (raw variable, masked). HTTPS leg: optional GITCODE_TOKEN (masked).
+# --- Shared body (shell executors: linux kotlin, win, mac) ---
 .prepare-repo-test:
   stage: test
   interruptible: true
@@ -49,23 +49,95 @@ stages:
     - mkdir -p "$LOCAL_REFERENCE_DIR"
     - bash .github/actions/prepare-repo/test.sh
 
-test:prepare-repo:linux:
+# Linux LLVM runner uses Docker executor; job supplies image + tools.
+.prepare-repo-test-linux-llvm:
+  stage: test
+  interruptible: true
+  image: ubuntu:22.04
+  variables:
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: "0"
+  before_script:
+    - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client git curl ca-certificates bash
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >> ~/.ssh/known_hosts 2>/dev/null || true
+    - |
+      if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
+        printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        eval "$(ssh-agent -s)"
+        ssh-add ~/.ssh/id_ed25519
+      fi
+    - |
+      if [ -n "${GITCODE_TOKEN:-}" ]; then
+        git config --global url."https://oauth2:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
+      fi
+    - mkdir -p "${CI_PROJECT_DIR}/.ci-tmp"
+  script:
+    - export WORKSPACE_DIR="${CI_PROJECT_DIR}/.ci-tmp/prepare-repo-workspace"
+    - export LOCAL_REFERENCE_DIR="${CI_PROJECT_DIR}/.ci-tmp/git-ci"
+    - rm -rf "$WORKSPACE_DIR" || true
+    - mkdir -p "$LOCAL_REFERENCE_DIR"
+    - bash .github/actions/prepare-repo/test.sh
+
+# --- kotlin + llvm × each SSH host ---
+test:prepare-repo:kotlin:linux:
   extends: .prepare-repo-test
   tags:
+    - kotlin
     - linux
     - amd64
-    - shell
 
-test:prepare-repo:macos:
+test:prepare-repo:llvm:linux:
+  extends: .prepare-repo-test-linux-llvm
+  tags:
+    - llvm
+    - linux
+    - amd64
+    - docker
+
+test:prepare-repo:kotlin:win:
   extends: .prepare-repo-test
   tags:
-    - macos
-    - arm64
-    - shell
-
-test:prepare-repo:windows:
-  extends: .prepare-repo-test
-  tags:
+    - kotlin
     - windows
     - amd64
-    - shell
+
+test:prepare-repo:llvm:win:
+  extends: .prepare-repo-test
+  tags:
+    - llvm
+    - windows
+    - amd64
+
+test:prepare-repo:kotlin:mini:
+  extends: .prepare-repo-test
+  tags:
+    - kotlin
+    - macos
+    - arm64
+    - host-mini
+
+test:prepare-repo:llvm:mini:
+  extends: .prepare-repo-test
+  tags:
+    - llvm
+    - macos
+    - arm64
+    - host-mini
+
+test:prepare-repo:kotlin:studio:
+  extends: .prepare-repo-test
+  tags:
+    - kotlin
+    - macos
+    - arm64
+    - host-studio
+
+test:prepare-repo:llvm:studio:
+  extends: .prepare-repo-test
+  tags:
+    - llvm
+    - macos
+    - arm64
+    - host-studio
