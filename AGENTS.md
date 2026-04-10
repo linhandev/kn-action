@@ -33,6 +33,23 @@ Workflows assume a **standard layout under `~/runner`** on each self-hosted mach
 | **`mini`** | same |
 | **This host** | The remaining macOS-class runner (e.g. Studio or your primary dev Mac). Confirm with `ls ~/runner` locally or `ssh <host> 'ls -la ~/runner'`. |
 
+### Kotlin vs LLVM — separate runners (required)
+
+**Policy:** Use **separate GitLab Runner registrations** (separate `config.toml` `[[runners]]` stanzas / separate `glrt-…` tokens) for **Kotlin** and **LLVM**. A given runner must **not** advertise both **`kotlin`** and **`llvm`** tags on the same registration.
+
+**Why:**
+
+- **LLVM** uses Google **`repo`** (~25 Git repos under one workspace), huge disk use, and **`clean_build`** can **`rm -rf` the entire job work root** (see [`build-llvm.yml`](.github/workflows/build-llvm.yml)). That layout is unrelated to the Kotlin single-repo **`prepare-repo`** tree.
+- **Kotlin** relies on long-lived **`~/runner/cache`** (Gradle, Konan, Maven) and a **separate** checkout dir (`ci-workspace`); mixing job roots on one runner risks **wipes**, **I/O contention**, and **harder debugging** (“which tree is broken?”).
+- **Tags** in `.gitlab-ci.yml` then stay unambiguous: Kotlin jobs **`tags: [kotlin, …]`**, LLVM jobs **`tags: [llvm, …]`** only.
+
+**Hardware:**
+
+- **Preferred:** **Dedicated physical machines** per role (matches the four-host mental model: some hosts skew **`kotlin`**, some **`llvm`**).
+- **If one machine runs both roles:** still use **two runner registrations** and point them at **different `builds_dir`** values in [`config.toml`](https://docs.gitlab.com/runner/configuration/advanced-configuration.html) (e.g. `~/runner/kotlin` vs `~/runner/llvm` as build roots) so job workspaces never share one parent tree.
+
+GitHub Actions today uses **label lists** (`kotlin` vs `llvm`) on self-hosted runners — keep the same **separation** when moving to GitLab.
+
 **Agent tip — before editing workflow or shell that touches paths/tools:** SSH to the relevant host and sanity-check paths and binaries, e.g.:
 
 ```bash
@@ -195,10 +212,12 @@ GitLab CE and runners are **LAN-only** (no public domain or WAN IP required). Al
 
 ### Runners
 
+Register **distinct** runners for **Kotlin** vs **LLVM** (see **Kotlin vs LLVM — separate runners** above). Do not merge `kotlin` and `llvm` tags on one registration.
+
 | Host | Executor | Config / service | Tags (example) |
 |------|-----------|------------------|----------------|
-| **`linux`** | **Docker** (socket mounted) | Docker container `gitlab-runner`, config **`~/gitlab-runner/config`** | Created in GitLab UI / API (e.g. `linux`, `docker`) |
-| **This Mac** (primary dev machine) | **Shell** (user-mode) | **`~/.gitlab-runner/config.toml`**, **`brew services start gitlab-runner`** | **`macos`**, **`ARM64`**, **`shell`**, **`dev`** — use these in `.gitlab-ci.yml` `tags:` until you align with `kotlin` / `llvm` naming |
+| **`linux`** | **Docker** (LLVM) or **shell** (Kotlin) | Docker container `gitlab-runner`, config **`~/gitlab-runner/config`** | **LLVM:** `llvm`, `linux`, `amd64`, `docker`. **Kotlin:** separate registration: `kotlin`, `linux`, `amd64`, `shell`. |
+| **This Mac** (primary dev machine) | **Shell** (user-mode) | **`~/.gitlab-runner/config.toml`**, **`brew services start gitlab-runner`** | Use **either** a **Kotlin**-only or **LLVM**-only registration per policy; if both exist on one Mac, use **two stanzas** + different **`builds_dir`**. Example tags: `kotlin`, `macos`, `arm64` / `llvm`, `macos`, `arm64`. |
 
 **Registering another runner** (any host): In GitLab go to **Admin area → CI/CD → Runners → New instance runner** (or project/group runner), copy the **`glrt-…`** token, then:
 
@@ -215,7 +234,7 @@ Use **`http://192.168.3.6:8929`** (not `localhost`) so job containers and other 
 
 ### Overlap with `~/runner`
 
-The same **`~/runner/{artifact,cache,kotlin,llvm}`** layout is intended for long-lived build hosts. **Kotlin** jobs on **Linux** are expected to use a **physical shell runner** (same as other hosts); **LLVM** on **Linux** uses a **Docker executor** with the builder image. **GitCode** remains the source of truth for Kotlin/LLVM sources (no GitLab mirror required for now). **Large artifacts** use the **LAN artifact server** and **`~/runner/artifact`**; GitLab-native artifacts are optional later.
+The same **`~/runner/{artifact,cache,kotlin,llvm}`** directory layout can exist on a host for **disk organization** (caches, optional `builds_dir`), but **CI routing** must still use **separate runner registrations** for Kotlin vs LLVM (see **Kotlin vs LLVM — separate runners**). **Kotlin** on **Linux** uses a **shell** executor on a **Kotlin-tagged** runner; **LLVM** on **Linux** uses a **Docker** executor on an **LLVM-tagged** runner. **GitCode** remains the source of truth for Kotlin/LLVM sources (no GitLab mirror required for now). **Large artifacts** use the **LAN artifact server** and **`~/runner/artifact`**; GitLab-native artifacts are optional later.
 
 ### CI variable contract (shell scripts)
 
@@ -237,7 +256,7 @@ Use **lowercase** OS and explicit **CPU** tags so `.gitlab-ci.yml` stays readabl
 - **Windows x86_64:** `windows`, `amd64`.
 - **macOS:** always include **both** **`macos`** and an arch tag so you can target Apple Silicon vs Intel: **`macos`**, **`arm64`** (Apple Silicon) or **`macos`**, **`amd64`** (Intel). Example tag sets: `kotlin`, `macos`, `arm64` / `llvm`, `macos`, `amd64`.
 
-Add role tags **`kotlin`** / **`llvm`** on top of OS/arch when mirroring the old matrix.
+Add role tags **`kotlin`** / **`llvm`** on top of OS/arch when mirroring the old matrix. **Never** put both role tags on the **same** runner registration; use two registrations (and different **`builds_dir`** if they share a machine).
 
 ### Incremental builds on GitLab (vs GitHub self-hosted)
 
