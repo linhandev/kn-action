@@ -39,4 +39,5 @@ runs:
         INPUT_CACHE_DIR: ${{ inputs.cache_dir }}
         INPUT_PATH: ${{ inputs.path }}
       run: |
+        export KNACTION_DOTENV_FILE="${GITHUB_OUTPUT}"
         source "$GITHUB_ACTION_PATH/download.sh"

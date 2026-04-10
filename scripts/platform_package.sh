@@ -129,11 +129,13 @@ done
 
 package_llvm
 
-# Optional cross-copy final packaging mode used by build-llvm.yml.
+# Optional cross-copy final packaging mode used by build-llvm.yml / GitLab CI.
 # Expects:
-# - LLVM_MAJOR_FOR_PACKAGE, LLVM_ESSENTIALS_ID, GITHUB_RUN_ID
-# - GITHUB_OUTPUT (optional; archives are still created without it)
-# Produces archives in cwd and (if GITHUB_OUTPUT exists) exports:
+# - LLVM_MAJOR_FOR_PACKAGE, LLVM_ESSENTIALS_ID
+# - CI_PIPELINE_ID (GitLab) or KNACTION_PIPELINE_ID (manual fallback)
+# - KNACTION_DOTENV_FILE (optional; append key=value for dotenv / job outputs)
+# - KNACTION_STEP_SUMMARY (optional; markdown log path, default discard)
+# Produces archives in cwd and (if KNACTION_DOTENV_FILE set) exports:
 #   archive_linux, archive_mac_arm64, archive_mac_x64, archive_windows
 if [ "${RUN_FINAL_PACKAGE:-0}" = "1" ]; then
   overlay_dir() {
@@ -153,13 +155,14 @@ if [ "${RUN_FINAL_PACKAGE:-0}" = "1" ]; then
     mkdir -p "$stem"
     cp -a "$source_dir"/. "$stem/"
     [ -d "$stem/bin" ] || { echo "::error::Expected $stem/bin after flattening from $source_dir"; ls -la "$stem"; exit 1; }
+    _rid="${CI_PIPELINE_ID:-${KNACTION_PIPELINE_ID:-}}"
     if [ "$ext" = "zip" ]; then
-      archive="${stem}-run${GITHUB_RUN_ID}.zip"
+      archive="${stem}-run${_rid}.zip"
       zip -qry "$archive" "$stem"
       first="$(unzip -Z1 "$archive" | head -1)"
       [ "$first" = "${stem}/" ] || { echo "::error::Expected first member ${stem}/, got $first"; exit 1; }
     else
-      archive="${stem}-run${GITHUB_RUN_ID}.tar.gz"
+      archive="${stem}-run${_rid}.tar.gz"
       GZIP=-9 tar -czf "$archive" "$stem"
       first="$(tar -tzf "$archive" | head -1)"
       [ "$first" = "${stem}/" ] || { echo "::error::Expected first member ${stem}/, got $first"; exit 1; }
@@ -169,7 +172,7 @@ if [ "${RUN_FINAL_PACKAGE:-0}" = "1" ]; then
 
   [ -n "${LLVM_MAJOR_FOR_PACKAGE:-}" ] || { echo "::error::LLVM_MAJOR_FOR_PACKAGE is required when RUN_FINAL_PACKAGE=1"; exit 1; }
   [ -n "${LLVM_ESSENTIALS_ID:-}" ] || { echo "::error::LLVM_ESSENTIALS_ID is required when RUN_FINAL_PACKAGE=1"; exit 1; }
-  [ -n "${GITHUB_RUN_ID:-}" ] || { echo "::error::GITHUB_RUN_ID is required when RUN_FINAL_PACKAGE=1"; exit 1; }
+  [ -n "${CI_PIPELINE_ID:-${KNACTION_PIPELINE_ID:-}}" ] || { echo "::error::CI_PIPELINE_ID or KNACTION_PIPELINE_ID is required when RUN_FINAL_PACKAGE=1"; exit 1; }
 
   if [ ! -d "$clang_linux_x86_64" ]; then
     echo "::error::Missing linux clang tree $clang_linux_x86_64"
@@ -198,14 +201,14 @@ if [ "${RUN_FINAL_PACKAGE:-0}" = "1" ]; then
     echo "Packed $ARCHIVE_MAC_ARM64 (top-level dir $STEM_MAC_ARM64)"
     echo "Packed $ARCHIVE_MAC_X64 (top-level dir $STEM_MAC_X64)"
     echo "Packed $ARCHIVE_WINDOWS (top-level dir $STEM_WINDOWS)"
-  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  } >> "${KNACTION_STEP_SUMMARY:-/dev/null}"
 
-  if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  if [ -n "${KNACTION_DOTENV_FILE:-}" ]; then
     {
       echo "archive_linux=$ARCHIVE_LINUX"
       echo "archive_mac_arm64=$ARCHIVE_MAC_ARM64"
       echo "archive_mac_x64=$ARCHIVE_MAC_X64"
       echo "archive_windows=$ARCHIVE_WINDOWS"
-    } >> "$GITHUB_OUTPUT"
+    } >> "$KNACTION_DOTENV_FILE"
   fi
 fi

@@ -37,7 +37,9 @@ if [ -f "$cache_path" ]; then
   if [ "$cache_path" != "$dest_path" ]; then
     cp -f "$cache_path" "$dest_path"
   fi
-  echo "path=$dest_path" >> "$GITHUB_OUTPUT"
+  if [ -n "${KNACTION_DOTENV_FILE:-}" ]; then
+    echo "path=$dest_path" >>"$KNACTION_DOTENV_FILE"
+  fi
   exit 0
 fi
 
@@ -51,5 +53,7 @@ if [ "$code" != "200" ]; then
 fi
 # Cache it for next time (same runner)
 cp -f "$dest_path" "$cache_path"
-echo "path=$dest_path" >> "$GITHUB_OUTPUT"
+if [ -n "${KNACTION_DOTENV_FILE:-}" ]; then
+  echo "path=$dest_path" >>"$KNACTION_DOTENV_FILE"
+fi
 echo "Downloaded and cached: $dest_path"

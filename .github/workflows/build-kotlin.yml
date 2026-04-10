@@ -50,6 +50,9 @@ env:
 jobs:
   build:
     name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
+    env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
+      CI_PIPELINE_ID: ${{ github.run_id }}
     strategy:
       fail-fast: false
       matrix:
@@ -172,7 +175,7 @@ jobs:
       - name: Install Gradle proxy init script
         run: |
           mkdir -p "${{ steps.vars.outputs.gradle_user_home }}/init.d"
-          cp "$GITHUB_WORKSPACE/kn-action/scripts/proxy.init.gradle" \
+          cp "$CI_PROJECT_DIR/scripts/proxy.init.gradle" \
             "${{ steps.vars.outputs.gradle_user_home }}/init.d/"
           echo "Gradle: proxy.init.gradle installed (Node dist via NODEJS_DIST_MIRROR; Maven mirror when MAVEN_PROXY_URL is set)"
 
@@ -202,7 +205,7 @@ jobs:
       - name: Apply Kotlin patches (npmSetRegistry / cache redirector)
         run: |
           set -euo pipefail
-          PATCH="$GITHUB_WORKSPACE/kn-action/patches/kotlin-js-tests-npmSetRegistry.patch"
+          PATCH="$CI_PROJECT_DIR/patches/kotlin-js-tests-npmSetRegistry.patch"
           cd "$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}"
           if patch -p1 < "$PATCH"; then
             echo "Applied kotlin-js-tests-npmSetRegistry patch"
@@ -314,7 +317,7 @@ jobs:
           else
             GRADLE_DIST_BASE="${{ env.DEFAULT_GRADLE_DISTRIBUTIONS_URL }}"
           fi
-          "$BASH" "$GITHUB_WORKSPACE/kn-action/scripts/rewrite-gradle-wrapper-reposlite.sh" \
+          "$BASH" "$CI_PROJECT_DIR/scripts/rewrite-gradle-wrapper-reposlite.sh" \
             "$GITHUB_WORKSPACE/${{ env.WORKSPACE_DIR }}" \
             "$GRADLE_DIST_BASE"
           echo "Gradle wrapper → Reposilite \`$GRADLE_DIST_BASE\` (same /distributions/ layout as services.gradle.org)" >> "$GITHUB_STEP_SUMMARY"

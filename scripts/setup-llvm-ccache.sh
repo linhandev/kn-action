@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Source before running OH toolchain/llvm-project/llvm-build/build.sh when ccache is available.
-# Self-hosted layout: Linux Docker job should keep CCACHE_DIR inside GITHUB_WORKSPACE (bind-mounted).
+# Self-hosted layout: Linux Docker job should keep CCACHE_DIR inside CI_PROJECT_DIR (bind-mounted).
 # macOS can use ~/runner/cache so caches survive workspace wipes unrelated to llvm/.
 #
-# Usage: source "$GITHUB_WORKSPACE/kn-action/scripts/setup-llvm-ccache.sh"
+# Usage: source "$CI_PROJECT_DIR/scripts/setup-llvm-ccache.sh"
 # Intentionally no "set -e" here — this file is sourced from CI steps.
 
 if ! command -v ccache >/dev/null 2>&1; then
@@ -11,15 +11,16 @@ if ! command -v ccache >/dev/null 2>&1; then
   return 0 2>/dev/null || exit 0
 fi
 
-: "${RUNNER_OS:=}"
-: "${RUNNER_ARCH:=}"
-: "${GITHUB_WORKSPACE:=}"
+# Prefer uname so GitLab (no RUNNER_OS) and GitHub Actions both behave.
+SYS="$(uname -s)"
+ARCH="${CI_RUNNER_ARCH:-$(uname -m)}"
+: "${CI_PROJECT_DIR:=}"
 
-if [ "$RUNNER_OS" = "Linux" ] && [ -n "${GITHUB_WORKSPACE}" ]; then
-  # Container job: only paths under GITHUB_WORKSPACE are reliably persisted on the host mount.
-  export CCACHE_DIR="${GITHUB_WORKSPACE}/.ccache"
+if [ "$SYS" = "Linux" ] && [ -n "${CI_PROJECT_DIR}" ]; then
+  # Container job: only paths under CI_PROJECT_DIR are reliably persisted on the host mount.
+  export CCACHE_DIR="${CI_PROJECT_DIR}/.ccache"
 else
-  CR="${HOME}/runner/cache/llvm-ccache-${RUNNER_OS:-unknown}-${RUNNER_ARCH:-unknown}"
+  CR="${HOME}/runner/cache/llvm-ccache-${SYS}-${ARCH}"
   mkdir -p "$CR"
   export CCACHE_DIR="$CR"
 fi

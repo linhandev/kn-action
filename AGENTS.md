@@ -152,7 +152,7 @@ Goals the workflow should keep satisfying (details live in the workflow and scri
 
 1. **Multi-platform LLVM builds** — Produce OH-oriented **`llvm/packages`** on **macOS ARM64, macOS X64, Linux X64 (Docker)**; the **Windows** host Clang package (**`clang-dev-windows-x86_64.tar.gz`**) is expected **inside the Linux** `packages/` tarball and is merged in **cross-copy** (native Windows LLVM compile in the build matrix stays optional).
 2. **Linux isolation** — Linux job runs in **`container.image`** from `ghcr.io/<owner>/kn-action-linux-llvm-builder:…` with a **volume** into the host artifact area (`…/artifact` → `/home/runner/runner/artifact`) so Linux matches the same local-artifact contract as other OSes.
-3. **Incremental vs clean** — **`LLVM_WORKSPACE`** is the **`llvm`** directory alongside the checked-out **`kn-action`** job workspace (see **`LLVM_WORKSPACE`** in [`build-llvm.yml`](.github/workflows/build-llvm.yml)). On self-hosted runners it is reused across runs because the Actions work directory persists. There is **no** Kotlin-style promotion of the LLVM tree into **`~/runner/cache`**; **`~/runner/cache`** is for things like the OH sysroot tarball, not the main LLVM checkout. **`clean_build`** **`rm -rf`s the parent of `GITHUB_WORKSPACE`** (entire job work root), rechecks out **`kn-action`**, and **`repo init`** runs when **`.repo`** is missing or clean is set—see **Setup environment**, **Re-checkout kn-action after clean workspace wipe**, and **Init repo manifest**. Expect much faster runs when the tree is unchanged and clean is off. **`repo sync`** can still touch many files each run, so Ninja may rebuild heavily; **[`scripts/setup-llvm-ccache.sh`](scripts/setup-llvm-ccache.sh)** enables **ccache** ( **`CC`/`CXX`** wrappers, **`CMAKE_*_COMPILER_LAUNCHER`**, Linux **`/usr/lib/ccache`** on **`PATH`**). **Linux (Docker)** keeps **`CCACHE_DIR`** under **`GITHUB_WORKSPACE/.ccache`** so the cache sits on the mounted work tree; **macOS** uses **`~/runner/cache/llvm-ccache-<os>-<arch>`**. The **Build LLVM** step appends **`ccache -s`** to the job summary for hit-rate verification.
+3. **Incremental vs clean** — **`LLVM_WORKSPACE`** is the **`llvm`** directory alongside the checked-out **`kn-action`** job workspace (see **`LLVM_WORKSPACE`** in [`build-llvm.yml`](.github/workflows/build-llvm.yml)). On self-hosted runners it is reused across runs because the job work directory persists. There is **no** Kotlin-style promotion of the LLVM tree into **`~/runner/cache`**; **`~/runner/cache`** is for things like the OH sysroot tarball, not the main LLVM checkout. **`clean_build`** **`rm -rf`s the job work root** (parent of the **`kn-action`** checkout), rechecks out **`kn-action`**, and **`repo init`** runs when **`.repo`** is missing or clean is set—see **Setup environment**, **Re-checkout kn-action after clean workspace wipe**, and **Init repo manifest**. Expect much faster runs when the tree is unchanged and clean is off. **`repo sync`** can still touch many files each run, so Ninja may rebuild heavily; **[`scripts/setup-llvm-ccache.sh`](scripts/setup-llvm-ccache.sh)** enables **ccache** ( **`CC`/`CXX`** wrappers, **`CMAKE_*_COMPILER_LAUNCHER`**, Linux **`/usr/lib/ccache`** on **`PATH`**). **Linux (Docker)** keeps **`CCACHE_DIR`** under **`CI_PROJECT_DIR/.ccache`** so the cache sits on the mounted work tree; **macOS** uses **`~/runner/cache/llvm-ccache-<uname>-<arch>`**. The **Build LLVM** step appends **`ccache -s`** to the job summary for hit-rate verification.
 4. **Conditional env prepare** — Run **`env_prepare`** only when the workspace lacks the usual bootstrap marker (e.g. **`prebuilts/cmake`**); skip when the tree is already prepared.
 5. **Repo / GitCode** — **`scripts/setup-repo-tool.sh`** installs **repo** with a **wrapper** so Windows Git Bash does not rely on `#!/usr/bin/env python` alone. Sync uses **`GITCODE_TOKEN`** (repository environment **`env`**); URL rewrites in git config for GitCode HTTPS.
 6. **Windows shell** — Use a Git Bash invocation that survives self-hosted Windows (e.g. **`C:\PROGRA~1\Git\bin\bash.exe`** with `pipefail`) — avoid quoted `Program Files` paths that break runner/OpenSSH command parsing. **Windows** also needs **Developer Mode** (or equivalent) so **`repo`/git symlinks** work; see **Build LLVM — required runner environment** above.
@@ -215,7 +215,54 @@ Use **`http://192.168.3.6:8929`** (not `localhost`) so job containers and other 
 
 ### Overlap with `~/runner`
 
-The same **`~/runner/{artifact,cache,kotlin,llvm}`** layout is intended for long-lived build hosts whether the CI system is GitHub Actions or GitLab CI; only the YAML and variable names differ.
+The same **`~/runner/{artifact,cache,kotlin,llvm}`** layout is intended for long-lived build hosts. **Kotlin** jobs on **Linux** are expected to use a **physical shell runner** (same as other hosts); **LLVM** on **Linux** uses a **Docker executor** with the builder image. **GitCode** remains the source of truth for Kotlin/LLVM sources (no GitLab mirror required for now). **Large artifacts** use the **LAN artifact server** and **`~/runner/artifact`**; GitLab-native artifacts are optional later.
+
+### CI variable contract (shell scripts)
+
+Scripts under **`scripts/`** and **`upload.sh` / `download.sh`** are CI-agnostic and follow **GitLab-style names**:
+
+| Variable | Meaning |
+|----------|---------|
+| **`CI_PROJECT_DIR`** | Root of the **kn-action** checkout (GitLab sets this). Locally: `export CI_PROJECT_DIR="$(git rev-parse --show-toplevel)"`. |
+| **`CI_PIPELINE_ID`** | Unique pipeline/run id used in archive suffixes (e.g. `platform_package.sh`). GitLab sets it; legacy GitHub workflows set **`CI_PIPELINE_ID: ${{ github.run_id }}`**. |
+| **`KNACTION_DOTENV_FILE`** | Optional path to a **`key=value`** file (GitLab **`artifacts:reports:dotenv`**, or GitHub Actions step output file). |
+| **`KNACTION_STEP_SUMMARY`** | Optional path for human-readable build notes (else discarded). |
+| **`KNACTION_PIPELINE_ID`** | Optional override when **`CI_PIPELINE_ID`** is unset (local runs). |
+
+### Runner tags (GitLab convention + OS/arch)
+
+Use **lowercase** OS and explicit **CPU** tags so `.gitlab-ci.yml` stays readable:
+
+- **Linux x86_64:** `linux`, `amd64` (or `x86_64` if you prefer; GitLab docs often use **amd64**).
+- **Windows x86_64:** `windows`, `amd64`.
+- **macOS:** always include **both** **`macos`** and an arch tag so you can target Apple Silicon vs Intel: **`macos`**, **`arm64`** (Apple Silicon) or **`macos`**, **`amd64`** (Intel). Example tag sets: `kotlin`, `macos`, `arm64` / `llvm`, `macos`, `amd64`.
+
+Add role tags **`kotlin`** / **`llvm`** on top of OS/arch when mirroring the old matrix.
+
+### Incremental builds on GitLab (vs GitHub self-hosted)
+
+GitHub Actions often leaves the **job workspace** on disk between runs, so trees under **`$GITHUB_WORKSPACE`** persist. GitLab Runner behavior depends on **executor** and **git strategy**:
+
+| Mechanism | Effect |
+|-----------|--------|
+| **`GIT_STRATEGY`** | **`fetch`** (default): reuse build dir, update refs — closest to “persistent workdir”. **`clone`**: clean clone each job — slow, good for hermetic jobs. **`none`**: you manage `git` yourself. |
+| **`GIT_CLEAN_FLAGS`** | Controls whether **`git clean`** runs before the job (default can remove untracked files). Set to **`none`** or adjust if you need dirty-tree incremental behavior. |
+| **Shell executor + same `builds_dir`** | Checkouts live under the runner’s **`builds/`** tree; the same project path is often **reused** across pipelines, similar to Actions — **incremental** if you do not wipe it. |
+| **Docker executor** | Container filesystem is usually **ephemeral** per job unless you mount volumes. **LLVM Linux:** keep **`CCACHE_DIR`** (and any large trees) on a **bind-mounted** path under **`CI_PROJECT_DIR`** or **`~/runner/cache`**, matching [`scripts/setup-llvm-ccache.sh`](scripts/setup-llvm-ccache.sh). |
+| **`cache:` in `.gitlab-ci.yml`** | Keyed archives (Gradle, Maven, etc.) for **speed**; complementary to a persistent checkout. |
+
+**Kotlin** incremental Gradle/Konan layout should keep using **`~/runner/cache`** (or `CI_PROJECT_DIR`-relative clean trees) exactly like the GitHub workflow — GitLab only changes how env vars are injected.
+
+### Multiple “workflows” in one GitLab project
+
+Yes. A single project can run **many pipeline layouts**:
+
+- **`include:`** — split into **`.gitlab/ci/kotlin.yml`**, **`.gitlab/ci/llvm.yml`**, etc., all included from **`.gitlab-ci.yml`**.
+- **`workflow:rules:`** — different pipelines by **branch**, **path**, **`CI_PIPELINE_SOURCE`**, or **pipeline variable**.
+- **`rules:` on jobs** — enable/disable jobs per **schedule**, **web trigger**, or **variable** (e.g. LLVM-only vs Kotlin-only).
+- **Downstream / child pipelines** — optional second **`gitlab-ci.yml`** in another project or **generated** config for isolation.
+
+So you do **not** need separate GitLab projects for “workflow per concern” unless you want hard isolation.
 
 ---
 

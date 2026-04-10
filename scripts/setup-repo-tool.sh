@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Install Google's repo launcher under $REPO_DIR (default: $GITHUB_WORKSPACE/bin).
+# Install Google's repo launcher under $REPO_DIR (default: $CI_PROJECT_DIR/bin).
+# GitLab sets CI_PROJECT_DIR to the checked-out project root. Export it when running locally:
+#   export CI_PROJECT_DIR="$(git rev-parse --show-toplevel)"
 # A tiny bash wrapper runs repo.py with a Python we verified here — avoids relying on
 # repo.py's shebang under Git Bash and avoids Windows "python3" app-installer stubs
 # (command -v succeeds but the binary is useless).
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}/bin}"
+: "${CI_PROJECT_DIR:?CI_PROJECT_DIR must be set (GitLab CI or export for local runs)}"
+REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 REPO_SCRIPT="$REPO_DIR/repo.py"
 REPO_WRAPPER="$REPO_DIR/repo"
 REPO_DOWNLOAD_URL="${REPO_DOWNLOAD_URL:-https://gitee.com/oschina/repo/raw/fork_flow/repo-py3}"
@@ -70,8 +73,9 @@ EOF
 
 chmod a+x "$REPO_WRAPPER" "$REPO_SCRIPT"
 
-if [ -n "${GITHUB_PATH:-}" ]; then
-  echo "$REPO_DIR" >> "$GITHUB_PATH"
+# GitLab: optional dotenv file for later steps in the same job (artifacts:reports:dotenv).
+if [ -n "${KNACTION_DOTENV_FILE:-}" ]; then
+  printf 'PATH=%s\n' "$REPO_DIR:${PATH}" >>"$KNACTION_DOTENV_FILE"
 fi
 
 export PATH="$REPO_DIR:$PATH"

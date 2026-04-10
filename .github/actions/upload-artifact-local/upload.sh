@@ -15,7 +15,9 @@ cache_path="$cache_dir/$name"
 if ! [ "$path" -ef "$cache_path" ]; then
   cp -f "$path" "$cache_path"
 fi
-echo "path=$cache_path" >> "$GITHUB_OUTPUT"
+if [ -n "${KNACTION_DOTENV_FILE:-}" ]; then
+  echo "path=$cache_path" >>"$KNACTION_DOTENV_FILE"
+fi
 echo "Cached to $cache_path"
 
 local_md5_artifact() {
@@ -32,7 +34,7 @@ local_md5_artifact() {
 
 local_md5="$(local_md5_artifact "$path")" || exit 1
 md5_url="${server_url}/artifacts/${name}.md5"
-tmp_sidecar="${RUNNER_TEMP:-/tmp}/upload-artifact-local-md5-$$"
+tmp_sidecar="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/upload-artifact-local-md5-$$"
 if ! code=$(curl -sS -o "$tmp_sidecar" -w '%{http_code}' "$md5_url"); then
   rm -f "$tmp_sidecar"
   echo "::error::Could not reach artifact server for MD5 check: $md5_url"
@@ -44,7 +46,9 @@ case "$code" in
     rm -f "$tmp_sidecar"
     if [ "$server_md5" = "$local_md5" ]; then
       download_url="${server_url}/artifacts/${name}"
-      echo "download_url=$download_url" >> "$GITHUB_OUTPUT"
+      if [ -n "${KNACTION_DOTENV_FILE:-}" ]; then
+        echo "download_url=$download_url" >>"$KNACTION_DOTENV_FILE"
+      fi
       echo "Server already has identical artifact (MD5 match), skipping upload."
       echo "Download: $download_url"
       exit 0
@@ -77,6 +81,8 @@ if [ "$code" != "200" ]; then
   exit 1
 fi
 download_url="${server_url}/artifacts/${name}"
-echo "download_url=$download_url" >> "$GITHUB_OUTPUT"
+if [ -n "${KNACTION_DOTENV_FILE:-}" ]; then
+  echo "download_url=$download_url" >>"$KNACTION_DOTENV_FILE"
+fi
 echo "Uploaded artifact: $name"
 echo "Download: $download_url"

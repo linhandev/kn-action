@@ -32,4 +32,5 @@ runs:
         INPUT_SERVER_URL: ${{ inputs.server_url }}
         INPUT_CACHE_DIR: ${{ inputs.cache_dir }}
       run: |
+        export KNACTION_DOTENV_FILE="${GITHUB_OUTPUT}"
         source "$GITHUB_ACTION_PATH/upload.sh"

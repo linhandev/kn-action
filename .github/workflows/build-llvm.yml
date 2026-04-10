@@ -43,6 +43,8 @@ on:
   #     # - 'scripts/ohos-build-llvm-windows.sh'
 
 env:
+  # Unique per workflow run; scripts (e.g. platform_package.sh) use this like GitLab CI_PIPELINE_ID.
+  CI_PIPELINE_ID: ${{ github.run_id }}
   MANIFEST_URL: https://gitcode.com/linhandev/manifest.git
   MANIFEST_FILE: llvm-toolchain.xml
   LOCAL_REFERENCE_DIR: ~/git/ci/llvm-project-kmp
@@ -63,6 +65,8 @@ jobs:
     # gh/API often pass booleans as the string "true"; accept both.
     if: ${{ !(github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true')) }}
     environment: env
+    env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
     outputs:
       llvm_sha_short: ${{ steps.archive.outputs.llvm_sha_short }}
       action_sha_short: ${{ steps.archive.outputs.action_sha_short }}
@@ -167,13 +171,13 @@ jobs:
           git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
 
       - name: Setup repo tool
-        run: bash "$GITHUB_WORKSPACE/kn-action/scripts/setup-repo-tool.sh"
+        run: bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
 
       - name: Init repo manifest
         env:
           LLVM_WORKSPACE: ${{ steps.vars.outputs.LLVM_WORKSPACE }}
         run: |
-          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
+          export PATH="$CI_PROJECT_DIR/bin:$PATH"
           # Init when .repo is missing (first run) or when doing a clean build
           if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${{ steps.vars.outputs.clean_build }}" = "true" ]; then
             cd "$LLVM_WORKSPACE"
@@ -190,7 +194,7 @@ jobs:
         env:
           GIT_TERMINAL_PROMPT: 0
         run: |
-          export PATH="$GITHUB_WORKSPACE/bin:$PATH"
+          export PATH="$CI_PROJECT_DIR/bin:$PATH"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           repo sync -c -v -j 16
           # Do not quote: -c git lfs pull must be three argv words (Windows/cmd caveat when Windows matrix is enabled).
@@ -218,8 +222,8 @@ jobs:
         run: |
           set -euo pipefail
           # Incremental ninja/cmake objects live under LLVM_WORKSPACE (persists on self-hosted unless clean_build).
-          # ccache speeds recompiles after repo sync / header churn; Linux keeps CCACHE_DIR under GITHUB_WORKSPACE (Docker mount).
-          source "$GITHUB_WORKSPACE/kn-action/scripts/setup-llvm-ccache.sh"
+          # ccache speeds recompiles after repo sync / header churn; Linux keeps CCACHE_DIR under CI_PROJECT_DIR (Docker mount).
+          source "$CI_PROJECT_DIR/scripts/setup-llvm-ccache.sh"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           bash toolchain/llvm-project/llvm-build/build.sh
           if command -v ccache >/dev/null 2>&1; then
@@ -268,6 +272,8 @@ jobs:
     name: Get latest artifacts names
     if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
+    env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
     outputs:
       outer_linux_name: ${{ steps.collect.outputs.outer_linux_name }}
       outer_mac_arm_name: ${{ steps.collect.outputs.outer_mac_arm_name }}
@@ -349,6 +355,7 @@ jobs:
     if: ${{ !cancelled() && needs['llvm-artifact-refs'].result == 'success' }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
       LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
       LLVM_MAJOR_FOR_PACKAGE: ${{ github.event.inputs.llvm_major_version || '19' }}
     outputs:
@@ -418,12 +425,12 @@ jobs:
             cd staging
             LLVM_MAJOR_FOR_PACKAGE="${LLVM_MAJOR_FOR_PACKAGE}" \
             LLVM_ESSENTIALS_ID="${LLVM_ESSENTIALS_ID}" \
-            GITHUB_RUN_ID="${GITHUB_RUN_ID}" \
-            GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
-            GITHUB_STEP_SUMMARY="${GITHUB_STEP_SUMMARY}" \
+            CI_PIPELINE_ID="${CI_PIPELINE_ID}" \
+            KNACTION_DOTENV_FILE="${GITHUB_OUTPUT}" \
+            KNACTION_STEP_SUMMARY="${GITHUB_STEP_SUMMARY}" \
             RUN_FINAL_PACKAGE="${RUN_FINAL_PACKAGE}" \
             CLANG_RESOURCE_VERSION="${CLANG_RESOURCE_VERSION}" \
-            bash "$GITHUB_WORKSPACE/kn-action/scripts/platform_package.sh"
+            bash "$CI_PROJECT_DIR/scripts/platform_package.sh"
           )
           # OHOS sysroot comes from deveco, hosted on maven, ohos-sysroot-dev.tar.gz isn't used.
 
@@ -485,6 +492,7 @@ jobs:
             shell: bash
     runs-on: ${{ matrix.runner }}
     env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
       LLVM_FINAL_LINUX: ${{ needs.cross-copy.outputs.archive_linux }}
       LLVM_FINAL_MAC_ARM64: ${{ needs.cross-copy.outputs.archive_mac_arm64 }}
       LLVM_FINAL_MAC_X64: ${{ needs.cross-copy.outputs.archive_mac_x64 }}
@@ -675,6 +683,8 @@ jobs:
     # always(): skip_build skips `build`; implicit success() would skip this job even when ohos-test-build matrix succeeds.
     if: ${{ always() && !cancelled() && needs['ohos-test-build'].result == 'success' }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
+    env:
+      CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
     strategy:
       fail-fast: false
       # One leg at a time: same runner + hdc session; avoids concurrent file send / shell to one device.
