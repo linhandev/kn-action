@@ -1,5 +1,5 @@
 # GitLab CI — kn-action (LAN). Runner fleet: AGENTS.md → "Four-host GitLab runner matrix".
-# prepare-repo tests run only on Kotlin-tagged runners (shell); LLVM runners are for LLVM pipelines.
+# prepare-repo tests: Kotlin runners only, three tags each (kotlin + OS + arch).
 
 workflow:
   rules:
@@ -48,7 +48,6 @@ stages:
     - mkdir -p "$LOCAL_REFERENCE_DIR"
     - bash .github/actions/prepare-repo/test.sh
 
-# One job per SSH host; tags match kotlin-* runners only.
 test:prepare-repo:kotlin:linux:
   extends: .prepare-repo-test
   tags:
@@ -56,25 +55,16 @@ test:prepare-repo:kotlin:linux:
     - linux
     - amd64
 
-test:prepare-repo:kotlin:win:
+test:prepare-repo:kotlin:windows:
   extends: .prepare-repo-test
   tags:
     - kotlin
     - windows
     - amd64
 
-test:prepare-repo:kotlin:mini:
+test:prepare-repo:kotlin:macos:
   extends: .prepare-repo-test
   tags:
     - kotlin
     - macos
     - arm64
-    - host-mini
-
-test:prepare-repo:kotlin:studio:
-  extends: .prepare-repo-test
-  tags:
-    - kotlin
-    - macos
-    - arm64
-    - host-studio
