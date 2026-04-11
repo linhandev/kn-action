@@ -12,9 +12,9 @@ mkdir -p "$WORK/downloads"
 cd "$WORK"
 DL="$(pwd)/downloads"
 
-"$CI_PROJECT_DIR/scripts/ci/gitlab-download-artifact-local.sh" --name="$OUTER_LINUX_NAME" --dir="$DL"
-"$CI_PROJECT_DIR/scripts/ci/gitlab-download-artifact-local.sh" --name="$OUTER_MAC_ARM_NAME" --dir="$DL"
-"$CI_PROJECT_DIR/scripts/ci/gitlab-download-artifact-local.sh" --name="$OUTER_MAC_X64_NAME" --dir="$DL"
+"$CI_PROJECT_DIR/scripts/ci/download-artifact-local.sh" --name="$OUTER_LINUX_NAME" --dir="$DL"
+"$CI_PROJECT_DIR/scripts/ci/download-artifact-local.sh" --name="$OUTER_MAC_ARM_NAME" --dir="$DL"
+"$CI_PROJECT_DIR/scripts/ci/download-artifact-local.sh" --name="$OUTER_MAC_X64_NAME" --dir="$DL"
 
 mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 staging
 tar -xf "$DL/$OUTER_LINUX_NAME" -C extract-linux

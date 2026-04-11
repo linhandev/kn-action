@@ -1,34 +1,26 @@
 # GitLab CI — kn-action (LAN). Runner fleet: AGENTS.md → "Four-host runner matrix".
 # prepare-repo tests: Kotlin runners only, three tags each (kotlin + OS + arch).
 #
-# Separate “workflows” (GitHub has build-llvm.yml vs test-prepare-repo.yml):
-# - Push/MR: prepare-repo tests run only when .github/actions/prepare-repo/** or
-#   test-prepare-repo.yml changes — not when you only touch .gitlab-ci.yml / LLVM paths.
-# - Web / schedule: set KNACTION_CI_PROFILE=llvm for LLVM-only (no prepare-repo).
+# Workflows: merge requests and manual “Run pipeline” only (no push / schedule).
+# Per-job rules gate prepare-repo vs LLVM via path changes; web uses KNACTION_CI_PROFILE.
+#
+# Manual LLVM-only: Run pipeline (web) with variable KNACTION_CI_PROFILE=llvm.
+# Manual prepare-repo tests: Run pipeline (web) with KNACTION_CI_PROFILE=test-prepare-repo.
+
+variables:
+  KNACTION_CI_PROFILE:
+    description: "Select CI profile to run"
+    value: "llvm"
+    options:
+      - "llvm"
+      - "test-prepare-repo"
+      - "llvm-sync"
 
 workflow:
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $KNACTION_CI_PROFILE == "llvm-sync"'
+    - if: '$CI_PIPELINE_SOURCE == "api" && $KNACTION_CI_PROFILE == "llvm-sync"'
     - if: '$CI_PIPELINE_SOURCE == "web"'
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-      changes:
-        - .github/actions/prepare-repo/**/*
-        - .github/workflows/test-prepare-repo.yml
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-      changes:
-        - .gitlab-ci.yml
-        - .github/workflows/build-llvm.yml
-        - .gitlab/ci/**/*
-        - scripts/ci/gitlab-llvm-build.sh
-        - scripts/ci/gitlab-llvm-build-linux.sh
-        - scripts/ci/gitlab-download-artifact-local.sh
-        - scripts/ci/gitlab-llvm-artifact-refs.sh
-        - scripts/ci/gitlab-llvm-cross-copy.sh
-        - scripts/ci/gitlab-ohos-test-build.sh
-        - scripts/ci/gitlab-hdc-verify-all.sh
-        - scripts/setup-repo-tool.sh
-        - scripts/setup-llvm-ccache.sh
-        - scripts/platform_package.sh
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .github/actions/prepare-repo/**/*
@@ -38,20 +30,33 @@ workflow:
         - .gitlab-ci.yml
         - .github/workflows/build-llvm.yml
         - .gitlab/ci/**/*
-        - scripts/ci/gitlab-llvm-build.sh
-        - scripts/ci/gitlab-llvm-build-linux.sh
-        - scripts/ci/gitlab-download-artifact-local.sh
-        - scripts/ci/gitlab-llvm-artifact-refs.sh
-        - scripts/ci/gitlab-llvm-cross-copy.sh
-        - scripts/ci/gitlab-ohos-test-build.sh
-        - scripts/ci/gitlab-hdc-verify-all.sh
+        - scripts/ci/llvm-build.sh
+        - scripts/ci/download-artifact-local.sh
+        - scripts/ci/llvm-artifact-refs.sh
+        - scripts/ci/llvm-cross-copy.sh
+        - scripts/ci/ohos-test-build.sh
+        - scripts/ci/hdc-verify-all.sh
         - scripts/setup-repo-tool.sh
         - scripts/setup-llvm-ccache.sh
         - scripts/platform_package.sh
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - .gitlab-ci.yml
+        - .gitlab/ci/kotlin.yml
+        - .github/workflows/build-kotlin.yml
+        - scripts/ci/kotlin-build.sh
+        - scripts/proxy.init.gradle
+        - scripts/rewrite-gradle-wrapper-reposlite.sh
+        - patches/**/*
+        - .github/actions/prepare-repo/**/*
+        - .github/actions/upload-artifact-local/**/*
+        - .github/actions/download-artifact-local/**/*
     - when: never
 
 include:
+  - local: .gitlab/ci/prepare-repo.yml
   - local: .gitlab/ci/llvm.yml
+  # - local: .gitlab/ci/kotlin.yml
 
 stages:
   - test
@@ -59,72 +64,3 @@ stages:
   - llvm_merge
   - llvm_verify
 
-.prepare-repo-test:
-  stage: test
-  interruptible: true
-  rules:
-    - if: '$KNACTION_CI_PROFILE == "llvm"'
-      when: never
-    - if: '$CI_PIPELINE_SOURCE == "web" && $KNACTION_CI_PROFILE != "llvm"'
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $KNACTION_CI_PROFILE != "llvm"'
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-      changes:
-        - .github/actions/prepare-repo/**/*
-        - .github/workflows/test-prepare-repo.yml
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes:
-        - .github/actions/prepare-repo/**/*
-        - .github/workflows/test-prepare-repo.yml
-  variables:
-    GIT_STRATEGY: fetch
-    GIT_DEPTH: "0"
-  before_script:
-    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
-    - ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >> ~/.ssh/known_hosts 2>/dev/null || true
-    - |
-      if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
-        printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-        chmod 600 ~/.ssh/id_ed25519
-        eval "$(ssh-agent -s)"
-        ssh-add ~/.ssh/id_ed25519
-      fi
-    - |
-      if [ -n "${GITCODE_TOKEN:-}" ]; then
-        git config --global url."https://oauth2:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
-      fi
-    - mkdir -p "${CI_PROJECT_DIR}/.ci-tmp"
-  script:
-    - export WORKSPACE_DIR="${CI_PROJECT_DIR}/.ci-tmp/prepare-repo-workspace"
-    - export LOCAL_REFERENCE_DIR="${CI_PROJECT_DIR}/.ci-tmp/git-ci"
-    - rm -rf "$WORKSPACE_DIR" || true
-    - mkdir -p "$LOCAL_REFERENCE_DIR"
-    - bash .github/actions/prepare-repo/test.sh
-
-test:prepare-repo:kotlin:linux:
-  extends: .prepare-repo-test
-  tags:
-    - kotlin
-    - linux
-    - amd64
-
-test:prepare-repo:kotlin:windows:
-  extends: .prepare-repo-test
-  tags:
-    - kotlin
-    - windows
-    - amd64
-
-test:prepare-repo:kotlin:macos:
-  extends: .prepare-repo-test
-  tags:
-    - kotlin
-    - macos
-    - arm64
-
-# Intel macOS runners (e.g. SSH host `mini` when x86_64); same script as ARM macOS job.
-test:prepare-repo:kotlin:macos-amd64:
-  extends: .prepare-repo-test
-  tags:
-    - kotlin
-    - macos
-    - amd64

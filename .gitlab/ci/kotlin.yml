@@ -1,0 +1,81 @@
+# Kotlin OH build — port of .github/workflows/build-kotlin.yml (GitLab matrix).
+# Web: set CI variable KNACTION_CI_PROFILE=kotlin (same idea as LLVM’s llvm profile).
+# Runners: kotlin + OS + arch (AGENTS.md). Requires GITCODE_SSH_PRIVATE_KEY for kotlin clone.
+
+.kotlin-build-rules:
+  rules:
+    - if: '$KNACTION_CI_PROFILE == "llvm"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "web" && $KNACTION_CI_PROFILE == "kotlin"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - .gitlab-ci.yml
+        - .gitlab/ci/kotlin.yml
+        - .github/workflows/build-kotlin.yml
+        - scripts/ci/kotlin-build.sh
+        - scripts/proxy.init.gradle
+        - scripts/rewrite-gradle-wrapper-reposlite.sh
+        - patches/**/*
+        - .github/actions/prepare-repo/**/*
+        - .github/actions/upload-artifact-local/**/*
+        - .github/actions/download-artifact-local/**/*
+
+.kotlin-build-common:
+  stage: build
+  interruptible: true
+  timeout: 6h
+  extends: .kotlin-build-rules
+  variables:
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: "0"
+    GIT_CLEAN_FLAGS: "-ffd"
+  before_script:
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >> ~/.ssh/known_hosts 2>/dev/null || true
+    - |
+      if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
+        printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        eval "$(ssh-agent -s)"
+        ssh-add ~/.ssh/id_ed25519
+      fi
+
+build:kotlin:linux:x64:
+  extends: .kotlin-build-common
+  needs: []
+  tags:
+    - kotlin
+    - linux
+    - x64
+  script:
+    - bash scripts/ci/kotlin-build.sh linux-x64
+
+build:kotlin:macos:arm64:
+  extends: .kotlin-build-common
+  needs: []
+  tags:
+    - kotlin
+    - macos
+    - arm64
+  script:
+    - bash scripts/ci/kotlin-build.sh macos-arm64
+
+build:kotlin:macos:x64:
+  extends: .kotlin-build-common
+  needs: []
+  tags:
+    - kotlin
+    - macos
+    - x64
+  script:
+    - bash scripts/ci/kotlin-build.sh macos-x64
+
+build:kotlin:windows:x64:
+  extends: .kotlin-build-common
+  needs: []
+  tags:
+    - kotlin
+    - windows
+    - x64
+  script:
+    - bash scripts/ci/kotlin-build.sh windows-x64

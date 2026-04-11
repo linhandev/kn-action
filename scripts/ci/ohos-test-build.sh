@@ -2,7 +2,7 @@
 # GHA ohos-test-build matrix leg. Requires dotenv from llvm:cross-copy (archive_*).
 set -euo pipefail
 
-PLATFORM="${1:?usage: gitlab-ohos-test-build.sh linux-x64|windows-x64|macos-arm64|macos-x64}"
+PLATFORM="${1:?usage: ohos-test-build.sh linux-x64|windows-x64|macos-arm64|macos-x64}"
 : "${CI_PROJECT_DIR:?}"
 : "${CI_PIPELINE_ID:?}"
 
@@ -29,7 +29,7 @@ rm -rf "$W"
 mkdir -p "$W/dl"
 cd "$W"
 
-"$CI_PROJECT_DIR/scripts/ci/gitlab-download-artifact-local.sh" --name="$n" --dir="$W/dl"
+"$CI_PROJECT_DIR/scripts/ci/download-artifact-local.sh" --name="$n" --dir="$W/dl"
 
 LLVM_TAR="$W/dl/$n"
 W_U="$W"

@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Self-hosted GitLab LLVM CI: trees must survive pre-job git clean (see .gitlab/ci/llvm.yml GIT_CLEAN_FLAGS).
+/llvm/
+/.ccache/
+/bin/repo
+/bin/repo.py
+# Kotlin OH CI clone (prepare-repo into kn-action checkout)
+/ci-workspace/

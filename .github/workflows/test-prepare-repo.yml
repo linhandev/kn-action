@@ -1,6 +1,6 @@
 # Run prepare-repo test script on Linux, macOS, and Windows when prepare-repo folder changes
 # For full tests (SSH + HTTPS), add GITCODE_SSH_PRIVATE_KEY to the "env" environment (Settings → Environments → env).
-# GitLab CI equivalent: .gitlab-ci.yml (test:prepare-repo:* jobs); project CI/CD variables GITCODE_SSH_PRIVATE_KEY, optional GITCODE_TOKEN.
+# GitLab CI equivalent: .gitlab-ci.yml (test:prepare-repo:* jobs); CI/CD variable GITCODE_SSH_PRIVATE_KEY for SSH; HTTPS uses public clone URLs.
 
 name: Test prepare-repo
 

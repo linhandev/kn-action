@@ -1,30 +1,28 @@
 #!/usr/bin/env bash
 # GitLab CI: matrix legs for .github/workflows/build-llvm.yml "build" job.
-# Usage: gitlab-llvm-build.sh linux | macos-arm64 | macos-amd64
+# Usage: llvm-build.sh linux | macos-arm64 | macos-x64
 set -euo pipefail
 
 : "${CI_PROJECT_DIR:?}"
 mkdir -p "${CI_PROJECT_DIR}/.llvm-ci-meta"
-LLVM_TRACE="${CI_PROJECT_DIR}/.llvm-ci-meta/trace.log"
-: >"$LLVM_TRACE"
-trace() {
-  local line
-  line="$(date -u +"%Y-%m-%dT%H:%M:%SZ") $*"
-  echo "$line" >>"$LLVM_TRACE"
-  echo "$line" >&2
+source "$CI_PROJECT_DIR/scripts/ci/logging.sh"
+
+# Drop stale global url.*.insteadOf rules mentioning gitcode.com (shared runners / old CI).
+gitcode_clear_stale_url_insteadof() {
+  local key
+  while IFS= read -r key; do
+    case "$key" in
+      *gitcode.com*|*gitcode.com:*)
+        git config --global --unset-all "$key" 2>/dev/null || true
+        ;;
+    esac
+  done < <(git config --global --name-only --get-regexp '^url\.' 2>/dev/null || true)
 }
 
-if [ -z "${GITCODE_TOKEN:-}" ]; then
-  echo "GITCODE_TOKEN is empty in this job."
-  echo "GitLab omits Protected variables on unprotected branches. Fix one of:"
-  echo "  • Settings → Repository → Protected branches: protect ${CI_COMMIT_REF_NAME:-this branch}; or"
-  echo "  • Settings → CI/CD → Variables → GITCODE_TOKEN: uncheck \"Protect variable\" (still use Masked)."
-  exit 1
-fi
 : "${CI_PIPELINE_ID:?}"
 
-PLATFORM="${1:?usage: gitlab-llvm-build.sh linux|macos-arm64|macos-amd64}"
-trace "start platform=$PLATFORM CI_JOB_NAME=${CI_JOB_NAME:-}"
+PLATFORM="${1:?usage: llvm-build.sh linux|macos-arm64|macos-x64}"
+log_info "start platform=$PLATFORM CI_JOB_NAME=${CI_JOB_NAME:-}"
 
 case "$PLATFORM" in
   linux)
@@ -37,44 +35,44 @@ case "$PLATFORM" in
     export HOMEBREW_NO_AUTO_UPDATE=1
     export HOMEBREW_NO_ENV_HINTS=1
     export CI=1
-    trace "homebrew deps"
+    log_info "homebrew deps"
     command -v brew >/dev/null 2>&1 || {
-      echo "brew not on PATH"
+      log_error "brew not on PATH"
       exit 1
     }
     echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python, ccache)…"
     for pkg in swig git-lfs java coreutils wget pigz python ccache; do
       if brew list "$pkg" &>/dev/null; then
-        trace "brew already installed: $pkg"
+        log_info "brew already installed: $pkg"
       else
-        trace "brew install: $pkg"
+        log_info "brew install: $pkg"
         brew install "$pkg"
       fi
     done
     ;;
-  macos-amd64)
+  macos-x64)
     export RUNNER_OS=macOS
     export RUNNER_ARCH=X64
     export HOMEBREW_NO_AUTO_UPDATE=1
     export HOMEBREW_NO_ENV_HINTS=1
     export CI=1
-    trace "homebrew deps"
+    log_info "homebrew deps"
     command -v brew >/dev/null 2>&1 || {
-      echo "brew not on PATH"
+      log_error "brew not on PATH"
       exit 1
     }
     echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python, ccache)…"
     for pkg in swig git-lfs java coreutils wget pigz python ccache; do
       if brew list "$pkg" &>/dev/null; then
-        trace "brew already installed: $pkg"
+        log_info "brew already installed: $pkg"
       else
-        trace "brew install: $pkg"
+        log_info "brew install: $pkg"
         brew install "$pkg"
       fi
     done
     ;;
   *)
-    echo "Unknown platform: $PLATFORM"
+    log_error "Unknown platform: $PLATFORM"
     exit 1
     ;;
 esac
@@ -102,12 +100,9 @@ git config --global --add safe.directory "$LLVM_MUSL" 2>/dev/null || true
 git config --global user.email &>/dev/null || git config --global user.email "ci@ci.ci"
 git config --global user.name &>/dev/null || git config --global user.name "ci"
 
-git config --global credential.helper ''
-git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
-git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
-git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
+gitcode_clear_stale_url_insteadof
 
-trace "setup-repo-tool"
+log_info "setup-repo-tool"
 bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
 export PATH="$REPO_DIR:$PATH"
 
@@ -118,32 +113,35 @@ if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]
   if [ -d "$ref_dir" ]; then
     REFERENCE_FLAG="--reference=$ref_dir"
   fi
-  trace "repo init"
+  log_info "repo init"
   repo init -u "$MANIFEST_URL" -m "$MANIFEST_FILE" $REFERENCE_FLAG
+else
+  log_info "repo init skipped (.repo present, LLVM_CLEAN_BUILD not set)"
 fi
 
 export GIT_TERMINAL_PROMPT=0
 cd "$LLVM_WORKSPACE"
-trace "repo sync"
-repo sync -c -v -j 16
-trace "git lfs"
+log_info "repo sync"
+# --force-sync: overwrite work trees when .repo/project-objects vs checkout disagree (hooks/remap); required on reused runners.
+# Omit -v (noisy/slow logs).
+repo sync -c --force-sync -j 16
+log_info "git lfs"
 repo forall -c git lfs pull
 
-if [ -n "${GITCODE_TOKEN:-}" ]; then
-  git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
-fi
-git config --global --unset credential.helper 2>/dev/null || true
+gitcode_clear_stale_url_insteadof
 
 if [ "$NEED_ENV_PREPARE" = "true" ]; then
   cd "$LLVM_WORKSPACE"
-  trace "env_prepare"
+  log_info "env_prepare"
   bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
 fi
 
-trace "ccache setup"
+log_info "ccache setup"
 source "$CI_PROJECT_DIR/scripts/setup-llvm-ccache.sh"
 cd "$LLVM_WORKSPACE"
-trace "llvm build.sh"
+log_info "llvm build.sh"
+log_info "incremental-sync probe mode: exit before build.sh"
+exit 0
 bash toolchain/llvm-project/llvm-build/build.sh
 if command -v ccache >/dev/null 2>&1; then
   ccache -s || true
@@ -160,7 +158,7 @@ if [ -z "${COMMIT_SHORT// }" ]; then
   COMMIT_SHORT="$(git -C "$CI_PROJECT_DIR" rev-parse --short=7 HEAD 2>/dev/null || true)"
 fi
 if [ -z "${COMMIT_SHORT// }" ]; then
-  echo "Could not determine commit short SHA (CI_COMMIT_SHA / git rev-parse)."
+  log_error "Could not determine commit short SHA (CI_COMMIT_SHA / git rev-parse)."
   exit 1
 fi
 
@@ -173,13 +171,13 @@ SAFE_JOB="$(echo "${CI_JOB_NAME:-llvm-build}" | tr ':/' '__')"
 
 PACKAGES_DIR="$LLVM_WORKSPACE/packages"
 if [ ! -d "$PACKAGES_DIR" ] || [ -z "$(ls -A "$PACKAGES_DIR" 2>/dev/null)" ]; then
-  echo "Expected non-empty directory at $PACKAGES_DIR"
+  log_error "Expected non-empty directory at $PACKAGES_DIR"
   exit 1
 fi
 
 ARCHIVE_NAME="llvm-packages-${LLVM_SHA_SHORT}_act-${COMMIT_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar"
 OUT_PATH="$AP/$ARCHIVE_NAME"
-trace "tar packages -> $OUT_PATH"
+log_info "tar packages -> $OUT_PATH"
 tar -cf "$OUT_PATH" -C "$LLVM_WORKSPACE" packages
 
 export INPUT_PATH="$OUT_PATH"
@@ -187,12 +185,13 @@ export INPUT_SERVER_URL="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
 export INPUT_CACHE_DIR="$AP"
 KNACTION_DOTENV_FILE="$(mktemp)"
 export KNACTION_DOTENV_FILE
-trace "upload artifact server ${INPUT_SERVER_URL:-}"
+log_info "upload artifact server ${INPUT_SERVER_URL:-}"
 # shellcheck source=/dev/null
 if ! source "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh"; then
-  echo "Artifact upload failed (retry once after 5s). Check Docker runner LAN reachability to ARTIFACT_SERVER_URL (${INPUT_SERVER_URL:-})."
+  log_warn "Artifact upload failed (retry once after 5s)."
+  log_warn "Check Docker runner LAN reachability to ARTIFACT_SERVER_URL (${INPUT_SERVER_URL:-})."
   sleep 5
-  trace "upload retry"
+  log_info "upload retry"
   # shellcheck source=/dev/null
   source "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh"
 fi
