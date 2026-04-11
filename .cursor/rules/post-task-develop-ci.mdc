@@ -1,16 +1,19 @@
 ---
-description: After completing work, commit on develop, push, poll CI run, fix, iterate
+description: After completing work, commit on develop, push to GitLab, ensure MR to main, drive MR pipeline green
 alwaysApply: true
 ---
 
-# Post-task: commit, push, and close the CI loop
+# Post-task: commit, push, merge request, and close the GitLab CI loop
 
-When a task or mode of work is **finished** and there is **nothing ambiguous** that requires asking the user (scope, product intent, secrets, or irreversible actions), **do not stop at a local change**. Drive it to a green workflow on `develop`:
+Primary CI is **GitLab** (remote `gl`). Pipelines run for **merge requests** and **manual “Run pipeline”**, not for ordinary branch pushes alone (see `.gitlab-ci.yml` `workflow:` rules). Treat the **MR pipeline** as the source of truth.
 
-1. **Commit** on branch `develop` with a clear message describing what changed and why.
-2. **Push** to GitHub (`origin`).
-3. **CI**: If a relevant workflow is not already running for that push, **trigger** it (e.g. empty commit only if the repo convention allows, or the appropriate `workflow_dispatch` / documented trigger). Otherwise rely on the push-triggered run.
-4. **Poll** the workflow run until it **concludes** (success, failure, or cancelled). Prefer this repo’s `scripts/poll-workflow-run.py` with the run ID from `gh`, or GitHub MCP / `gh run watch` as appropriate.
-5. If the run **failed**, **diagnose**, **fix** in-repo, and **iterate**: commit → push → poll again until green or until you hit something that must be resolved with the user.
+When a task or mode of work is **finished**, **do not stop at a local change**. Drive it to a green pipeline on the path to `main`:
+
+1. **Commit** on branch `develop` with a clear message describing what changed and why (conventional commits; see workspace GitLab workflow rules).
+2. **Push** to GitLab: `git push gl develop`
+3. **Merge request**: Ensure there is an **open MR from `develop` into `main`**. If none exists, **create one** (e.g. `glab mr create -s develop -b main -t "short title" -y`, GitLab UI, or GitLab API/MCP). Use a concise title and description; link issues with `#<id>` when applicable.
+4. **CI**: Rely on the **MR-triggered pipeline** for that merge request. This repo’s `workflow:` only creates MR pipelines when changed files match **`.gitlab-ci.yml` paths** (see `.gitlab-ci.yml`); MRs that touch only other paths (e.g. some docs or `.cursor/`) may need **Run pipeline** in GitLab (**web** source). If nothing ran and the project allows it, use **Run pipeline** rather than assuming a bare push started CI.
+5. **Poll** until the **pipeline finishes** (success, failure, or cancelled). Prefer **GitLab CLI** (`glab ci status`, `glab ci trace`, `glab ci view`, or repeated checks), **GitLab API**, or the GitLab MCP if available — not GitHub `gh` or `scripts/poll-workflow-run.py` (that script is for GitHub Actions in other contexts).
+6. If the pipeline **failed**, **diagnose** (job logs), **fix** in-repo, **commit** on `develop`, **push**, and **iterate** until the MR pipeline is green or you hit a blocker that needs the user (secrets, runner, LAN-only access, permissions).
 
 Skip this loop when the user explicitly asked for a draft-only change, no push, or when git/remote state is unknown or unsafe to modify without confirmation.

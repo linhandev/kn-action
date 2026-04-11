@@ -55,18 +55,12 @@ ssh mini  'ls -la ~/runner ~/gitlab-runner 2>/dev/null; xcode-select -p'
 
 Checklist so **`llvm`**-tagged runners can **`repo` sync**, build, and drop **`llvm/packages`** into **`~/runner/artifact`**.
 
-### CI / secrets (GitLab)
-
-| Item | Required |
-|------|----------|
-| **`GITCODE_TOKEN`** | Masked CI/CD variable — GitCode PAT with read access for HTTPS **`git`** / **`repo`** (URL rewrites in git config as in scripts). If the variable is **Protected**, GitLab only injects it for pipelines on **protected branches/tags**; either protect the branch you build from (e.g. **`develop`**) or turn off **Protect variable** for `GITCODE_TOKEN` (keeping **Masked** is fine). |
-
 ### Every `llvm` host (macOS / Linux / Windows)
 
 | Item | Notes |
 |------|------|
 | **`~/runner/artifact`**, **`~/runner/cache`** | Scripts expect artifact output and caches here; bind-mount or ensure paths inside Docker match this layout. |
-| **Network** | **gitcode.com**, **gitee.com** (default **`repo.py`** fetch in **`setup-repo-tool.sh`**). |
+| **Network** | **gitcode.com**, **gitee.com** (default **`repo.py`** fetch in **`setup-repo-tool.sh`**). HTTPS **`repo`** remotes are expected to be **public** (no CI PAT); use **SSH** on the runner for private upstreams. |
 | **Optional `repo init --reference`** | **`LOCAL_REFERENCE_DIR`** defaults to **`~/git/ci/llvm-project-kmp`** when set on the host. |
 
 ### macOS (`llvm`)
@@ -111,7 +105,7 @@ Keep these in mind when changing **`scripts/`** or CI:
 
 **Kotlin**
 
-- Multi-platform matrix (**macOS** arm64/x64, **Linux** amd64, **Windows** amd64) with consistent toolchains per OS.
+- Multi-platform matrix (**macOS** arm64/x64, **Linux** x64, **Windows** x64) with consistent toolchains per OS.
 - **Incremental** builds reuse **`~/runner/cache`** (Gradle/Konan/Maven); **clean** builds use an ephemeral tree then may **promote** cache on success (see existing script/workflow logic you port).
 - **GitCode via SSH** — host identity only for clones where designed.
 - **prepare-repo** for commit/branch/MR selection (see action README).
@@ -156,26 +150,28 @@ GitLab and runners are **LAN-only**. URLs use the GitLab host’s **static LAN I
 
 SSH hosts: **`linux`**, **`win`**, **`mini`**, **studio**. **Eight** registrations: **Kotlin + LLVM on each host**. **`.gitlab-ci.yml`** **`prepare-repo`** tests use **Kotlin** runners only.
 
-**Naming (`--description`):** **`{kotlin|llvm}-{os}-{arch}`** only (e.g. **`kotlin-linux-amd64`**, **`kotlin-macos-arm64`**, **`kotlin-windows-amd64`**). Do not embed SSH host names or executor type in the description.
+**Naming (`--description`):** **`{kotlin|llvm}-{os}-{arch}`** only (e.g. **`kotlin-linux-x64`**, **`kotlin-macos-arm64`**, **`kotlin-macos-x64`**, **`kotlin-windows-x64`**). Do not embed SSH host names or executor type in the description.
 
-**Tags:** exactly **three**: role (**`kotlin`** / **`llvm`**), OS (**`linux`**, **`windows`**, **`macos`**), arch (**`amd64`** / **`arm64`**). No **`docker`** tag — LLVM on Linux uses **`executor = "docker"`** in **`config.toml`**; jobs with **`image:`** select that runner via tags + executor.
+**Tags:** exactly **three**: role (**`kotlin`** / **`llvm`**), OS (**`linux`**, **`windows`**, **`macos`**), arch (**`x64`** / **`arm64`**). No **`docker`** tag — LLVM on Linux uses **`executor = "docker"`** in **`config.toml`**; jobs with **`image:`** select that runner via tags + executor.
 
 **Runner `builds_dir` (spec, all hosts):** **`~/gitlab-runner/kotlin`** and **`~/gitlab-runner/llvm`**. On Windows: **`%USERPROFILE%\gitlab-runner\kotlin`** and **`%USERPROFILE%\gitlab-runner\llvm`**. Set in **`config.toml`** or **`gitlab-runner register --builds-dir`**.
 
 | SSH host | Runner name | Tags | Executor | `builds_dir` |
 |----------|-------------|------|----------|--------------|
-| **`linux`** | `kotlin-linux-amd64` | `kotlin`, `linux`, `amd64` | **shell** | **`~/gitlab-runner/kotlin`** |
-| **`linux`** | `llvm-linux-amd64` | `llvm`, `linux`, `amd64` | **docker** | **`~/gitlab-runner/llvm`** (mount **`~/runner/artifact`** etc. per LLVM Docker layout) |
-| **`win`** | `kotlin-windows-amd64` | `kotlin`, `windows`, `amd64` | **shell** (Git Bash) | **`%USERPROFILE%\gitlab-runner\kotlin`** |
-| **`win`** | `llvm-windows-amd64` | `llvm`, `windows`, `amd64` | **shell** (Git Bash) | **`%USERPROFILE%\gitlab-runner\llvm`** |
-| **`mini`**, **`studio`** | `kotlin-macos-arm64` | `kotlin`, `macos`, `arm64` | **shell** | **`~/gitlab-runner/kotlin`** |
-| **`mini`**, **`studio`** | `llvm-macos-arm64` | `llvm`, `macos`, `arm64` | **shell** | **`~/gitlab-runner/llvm`** |
+| **`linux`** | `kotlin-linux-x64` | `kotlin`, `linux`, `x64` | **shell** | **`~/gitlab-runner/kotlin`** |
+| **`linux`** | `llvm-linux-x64` | `llvm`, `linux`, `x64` | **docker** | **`~/gitlab-runner/llvm`** (mount **`~/runner/artifact`** etc. per LLVM Docker layout) |
+| **`win`** | `kotlin-windows-x64` | `kotlin`, `windows`, `x64` | **shell** (Git Bash) | **`%USERPROFILE%\gitlab-runner\kotlin`** |
+| **`win`** | `llvm-windows-x64` | `llvm`, `windows`, `x64` | **shell** (Git Bash) | **`%USERPROFILE%\gitlab-runner\llvm`** |
+| **`studio`** | `kotlin-macos-arm64` | `kotlin`, `macos`, `arm64` | **shell** | **`~/gitlab-runner/kotlin`** |
+| **`studio`** | `llvm-macos-arm64` | `llvm`, `macos`, `arm64` | **shell** | **`~/gitlab-runner/llvm`** |
+| **`mini`** | `kotlin-macos-x64` | `kotlin`, `macos`, `x64` | **shell** | **`~/gitlab-runner/kotlin`** |
+| **`mini`** | `llvm-macos-x64` | `llvm`, `macos`, `x64` | **shell** | **`~/gitlab-runner/llvm`** |
 
 **Windows:** Runner install under **`%USERPROFILE%\gitlab-runner\`**, config **`config.toml`**, service user matches **`%USERPROFILE%`**.
 
-**Linux:** Config often **`~/gitlab-runner/config.toml`** or **`~/gitlab-runner/config/config.toml`**.
+**Linux:** **`~/gitlab-runner/config.toml`** (same tree as **`builds_dir`** above). System packages may use **`/etc/gitlab-runner/config.toml`** instead.
 
-**macOS:** **`~/gitlab-runner/config.toml`**; two stanzas per machine on **`mini`** and **`studio`** (same names/tags; different physical runners / **`$HOME`**).
+**macOS:** **`~/gitlab-runner/config.toml`**; two stanzas per host (**`studio`**: arm64 names; **`mini`**: x64 names). **`name`** in **`config.toml`** should match the GitLab runner **description** above.
 
 **Register example:**
 
@@ -189,20 +185,19 @@ gitlab-runner register \
   --builds-dir "$HOME/gitlab-runner/kotlin"
 ```
 
-**LLVM Linux (Docker):** add **`--executor docker`**, **`--docker-image alpine:latest`**, **`--tag-list "llvm,linux,amd64"`**.
+**LLVM Linux (Docker):** add **`--executor docker`**, **`--docker-image alpine:latest`**, **`--tag-list "llvm,linux,x64"`**.
 
 **API automation:** Short-lived root PATs for **`POST /api/v4/user/runners`** — revoke immediately; do not commit tokens.
 
 ### Test `prepare-repo` (`.gitlab-ci.yml`)
 
-**Three** jobs — **Kotlin** runners, **three tags** each. Runs [`.github/actions/prepare-repo/test.sh`](.github/actions/prepare-repo/test.sh) (SSH + HTTPS to **`linhandev/test-prepare-repo`** on GitCode). One **macOS** job matches both **`mini`** and **`studio`**.
+**Four** jobs — **Kotlin** runners, **three tags** each. Runs [`.github/actions/prepare-repo/test.sh`](.github/actions/prepare-repo/test.sh) (SSH + HTTPS to **`linhandev/test-prepare-repo`** on GitCode). **macOS** **`arm64`** targets **`studio`** (Apple Silicon); **`macos-x64`** targets **`mini`** (Intel).
 
 | Item | Notes |
 |------|--------|
 | **Trigger** | **`workflow:rules`**: `schedule`, **`web`**, **`push`/`merge_request_event`** when **`.github/actions/prepare-repo/**`**, **`.gitlab-ci.yml`**, or related paths change. |
-| **Tags** | **`test:prepare-repo:kotlin:linux`** → `kotlin`, `linux`, `amd64`. **`…:windows`** → `kotlin`, `windows`, `amd64`. **`…:macos`** → `kotlin`, `macos`, `arm64`. |
+| **Tags** | **`test:prepare-repo:kotlin:linux`** → `kotlin`, `linux`, `x64`. **`…:windows`** → `kotlin`, `windows`, `x64`. **`…:macos`** → `kotlin`, `macos`, `arm64`. **`…:macos-x64`** → `kotlin`, `macos`, `x64`. |
 | **`GITCODE_SSH_PRIVATE_KEY`** | CI/CD variable (masked). |
-| **`GITCODE_TOKEN`** | Optional; HTTPS leg of **`test.sh`**. |
 | **Work dirs** | Ephemeral under **`$CI_PROJECT_DIR/.ci-tmp/`**. |
 
 ### `~/runner` vs `~/gitlab-runner`

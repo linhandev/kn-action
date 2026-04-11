@@ -3,7 +3,7 @@
 # Linux: runs inside OpenHarmony build env Docker image (empty `container.image` skips Docker; see actions/runner#265).
 # Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
 # workflow_dispatch skip_build: three independent download-artifact-local pattern= calls (latest per OS via server); outer tars need not share the same llvm/act SHA.
-# Requires: environment "env" with secret GITCODE_TOKEN (GitCode PAT with read access) for repo sync from gitcode.com.
+# Repo sync uses public HTTPS remotes (or SSH where configured on the runner).
 
 name: Build LLVM
 
@@ -156,19 +156,12 @@ jobs:
           # only set if not already
           git config --global user.email &>/dev/null || git config --global user.email "ci@ci.ci"
           git config --global user.name &>/dev/null || git config --global user.name "ci"
-
-      - name: Setup git credentials for GitCode
-        env:
-          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-        run: |
-          if [ -z "${GITCODE_TOKEN}" ]; then
-            echo "::error::GITCODE_TOKEN secret is not set. Add it in repo Settings → Secrets and variables → Actions (read-only access is sufficient)."
-            exit 1
-          fi
-          git config --global credential.helper ''
-          git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
-          git config --global url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "https://gitcode.com/"
-          git config --global --add url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf "git@gitcode.com:"
+          # Shared runners: drop stale url.*.insteadOf for gitcode.com (left from older CI).
+          while IFS= read -r key; do
+            case "$key" in *gitcode.com*|*gitcode.com:*)
+              git config --global --unset-all "$key" 2>/dev/null || true ;;
+            esac
+          done < <(git config --global --name-only --get-regexp '^url\.' 2>/dev/null || true)
 
       - name: Setup repo tool
         run: bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
@@ -196,18 +189,15 @@ jobs:
         run: |
           export PATH="$CI_PROJECT_DIR/bin:$PATH"
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
-          repo sync -c -v -j 16
+          # Omit default -v (noisy / slower logs). Set REPO_SYNC_VERBOSE=1 in env to enable.
+          _j="${REPO_SYNC_JOBS:-16}"
+          if [ "${REPO_SYNC_VERBOSE:-0}" = "1" ]; then
+            repo sync -c -v -j "$_j"
+          else
+            repo sync -c -j "$_j"
+          fi
           # Do not quote: -c git lfs pull must be three argv words (Windows/cmd caveat when Windows matrix is enabled).
           repo forall -c git lfs pull
-
-      - name: Restore git config (remove GitCode credentials)
-        env:
-          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-        run: |
-          if [ -n "${GITCODE_TOKEN}" ]; then
-            git config --global --unset-all url."https://linhandev:${GITCODE_TOKEN}@gitcode.com/".insteadOf 2>/dev/null || true
-          fi
-          git config --global --unset credential.helper 2>/dev/null || true
 
       - name: Prepare build environment (Linux / macOS)
         if: steps.vars.outputs.need_env_prepare == 'true'

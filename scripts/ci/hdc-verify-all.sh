@@ -18,7 +18,7 @@ verify_one() {
   local SUF="$1"
   local SUB="$2"
   local NAME="test-binaries-ohos-${SUF}-${CI_PIPELINE_ID}.tar.gz"
-  "$CI_PROJECT_DIR/scripts/ci/gitlab-download-artifact-local.sh" --name="$NAME" --dir="$ROOT/dl"
+  "$CI_PROJECT_DIR/scripts/ci/download-artifact-local.sh" --name="$NAME" --dir="$ROOT/dl"
   mkdir -p "$ROOT/run/$SUB"
   tar -xzf "$ROOT/dl/$NAME" -C "$ROOT/run/$SUB"
 

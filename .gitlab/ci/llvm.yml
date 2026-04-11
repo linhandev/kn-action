@@ -1,135 +1,155 @@
 # Ported from .github/workflows/build-llvm.yml (build → llvm-artifact-refs → cross-copy → ohos-test → hdc).
 #
-# Web / schedule: KNACTION_CI_PROFILE=llvm (no prepare-repo matrix).
+# Web + MR only (see root .gitlab-ci.yml workflow). Web: set KNACTION_CI_PROFILE=llvm for LLVM-only (no prepare-repo matrix).
 #
 # Linux Docker: if upload to ARTIFACT_SERVER_URL fails, use runners.docker.network_mode=host
-# (or routing so the container can reach the LAN artifact host). GITCODE_TOKEN must be
-# available on the job branch (disable “Protect variable” or protect the branch).
+# (or routing so the container can reach the LAN artifact host).
 
 .llvm-build-matrix-common:
-  stage: build
-  needs: []
+  stage: build # TODO: change to build-llvm
   interruptible: true
   timeout: 6h
+  # Same as scripts/ci/llvm-build.sh default and GHA build-llvm.yml: repo init --reference when present.
+  # Use before_script so $HOME expands (GitLab variables: do not expand $HOME reliably).
+  before_script:
+    - export LOCAL_REFERENCE_DIR="${HOME}/git/ci/llvm-project-kmp"
   variables:
     GIT_STRATEGY: fetch
     GIT_DEPTH: "0"
+    # Default -ffdx removes ignored paths and deletes untracked llvm/; drop -x so .gitignore keeps
+    # llvm/, .ccache/, and bin/ (repo tool) across jobs on the same runner checkout.
+    GIT_CLEAN_FLAGS: "-ffd"
 
 .llvm-build-rules:
   rules:
-    - if: '$KNACTION_CI_PROFILE == "prepare-repo"'
-      when: never
     - if: '$CI_PIPELINE_SOURCE == "web" && $KNACTION_CI_PROFILE == "llvm"'
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $KNACTION_CI_PROFILE == "llvm"'
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-      changes:
-        - .github/workflows/build-llvm.yml
-        - .gitlab-ci.yml
-        - .gitlab/ci/**/*
-        - scripts/ci/gitlab-llvm-build.sh
-        - scripts/ci/gitlab-llvm-build-linux.sh
-        - scripts/ci/gitlab-download-artifact-local.sh
-        - scripts/ci/gitlab-llvm-artifact-refs.sh
-        - scripts/ci/gitlab-llvm-cross-copy.sh
-        - scripts/ci/gitlab-ohos-test-build.sh
-        - scripts/ci/gitlab-hdc-verify-all.sh
-        - scripts/setup-repo-tool.sh
-        - scripts/setup-llvm-ccache.sh
-        - scripts/platform_package.sh
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .github/workflows/build-llvm.yml
         - .gitlab-ci.yml
         - .gitlab/ci/**/*
-        - scripts/ci/gitlab-llvm-build.sh
-        - scripts/ci/gitlab-llvm-build-linux.sh
-        - scripts/ci/gitlab-download-artifact-local.sh
-        - scripts/ci/gitlab-llvm-artifact-refs.sh
-        - scripts/ci/gitlab-llvm-cross-copy.sh
-        - scripts/ci/gitlab-ohos-test-build.sh
-        - scripts/ci/gitlab-hdc-verify-all.sh
+        - scripts/ci/llvm-build.sh
+        - scripts/ci/download-artifact-local.sh
+        - scripts/ci/llvm-artifact-refs.sh
+        - scripts/ci/llvm-cross-copy.sh
+        - scripts/ci/ohos-test-build.sh
+        - scripts/ci/hdc-verify-all.sh
         - scripts/setup-repo-tool.sh
         - scripts/setup-llvm-ccache.sh
         - scripts/platform_package.sh
 
-build:llvm:linux:amd64:
+sync:llvm:origin-to-gl:
+  stage: test
+  interruptible: true
+  timeout: 30m
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $KNACTION_CI_PROFILE == "llvm-sync"'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $KNACTION_CI_PROFILE == "llvm-sync"'
+  tags:
+    - kotlin
+    - linux
+    - x64
+  variables:
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: "0"
+    LLVM_SYNC_BRANCH: "kmp-llvm-19.1.4"
+  script:
+    - bash scripts/ci/llvm-sync-origin-to-gl.sh
+
+# Linux Docker image (pin matches infra/docker/Dockerfile). Prefer local cache: avoid runner default
+# pull_policy=always (re-pull every job). If a runner rejects non-default policies, set
+# [runners.docker] pull_policy = ["if-not-present"] on llvm-linux-x64 or allow the job keyword.
+# Only set to docker execution legs.
+.llvm-linux-builder-image:
+  image:
+    name: ghcr.io/linhandev/kn-action-linux-llvm-builder:bc3de27
+    pull_policy: if-not-present
+
+# Linux Docker is its own job (image, FF_*) — do not mix with macOS shell legs in one matrix.
+# FF_NETWORK_PER_BUILD=true isolates each job on a bridge that often cannot reach LAN GitCode / artifact hosts.
+build:llvm:linux:x64:
   extends:
     - .llvm-build-matrix-common
     - .llvm-build-rules
-  image: ghcr.io/linhandev/kn-action-linux-llvm-builder:bc3de27
+    - .llvm-linux-builder-image
+  needs: []
   tags:
     - llvm
     - linux
-    - amd64
+    - x64
   variables:
-    FF_NETWORK_PER_BUILD: "true"
+    FF_NETWORK_PER_BUILD: "false"
   artifacts:
     when: always
     paths:
       - .llvm-ci-meta/
     expire_in: 2 days
   script:
-    - bash scripts/ci/gitlab-llvm-build.sh linux
+    - bash scripts/ci/llvm-build.sh linux
 
-build:llvm:macos:arm64:
+# macOS shell legs: two explicit jobs (studio arm64, mini x64), no Docker `image` (see .llvm-linux-builder-image).
+# Three build jobs total: linux + mac arm64 + mac x64 (same matrix shape as GHA build-llvm.yml).
+.llvm-build-macos-common:
   extends:
     - .llvm-build-matrix-common
     - .llvm-build-rules
+  needs: []
+  artifacts:
+    when: always
+    paths:
+      - .llvm-ci-meta/
+    expire_in: 2 days
+
+build:llvm:macos:arm64:
+  extends: .llvm-build-macos-common
   tags:
     - llvm
     - macos
     - arm64
-  artifacts:
-    when: always
-    paths:
-      - .llvm-ci-meta/
-    expire_in: 2 days
   script:
-    - bash scripts/ci/gitlab-llvm-build.sh macos-arm64
+    - bash scripts/ci/llvm-build.sh macos-arm64
 
-build:llvm:macos:amd64:
+build:llvm:macos:x64:
   extends:
-    - .llvm-build-matrix-common
-    - .llvm-build-rules
+    - .llvm-build-macos-common
   tags:
     - llvm
     - macos
-    - amd64
-  artifacts:
-    when: always
-    paths:
-      - .llvm-ci-meta/
-    expire_in: 2 days
+    - x64
   script:
-    - bash scripts/ci/gitlab-llvm-build.sh macos-amd64
+    - bash scripts/ci/llvm-build.sh macos-x64
 
 # --- merge outer tars (GHA llvm-artifact-refs + cross-copy) ---
 
 llvm:artifact-refs:
   extends: .llvm-build-rules
+  rules:
+    - when: never
   stage: llvm_merge
   image: alpine:3.19
   tags:
     - llvm
     - linux
-    - amd64
+    - x64
   needs:
-    - job: build:llvm:linux:amd64
+    - job: build:llvm:linux:x64
       artifacts: true
     - job: build:llvm:macos:arm64
       artifacts: true
-    - job: build:llvm:macos:amd64
+    - job: build:llvm:macos:x64
       artifacts: true
   before_script:
     - apk add --no-cache bash
   script:
-    - bash scripts/ci/gitlab-llvm-artifact-refs.sh
+    - bash scripts/ci/llvm-artifact-refs.sh
   artifacts:
     reports:
       dotenv: llvm-artifact-refs.env
 
 llvm:cross-copy:
   extends: .llvm-build-rules
+  rules:
+    - when: never
   stage: llvm_merge
   tags:
     - llvm
@@ -144,7 +164,7 @@ llvm:cross-copy:
     LLVM_MAJOR_FOR_PACKAGE: "19"
     CLANG_RESOURCE_VERSION: "19"
   script:
-    - bash scripts/ci/gitlab-llvm-cross-copy.sh
+    - bash scripts/ci/llvm-cross-copy.sh
   artifacts:
     reports:
       dotenv: cross-copy.env
@@ -165,48 +185,59 @@ llvm:cross-copy:
     OHOS_SYSROOT_CACHE_DIR: ~/runner/cache
 
 ohos:test:linux-x64:
-  extends: .ohos-test-common
-  image: ghcr.io/linhandev/kn-action-linux-llvm-builder:bc3de27
+  extends:
+    - .ohos-test-common
+    - .llvm-linux-builder-image
+  rules:
+    - when: never
   tags:
     - llvm
     - linux
-    - amd64
+    - x64
   script:
-    - bash scripts/ci/gitlab-ohos-test-build.sh linux-x64
+    - bash scripts/ci/ohos-test-build.sh linux-x64
 
 ohos:test:windows-x64:
   extends: .ohos-test-common
+  rules:
+    - when: never
   tags:
     - llvm
     - windows
-    - amd64
+    - x64
   variables:
     RUNNER_OS: Windows
   script:
-    - bash scripts/ci/gitlab-ohos-test-build.sh windows-x64
+    - bash scripts/ci/ohos-test-build.sh windows-x64
 
 ohos:test:macos-arm64:
   extends: .ohos-test-common
+  rules:
+    - when: never
   tags:
     - llvm
     - macos
     - arm64
   script:
-    - bash scripts/ci/gitlab-ohos-test-build.sh macos-arm64
+    - bash scripts/ci/ohos-test-build.sh macos-arm64
 
 ohos:test:macos-x64:
   extends: .ohos-test-common
+  rules:
+    - when: never
   tags:
     - llvm
     - macos
-    - amd64
+    - x64
   script:
-    - bash scripts/ci/gitlab-ohos-test-build.sh macos-x64
+    - bash scripts/ci/ohos-test-build.sh macos-x64
 
 # --- device verify (GHA hdc-ohos-verify); optional if hdc/device missing ---
 
 hdc:ohos:verify:
   extends: .llvm-build-rules
+  rules:
+    - when: never
   stage: llvm_verify
   tags:
     - llvm
@@ -219,4 +250,4 @@ hdc:ohos:verify:
     - job: ohos:test:macos-x64
   allow_failure: true
   script:
-    - bash scripts/ci/gitlab-hdc-verify-all.sh
+    - bash scripts/ci/hdc-verify-all.sh
