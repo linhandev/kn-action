@@ -7,7 +7,7 @@
 # (command -v succeeds but the binary is useless).
 #
 # Docker jobs often start with an empty project bin/; repo.py is also copied from
-# REPO_TOOL_CACHE (default ~/runner/cache/kn-action-repo) when set on the host so we
+# REPO_TOOL_CACHE (default ~/gitlab-runner/cache/kn-action-repo) when set on the host so we
 # avoid re-downloading from gitee every run.
 set -euo pipefail
 
@@ -16,7 +16,7 @@ REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 REPO_SCRIPT="$REPO_DIR/repo.py"
 REPO_WRAPPER="$REPO_DIR/repo"
 REPO_DOWNLOAD_URL="${REPO_DOWNLOAD_URL:-https://gitee.com/oschina/repo/raw/fork_flow/repo-py3}"
-REPO_TOOL_CACHE="${REPO_TOOL_CACHE:-${HOME}/runner/cache/kn-action-repo}"
+REPO_TOOL_CACHE="${REPO_TOOL_CACHE:-${HOME}/gitlab-runner/cache/kn-action-repo}"
 REPO_CACHE_SCRIPT="$REPO_TOOL_CACHE/repo.py"
 
 mkdir -p "$REPO_DIR"
@@ -26,7 +26,7 @@ if [ -f "$REPO_WRAPPER" ] && [ ! -f "$REPO_SCRIPT" ]; then
   mv "$REPO_WRAPPER" "$REPO_SCRIPT"
 fi
 
-# Restore repo.py from persistent runner cache (same layout as ~/runner/cache elsewhere).
+# Restore repo.py from persistent runner cache (same layout as ~/gitlab-runner/cache elsewhere).
 if [ ! -f "$REPO_SCRIPT" ] && [ -f "$REPO_CACHE_SCRIPT" ]; then
   cp -a "$REPO_CACHE_SCRIPT" "$REPO_SCRIPT"
   head -c 2 "$REPO_SCRIPT" | grep -q '#!' || {

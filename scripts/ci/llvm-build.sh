@@ -7,18 +7,6 @@ set -euo pipefail
 mkdir -p "${CI_PROJECT_DIR}/.llvm-ci-meta"
 source "$CI_PROJECT_DIR/scripts/ci/logging.sh"
 
-# Drop stale global url.*.insteadOf rules mentioning gitcode.com (shared runners / old CI).
-gitcode_clear_stale_url_insteadof() {
-  local key
-  while IFS= read -r key; do
-    case "$key" in
-      *gitcode.com*|*gitcode.com:*)
-        git config --global --unset-all "$key" 2>/dev/null || true
-        ;;
-    esac
-  done < <(git config --global --name-only --get-regexp '^url\.' 2>/dev/null || true)
-}
-
 : "${CI_PIPELINE_ID:?}"
 
 PLATFORM="${1:?usage: llvm-build.sh linux|macos-arm64|macos-x64}"
@@ -40,8 +28,8 @@ case "$PLATFORM" in
       log_error "brew not on PATH"
       exit 1
     }
-    echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python, ccache)…"
-    for pkg in swig git-lfs java coreutils wget pigz python ccache; do
+    echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python, ccache, ninja)…"
+    for pkg in swig git-lfs java coreutils wget pigz python ccache ninja; do
       if brew list "$pkg" &>/dev/null; then
         log_info "brew already installed: $pkg"
       else
@@ -61,8 +49,8 @@ case "$PLATFORM" in
       log_error "brew not on PATH"
       exit 1
     }
-    echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python, ccache)…"
-    for pkg in swig git-lfs java coreutils wget pigz python ccache; do
+    echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python, ccache, ninja)…"
+    for pkg in swig git-lfs java coreutils wget pigz python ccache ninja; do
       if brew list "$pkg" &>/dev/null; then
         log_info "brew already installed: $pkg"
       else
@@ -77,6 +65,8 @@ case "$PLATFORM" in
     ;;
 esac
 
+# Keep one uniform workspace convention across runners/hosts:
+# host path ~/gitlab-runner/llvm/... must be mounted into Docker at the same path.
 export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/llvm}"
 export REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 export ARTIFACT_LOCAL_PATH="${ARTIFACT_LOCAL_PATH:-${HOME}/runner/artifact}"
@@ -88,19 +78,12 @@ if [ "${LLVM_CLEAN_BUILD:-false}" = "true" ] || [ "${LLVM_CLEAN_BUILD:-false}" =
 fi
 mkdir -p "$LLVM_WORKSPACE"
 
-NEED_ENV_PREPARE="false"
-if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
-  NEED_ENV_PREPARE="true"
-fi
-
 LLVM_PROJECT_BUILD="$LLVM_WORKSPACE/build"
 LLVM_MUSL="$LLVM_WORKSPACE/third_party/musl"
 git config --global --add safe.directory "$LLVM_PROJECT_BUILD" 2>/dev/null || true
 git config --global --add safe.directory "$LLVM_MUSL" 2>/dev/null || true
 git config --global user.email &>/dev/null || git config --global user.email "ci@ci.ci"
 git config --global user.name &>/dev/null || git config --global user.name "ci"
-
-gitcode_clear_stale_url_insteadof
 
 log_info "setup-repo-tool"
 bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
@@ -128,20 +111,110 @@ repo sync -c --force-sync -j 16
 log_info "git lfs"
 repo forall -c git lfs pull
 
-gitcode_clear_stale_url_insteadof
+# env_prepare.sh downloads CMake, Ninja under prebuilts/, etc. Run it when the tree is
+# incomplete — not only when prebuilts/cmake is missing (e.g. incremental sync can leave
+# prebuilts/cmake but drop build-tools/ninja; CMake then fails running ninja --version).
+prebuilt_ninja_ok() {
+  case "$PLATFORM" in
+    linux)
+      [ -x "${LLVM_WORKSPACE}/prebuilts/build-tools/linux-x64/bin/ninja" ]
+      ;;
+    macos-arm64)
+      [ -x "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-arm64/bin/ninja" ]
+      ;;
+    macos-x64)
+      [ -x "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x64/bin/ninja" ] ||
+        [ -x "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x86_64/bin/ninja" ]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+NEED_ENV_PREPARE="false"
+if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
+  NEED_ENV_PREPARE="true"
+fi
+if ! prebuilt_ninja_ok; then
+  log_warn "prebuilts incomplete (cmake dir or prebuilt ninja); will run env_prepare.sh"
+  NEED_ENV_PREPARE="true"
+fi
 
 if [ "$NEED_ENV_PREPARE" = "true" ]; then
   cd "$LLVM_WORKSPACE"
-  log_info "env_prepare"
+  log_info "running env_prepare"
   bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
 fi
 
-log_info "ccache setup"
-source "$CI_PROJECT_DIR/scripts/setup-llvm-ccache.sh"
+# Linux: OH CMake invokes prebuilts/build-tools/linux-x64/bin/ninja. Incremental repo sync can
+# leave a broken or missing prebuilt ninja; prefer distro ninja-build (Dockerfile) or Homebrew
+# ninja on Linux hosts that use linuxbrew — symlink into the tree CMake expects.
+if [ "$PLATFORM" = "linux" ]; then
+  log_info "Linux: ensure ninja for prebuilts path (apt ninja-build or Homebrew)"
+  if command -v apt-get >/dev/null 2>&1; then
+    if ! command -v ninja >/dev/null 2>&1; then
+      log_info "apt-get install ninja-build"
+      apt-get update
+      apt-get install -y --no-install-recommends ninja-build
+    fi
+  elif command -v brew >/dev/null 2>&1; then
+    brew list ninja &>/dev/null || brew install ninja
+  fi
+  if command -v ninja >/dev/null 2>&1; then
+    sys_ninja="$(command -v ninja)"
+    mkdir -p "${LLVM_WORKSPACE}/prebuilts/build-tools/linux-x64/bin"
+    ln -sf "$sys_ninja" "${LLVM_WORKSPACE}/prebuilts/build-tools/linux-x64/bin/ninja"
+    log_info "Linux: linked ninja -> $sys_ninja"
+  else
+    log_error "Linux: ninja not available after install attempts"
+    exit 1
+  fi
+fi
+
+# Last resort on macOS: Homebrew ninja at the path OH build.py passes to CMake.
+if ! prebuilt_ninja_ok; then
+  case "$PLATFORM" in
+    macos-arm64 | macos-x64)
+      log_warn "prebuilt ninja still missing after env_prepare; linking Homebrew ninja into prebuilts/build-tools"
+      command -v brew >/dev/null 2>&1 || {
+        log_error "brew not on PATH"
+        exit 1
+      }
+      brew list ninja &>/dev/null || brew install ninja
+      sys_ninja="$(command -v ninja)"
+      mkdir -p "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-arm64/bin"
+      ln -sf "$sys_ninja" "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-arm64/bin/ninja"
+      if [ "$PLATFORM" = "macos-x64" ]; then
+        mkdir -p "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x64/bin" \
+          "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x86_64/bin"
+        ln -sf "$sys_ninja" "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x64/bin/ninja"
+        ln -sf "$sys_ninja" "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x86_64/bin/ninja"
+      fi
+      ;;
+    *)
+      log_error "prebuilt ninja missing after env_prepare (fix prebuilts or install ninja for $PLATFORM)"
+      exit 1
+      ;;
+  esac
+fi
+if ! prebuilt_ninja_ok; then
+  log_error "prebuilt ninja still not usable under prebuilts/build-tools"
+  exit 1
+fi
+
+# log_info "ccache setup"
+# if ! source "$CI_PROJECT_DIR/scripts/setup-llvm-ccache.sh"; then
+#   log_warn "ccache setup failed; running env_prepare on demand and retrying"
+#   cd "$LLVM_WORKSPACE"
+#   log_info "running env_prepare (ccache/toolchain bootstrap)"
+#   bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
+#   log_info "ccache setup retry"
+#   source "$CI_PROJECT_DIR/scripts/setup-llvm-ccache.sh"
+# fi
+
+log_info "running build.sh"
 cd "$LLVM_WORKSPACE"
-log_info "llvm build.sh"
-log_info "incremental-sync probe mode: exit before build.sh"
-exit 0
 bash toolchain/llvm-project/llvm-build/build.sh
 if command -v ccache >/dev/null 2>&1; then
   ccache -s || true

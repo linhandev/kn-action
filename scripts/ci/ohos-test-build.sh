@@ -62,7 +62,7 @@ fi
 
 OHOS_SYSROOT="${OHOS_SYSROOT:-sysroot-ohos-aarch64-6.0.2.640-02}"
 OHOS_SYSROOT_URL="${OHOS_SYSROOT_URL:-https://maven.eazytec-cloud.com/nexus/repository/file-storage/sysroot-ohos-aarch64-6.0.2.640-02.tar.gz}"
-CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-$HOME/runner/cache}"
+CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-$HOME/gitlab-runner/cache}"
 CACHE_BASE="${CACHE_BASE/#\~/$HOME}"
 if [ "${RUNNER_OS:-}" = "Windows" ] && command -v cygpath >/dev/null 2>&1; then
   CACHE_BASE="$(cygpath -u "$CACHE_BASE")"

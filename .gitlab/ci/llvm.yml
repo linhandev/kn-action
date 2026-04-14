@@ -59,6 +59,7 @@ sync:llvm:origin-to-gl:
 # Linux Docker image (pin matches infra/docker/Dockerfile). Prefer local cache: avoid runner default
 # pull_policy=always (re-pull every job). If a runner rejects non-default policies, set
 # [runners.docker] pull_policy = ["if-not-present"] on llvm-linux-x64 or allow the job keyword.
+# Runner config.toml must bind-mount ~/gitlab-runner/cache into the container (ccache, sysroot).
 # Only set to docker execution legs.
 .llvm-linux-builder-image:
   image:
@@ -182,7 +183,7 @@ llvm:cross-copy:
   variables:
     OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02
     OHOS_SYSROOT_URL: https://maven.eazytec-cloud.com/nexus/repository/file-storage/sysroot-ohos-aarch64-6.0.2.640-02.tar.gz
-    OHOS_SYSROOT_CACHE_DIR: ~/runner/cache
+    OHOS_SYSROOT_CACHE_DIR: ~/gitlab-runner/cache
 
 ohos:test:linux-x64:
   extends:
