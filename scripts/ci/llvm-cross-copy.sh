@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # GHA cross-copy job: merge llvm/packages outer tars and run platform_package RUN_FINAL_PACKAGE=1.
+# GitLab: intended to run on macOS arm64 only—artifact server locality; no requirement to execute
+# the merged LLVM on this host (see .gitlab/ci/llvm.yml and AGENTS.md).
 set -euo pipefail
 : "${CI_PROJECT_DIR:?}"
 : "${OUTER_LINUX_NAME:?}"
 : "${OUTER_MAC_ARM_NAME:?}"
 : "${OUTER_MAC_X64_NAME:?}"
+
+echo "llvm-cross-copy: downloading outer tars from artifact server"
+echo "  Linux:    $OUTER_LINUX_NAME"
+echo "  macOS arm64: $OUTER_MAC_ARM_NAME"
+echo "  macOS x64:   $OUTER_MAC_X64_NAME"
 
 WORK="${CI_PROJECT_DIR}/cross-copy-work"
 rm -rf "$WORK"

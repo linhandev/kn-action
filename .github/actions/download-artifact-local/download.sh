@@ -15,15 +15,17 @@ if [ -n "$name" ] && [ -n "$pattern" ]; then
   exit 1
 fi
 
-# If pattern is set, resolve to latest matching artifact name via server redirect
+# If pattern is set, resolve to latest matching artifact name via server 302 Location
+# (curl %{redirect_url} is often empty with -o /dev/null; parse headers — see scripts/ci/artifact-server-latest.sh).
 if [ -n "$pattern" ]; then
-  redirect_url=$(curl -sS -w '%{redirect_url}' -o /dev/null -G \
-    --data-urlencode "pattern=$pattern" "$server_url/artifacts/latest")
-  if [ -z "$redirect_url" ]; then
+  _dl_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _repo_root="$(cd "$_dl_here/../../.." && pwd)"
+  # shellcheck source=/dev/null
+  source "$_repo_root/scripts/ci/artifact-server-latest.sh"
+  name="$(artifact_server_latest_basename "$server_url" "$pattern")" || {
     echo "::error::No artifact matching pattern: $pattern"
     exit 1
-  fi
-  name=$(basename "${redirect_url%%\?*}")
+  }
 fi
 
 mkdir -p "$cache_dir"
