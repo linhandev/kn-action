@@ -1,9 +1,13 @@
 # Ported from .github/workflows/build-llvm.yml (build → llvm-artifact-refs → cross-copy → ohos-test → hdc).
 #
-# Web + MR only (see root .gitlab-ci.yml workflow). Web: set KNACTION_CI_PROFILE=llvm for LLVM-only (no prepare-repo matrix).
+# Push + Web + MR (see root .gitlab-ci.yml workflow). Web: set KNACTION_CI_PROFILE=llvm for LLVM-only (no prepare-repo matrix).
 #
 # Linux Docker: if upload to ARTIFACT_SERVER_URL fails, use runners.docker.network_mode=host
 # (or routing so the container can reach the LAN artifact host).
+#
+# LLVM compile matrix is off by default (see root variables KNACTION_LLVM_RUN_BUILD). Set it true
+# to run build:llvm:*; otherwise llvm:artifact-refs resolves latest outer tars per OS via artifact-server
+# regex (same patterns as GHA skip_build).
 
 .llvm-build-matrix-common:
   stage: build # TODO: change to build-llvm
@@ -20,8 +24,61 @@
     # llvm/, .ccache/, and bin/ (repo tool) across jobs on the same runner checkout.
     GIT_CLEAN_FLAGS: "-ffd"
 
+
 .llvm-build-rules:
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $KNACTION_CI_PROFILE == "llvm"'
+    # - if: '$CI_PIPELINE_SOURCE == "push"'
+    #   changes:
+    #     - .github/workflows/build-llvm.yml
+    #     - .gitlab-ci.yml
+    #     - .gitlab/ci/**/*
+    #     - scripts/ci/llvm-build.sh
+    #     - scripts/ci/download-artifact-local.sh
+    #     - scripts/ci/llvm-artifact-refs.sh
+    #     - scripts/ci/artifact-server-latest.sh
+    #     - scripts/ci/llvm-cross-copy.sh
+    #     - scripts/ci/ohos-test-build.sh
+    #     - scripts/ci/hdc-verify-all.sh
+    #     - scripts/setup-repo-tool.sh
+    #     - scripts/setup-llvm-ccache.sh
+    #     - scripts/platform_package.sh
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - .github/workflows/build-llvm.yml
+        - .gitlab-ci.yml
+        - .gitlab/ci/**/*
+        - scripts/ci/llvm-build.sh
+        - scripts/ci/download-artifact-local.sh
+        - scripts/ci/llvm-artifact-refs.sh
+        - scripts/ci/artifact-server-latest.sh
+        - scripts/ci/llvm-cross-copy.sh
+        - scripts/ci/ohos-test-build.sh
+        - scripts/ci/hdc-verify-all.sh
+        - scripts/setup-repo-tool.sh
+        - scripts/setup-llvm-ccache.sh
+        - scripts/platform_package.sh
+
+# Same triggers as .llvm-build-rules but compile jobs are skipped unless KNACTION_LLVM_RUN_BUILD=true.
+.llvm-compile-job-rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - .github/workflows/build-llvm.yml
+        - .gitlab-ci.yml
+        - .gitlab/ci/**/*
+        - scripts/ci/llvm-build.sh
+        - scripts/ci/download-artifact-local.sh
+        - scripts/ci/llvm-artifact-refs.sh
+        - scripts/ci/artifact-server-latest.sh
+        - scripts/ci/llvm-cross-copy.sh
+        - scripts/ci/ohos-test-build.sh
+        - scripts/ci/hdc-verify-all.sh
+        - scripts/setup-repo-tool.sh
+        - scripts/setup-llvm-ccache.sh
+        - scripts/platform_package.sh
+    - if: '$KNACTION_LLVM_RUN_BUILD != "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "web" && $KNACTION_CI_PROFILE == "llvm"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
@@ -31,6 +88,7 @@
         - scripts/ci/llvm-build.sh
         - scripts/ci/download-artifact-local.sh
         - scripts/ci/llvm-artifact-refs.sh
+        - scripts/ci/artifact-server-latest.sh
         - scripts/ci/llvm-cross-copy.sh
         - scripts/ci/ohos-test-build.sh
         - scripts/ci/hdc-verify-all.sh
@@ -43,8 +101,8 @@ sync:llvm:origin-to-gl:
   interruptible: true
   timeout: 30m
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $KNACTION_CI_PROFILE == "llvm-sync"'
-    - if: '$CI_PIPELINE_SOURCE == "web" && $KNACTION_CI_PROFILE == "llvm-sync"'
+    # Disabled temporarily (re-enable schedule/web llvm-sync workflow in root .gitlab-ci.yml too).
+    - when: never
   tags:
     - kotlin
     - linux
@@ -71,7 +129,7 @@ sync:llvm:origin-to-gl:
 build:llvm:linux:x64:
   extends:
     - .llvm-build-matrix-common
-    - .llvm-build-rules
+    - .llvm-compile-job-rules
     - .llvm-linux-builder-image
   needs: []
   tags:
@@ -93,7 +151,7 @@ build:llvm:linux:x64:
 .llvm-build-macos-common:
   extends:
     - .llvm-build-matrix-common
-    - .llvm-build-rules
+    - .llvm-compile-job-rules
   needs: []
   artifacts:
     when: always
@@ -121,36 +179,47 @@ build:llvm:macos:x64:
     - bash scripts/ci/llvm-build.sh macos-x64
 
 # --- merge outer tars (GHA llvm-artifact-refs + cross-copy) ---
+#
+# Design: llvm:cross-copy is pinned to macOS arm64 (llvm-macos-arm64 / studio) on purpose.
+# The LAN artifact server is operated from that host class, so downloads/uploads avoid long
+# cross-machine paths and Docker bridge issues. The step only merges outer tars, runs
+# platform_package.sh (file I/O + archives), and re-uploads; it does not execute the built LLVM
+# toolchain on the runner—host choice is for artifact locality and tooling, not for running OH
+# binaries on the merge host.
 
 llvm:artifact-refs:
-  extends: .llvm-build-rules
-  rules:
-    - when: never
+  extends:
+    - .llvm-build-rules
+    # Same image as build:llvm:linux:x64 (bash + curl); avoids apk on Alpine when the
+    # llvm-linux-x64 registration is shell-only or image is ignored.
+    - .llvm-linux-builder-image
   stage: llvm_merge
-  image: alpine:3.19
   tags:
     - llvm
     - linux
     - x64
+  variables:
+    # Match build:llvm:linux:x64 so the container can reach the LAN artifact host (not an isolated bridge).
+    FF_NETWORK_PER_BUILD: "false"
   needs:
     - job: build:llvm:linux:x64
       artifacts: true
+      optional: true
     - job: build:llvm:macos:arm64
       artifacts: true
+      optional: true
     - job: build:llvm:macos:x64
       artifacts: true
-  before_script:
-    - apk add --no-cache bash
+      optional: true
   script:
     - bash scripts/ci/llvm-artifact-refs.sh
   artifacts:
     reports:
       dotenv: llvm-artifact-refs.env
 
+# See design note above: macOS arm64 only (artifact server + merge workload; no LLVM execution here).
 llvm:cross-copy:
   extends: .llvm-build-rules
-  rules:
-    - when: never
   stage: llvm_merge
   tags:
     - llvm
@@ -172,7 +241,7 @@ llvm:cross-copy:
 
 # --- OHOS compile smoke per host (GHA ohos-test-build) ---
 
-.ohos-test-common:
+.ohos-build-test-common:
   extends: .llvm-build-rules
   stage: llvm_verify
   interruptible: true
@@ -185,12 +254,10 @@ llvm:cross-copy:
     OHOS_SYSROOT_URL: https://maven.eazytec-cloud.com/nexus/repository/file-storage/sysroot-ohos-aarch64-6.0.2.640-02.tar.gz
     OHOS_SYSROOT_CACHE_DIR: ~/gitlab-runner/cache
 
-ohos:test:linux-x64:
+ohos:build-test:linux-x64:
   extends:
-    - .ohos-test-common
+    - .ohos-build-test-common
     - .llvm-linux-builder-image
-  rules:
-    - when: never
   tags:
     - llvm
     - linux
@@ -198,23 +265,22 @@ ohos:test:linux-x64:
   script:
     - bash scripts/ci/ohos-test-build.sh linux-x64
 
-ohos:test:windows-x64:
-  extends: .ohos-test-common
-  rules:
-    - when: never
+ohos:build-test:windows-x64:
+  extends: .ohos-build-test-common
   tags:
     - llvm
     - windows
     - x64
+  # Windows Git Bash PATH quirks (find.exe vs GNU find) and OHOS clang paths are still being
+  # validated on llvm-windows-x64; do not block merge pipelines on this leg.
+  allow_failure: true
   variables:
     RUNNER_OS: Windows
   script:
     - bash scripts/ci/ohos-test-build.sh windows-x64
 
-ohos:test:macos-arm64:
-  extends: .ohos-test-common
-  rules:
-    - when: never
+ohos:build-test:macos-arm64:
+  extends: .ohos-build-test-common
   tags:
     - llvm
     - macos
@@ -222,10 +288,8 @@ ohos:test:macos-arm64:
   script:
     - bash scripts/ci/ohos-test-build.sh macos-arm64
 
-ohos:test:macos-x64:
-  extends: .ohos-test-common
-  rules:
-    - when: never
+ohos:build-test:macos-x64:
+  extends: .ohos-build-test-common
   tags:
     - llvm
     - macos
@@ -233,22 +297,21 @@ ohos:test:macos-x64:
   script:
     - bash scripts/ci/ohos-test-build.sh macos-x64
 
-# --- device verify (GHA hdc-ohos-verify); optional if hdc/device missing ---
+# --- execute downloaded test artifacts on macOS arm64 (GHA hdc-ohos-verify parity) ---
 
-hdc:ohos:verify:
+ohos:execute:macos-arm64:
   extends: .llvm-build-rules
-  rules:
-    - when: never
   stage: llvm_verify
   tags:
     - llvm
     - macos
     - arm64
   needs:
-    - job: ohos:test:linux-x64
-    - job: ohos:test:windows-x64
-    - job: ohos:test:macos-arm64
-    - job: ohos:test:macos-x64
+    - job: ohos:build-test:linux-x64
+    - job: ohos:build-test:windows-x64
+    - job: ohos:build-test:macos-arm64
+    - job: ohos:build-test:macos-x64
+  # scripts/ci/hdc-verify-all.sh downloads all host test artifacts and executes each pair.
   allow_failure: true
   script:
     - bash scripts/ci/hdc-verify-all.sh

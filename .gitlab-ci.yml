@@ -1,7 +1,7 @@
 # GitLab CI — kn-action (LAN). Runner fleet: AGENTS.md → "Four-host runner matrix".
 # prepare-repo tests: Kotlin runners only, three tags each (kotlin + OS + arch).
 #
-# Workflows: merge requests and manual “Run pipeline” only (no push / schedule).
+# Workflows: push (path-gated), merge requests, and manual “Run pipeline” (no schedule).
 # Per-job rules gate prepare-repo vs LLVM via path changes; web uses KNACTION_CI_PROFILE.
 #
 # Manual LLVM-only: Run pipeline (web) with variable KNACTION_CI_PROFILE=llvm.
@@ -14,13 +14,29 @@ variables:
     options:
       - "llvm"
       - "test-prepare-repo"
-      - "llvm-sync"
+  KNACTION_LLVM_RUN_BUILD:
+    value: "false"
+    description: "When true, run the three build:llvm:* jobs; when false, llvm:artifact-refs uses latest-per-OS outer tars from the LAN artifact server (regex)."
 
 workflow:
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $KNACTION_CI_PROFILE == "llvm-sync"'
-    - if: '$CI_PIPELINE_SOURCE == "api" && $KNACTION_CI_PROFILE == "llvm-sync"'
+    # llvm-sync (origin→GL mirror) disabled; re-add with sync:llvm:origin-to-gl rules in .gitlab/ci/llvm.yml.
     - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - .gitlab-ci.yml
+        - .github/workflows/build-llvm.yml
+        - .gitlab/ci/**/*
+        - scripts/ci/llvm-build.sh
+        - scripts/ci/download-artifact-local.sh
+        - scripts/ci/llvm-artifact-refs.sh
+        - scripts/ci/artifact-server-latest.sh
+        - scripts/ci/llvm-cross-copy.sh
+        - scripts/ci/ohos-test-build.sh
+        - scripts/ci/hdc-verify-all.sh
+        - scripts/setup-repo-tool.sh
+        - scripts/setup-llvm-ccache.sh
+        - scripts/platform_package.sh
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .github/actions/prepare-repo/**/*
@@ -33,6 +49,7 @@ workflow:
         - scripts/ci/llvm-build.sh
         - scripts/ci/download-artifact-local.sh
         - scripts/ci/llvm-artifact-refs.sh
+        - scripts/ci/artifact-server-latest.sh
         - scripts/ci/llvm-cross-copy.sh
         - scripts/ci/ohos-test-build.sh
         - scripts/ci/hdc-verify-all.sh

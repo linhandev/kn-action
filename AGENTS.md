@@ -121,6 +121,7 @@ Keep these in mind when changing **`scripts/`** or CI:
 - **Repo** via [**`scripts/setup-repo-tool.sh`**](scripts/setup-repo-tool.sh) (Windows wrapper for **`python`**).
 - **Artifacts** and **`platform_package.sh`** naming aligned with Konan dependency layout (flattened host trees in published tarballs/zip).
 - **Multi-platform**: prefer **`fail-fast: false`** so one OS does not cancel others.
+- **GitLab merge (`llvm:cross-copy`)**: run **only on `llvm-macos-arm64`** (Apple Silicon runner, e.g. **studio**). The **LAN artifact server** is tied to that host class, so merge jobs stay local to fast download/upload paths. Cross-copy is **merge + `platform_package.sh` packaging** over tarballs; it does **not** require executing the produced LLVM on the merge host—downstream **`ohos:build-test:*`** jobs validate per OS.
 
 ---
 

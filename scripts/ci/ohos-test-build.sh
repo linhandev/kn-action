@@ -29,6 +29,9 @@ rm -rf "$W"
 mkdir -p "$W/dl"
 cd "$W"
 
+# Git for Windows: PATH can expose Windows find.exe before /usr/bin/find; the latter is required.
+if [ -x /usr/bin/find ]; then FIND=/usr/bin/find; else FIND=find; fi
+
 "$CI_PROJECT_DIR/scripts/ci/download-artifact-local.sh" --name="$n" --dir="$W/dl"
 
 LLVM_TAR="$W/dl/$n"
@@ -53,7 +56,7 @@ else
   tar -xzf "$LLVM_TAR" -C "$W_U"
 fi
 
-ROOT="$(find "$W_U" -maxdepth 1 -type d -name 'llvm-*-dev-*' | head -1)"
+ROOT="$("$FIND" "$W_U" -maxdepth 1 -type d -name 'llvm-*-dev-*' | head -1)"
 if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
   echo "Expected llvm-*-dev-* directory after extract"
   ls -la "$W_U" || true
@@ -161,7 +164,8 @@ done
   ls -la src
   exit 1
 }
-tar -czf "$W/$NAME" -C src "${members[@]}"
+# Git Bash GNU tar treats "C:/..." archive paths as host:file remote specs; write via cwd + basename.
+( cd "$W" && tar -czf "$NAME" -C src "${members[@]}" )
 
 export INPUT_PATH="$W/$NAME"
 export INPUT_SERVER_URL="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
