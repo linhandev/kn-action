@@ -1,6 +1,6 @@
 # Ported from .github/workflows/build-llvm.yml (build → llvm-artifact-refs → cross-copy → ohos-test → hdc).
 #
-# Push + Web + MR (see root .gitlab-ci.yml workflow). Web: set KNACTION_CI_PROFILE=llvm for LLVM-only (no prepare-repo matrix).
+# Web + MR only for LLVM (no branch push pipeline; see root .gitlab-ci.yml workflow). Web: set KNACTION_CI_PROFILE=llvm for LLVM-only (no prepare-repo matrix).
 #
 # Linux Docker: if upload to ARTIFACT_SERVER_URL fails, use runners.docker.network_mode=host
 # (or routing so the container can reach the LAN artifact host).
@@ -23,7 +23,6 @@
     # Default -ffdx removes ignored paths and deletes untracked llvm/; drop -x so .gitignore keeps
     # llvm/, .ccache/, and bin/ (repo tool) across jobs on the same runner checkout.
     GIT_CLEAN_FLAGS: "-ffd"
-
 
 .llvm-build-rules:
   rules:
@@ -62,21 +61,6 @@
 # Same triggers as .llvm-build-rules but compile jobs are skipped unless KNACTION_LLVM_RUN_BUILD=true.
 .llvm-compile-job-rules:
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-      changes:
-        - .github/workflows/build-llvm.yml
-        - .gitlab-ci.yml
-        - .gitlab/ci/**/*
-        - scripts/ci/llvm-build.sh
-        - scripts/ci/download-artifact-local.sh
-        - scripts/ci/llvm-artifact-refs.sh
-        - scripts/ci/artifact-server-latest.sh
-        - scripts/ci/llvm-cross-copy.sh
-        - scripts/ci/ohos-test-build.sh
-        - scripts/ci/hdc-verify-all.sh
-        - scripts/setup-repo-tool.sh
-        - scripts/setup-llvm-ccache.sh
-        - scripts/platform_package.sh
     - if: '$KNACTION_LLVM_RUN_BUILD != "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "web" && $KNACTION_CI_PROFILE == "llvm"'

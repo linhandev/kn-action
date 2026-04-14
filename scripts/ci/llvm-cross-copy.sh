@@ -51,20 +51,17 @@ export KNACTION_STEP_SUMMARY="${KNACTION_STEP_SUMMARY:-/dev/null}"
   bash "$CI_PROJECT_DIR/scripts/platform_package.sh"
 )
 
-for p in clang_darwin-arm64 clang_darwin-x86_64 clang_windows-x86_64; do
-  D="$(find staging -maxdepth 1 -type d -name "${p}-*" | head -1)"
-  if [ -z "$D" ] || [ ! -d "$D" ]; then
-    echo "Missing merged $p tree under staging"
-    ls -la staging || true
-    exit 1
-  fi
-  echo "Merged $p -> $D"
-done
-
 set -a
 # shellcheck disable=SC1090
 source "$DOTENV"
 set +a
+
+for key in archive_linux archive_mac_arm64 archive_mac_x64 archive_windows; do
+  fname="${!key:-}"
+  [ -n "$fname" ] || { echo "Missing $key in cross-copy.env"; exit 1; }
+  [ -f "staging/$fname" ] || { echo "Archive $fname missing under staging/"; ls -la staging || true; exit 1; }
+  echo "Verified $key -> $fname"
+done
 
 AP="${ARTIFACT_LOCAL_PATH:-$HOME/runner/artifact}"
 AP="${AP/#\~/$HOME}"
@@ -74,12 +71,7 @@ export INPUT_CACHE_DIR="$AP"
 export KNACTION_DOTENV_FILE="$UP_DOT"
 
 for key in archive_linux archive_mac_arm64 archive_mac_x64 archive_windows; do
-  fname="${!key:-}"
-  if [ -z "$fname" ]; then
-    echo "Missing $key in cross-copy.env"
-    exit 1
-  fi
-  export INPUT_PATH="$WORK/staging/$fname"
+  export INPUT_PATH="$WORK/staging/${!key}"
   # shellcheck source=/dev/null
   source "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh"
 done
