@@ -20,7 +20,7 @@ This file is for humans and coding agents working on **kn-action**: **GitLab CI*
 | **`~/gitlab-runner/kotlin`** | GitLab Runner **`builds_dir`** for **Kotlin**-tagged registrations (spec; all hosts — see **Self-hosted GitLab**). |
 | **`~/gitlab-runner/llvm`** | GitLab Runner **`builds_dir`** for **LLVM**-tagged registrations (spec; all hosts). |
 | **`~/runner/artifact`** | Local artifact drop zone (aligned with composite action scripts). |
-| **`~/runner/cache`** | Persistent caches (Konan, Maven, OH sysroot tarballs, ccache, etc.). |
+| **`~/gitlab-runner/cache`** | Persistent caches (Konan, Maven, OH sysroot tarballs, ccache, etc.). |
 | **`~/runner/kotlin`**, **`~/runner/llvm`** | Optional extra dirs for disk organization or non-GitLab automation; **GitLab job checkouts** stay under **`~/gitlab-runner/…`**, not here. |
 
 **Four machines** are typically used (SSH **`Host`** names: **`linux`**, **`win`**, **`mini`**, **studio**):
@@ -37,7 +37,7 @@ This file is for humans and coding agents working on **kn-action**: **GitLab CI*
 **Why:**
 
 - **LLVM**: **`repo`** (~many Git repos), large disk, **`clean_build`**-style wipes can remove the whole job work parent — incompatible with sharing a root with Kotlin’s single-repo tree.
-- **Kotlin**: Long-lived **`~/runner/cache`** and a separate workspace; mixing roles increases contention and confusing failures.
+- **Kotlin**: Long-lived **`~/gitlab-runner/cache`** and a separate workspace; mixing roles increases contention and confusing failures.
 
 **Hardware:** Prefer dedicated machines per role; if one host runs both, still use **two registrations** and **different `builds_dir`** values (**`~/gitlab-runner/kotlin`** vs **`~/gitlab-runner/llvm`**).
 
@@ -59,7 +59,7 @@ Checklist so **`llvm`**-tagged runners can **`repo` sync**, build, and drop **`l
 
 | Item | Notes |
 |------|------|
-| **`~/runner/artifact`**, **`~/runner/cache`** | Scripts expect artifact output and caches here; bind-mount or ensure paths inside Docker match this layout. |
+| **`~/runner/artifact`**, **`~/gitlab-runner/cache`** | Scripts expect artifact output and caches here; bind-mount or ensure paths inside Docker match this layout. |
 | **Network** | **gitcode.com**, **gitee.com** (default **`repo.py`** fetch in **`setup-repo-tool.sh`**). HTTPS **`repo`** remotes are expected to be **public** (no CI PAT); use **SSH** on the runner for private upstreams. |
 | **Optional `repo init --reference`** | **`LOCAL_REFERENCE_DIR`** defaults to **`~/git/ci/llvm-project-kmp`** when set on the host. |
 
@@ -106,7 +106,7 @@ Keep these in mind when changing **`scripts/`** or CI:
 **Kotlin**
 
 - Multi-platform matrix (**macOS** arm64/x64, **Linux** x64, **Windows** x64) with consistent toolchains per OS.
-- **Incremental** builds reuse **`~/runner/cache`** (Gradle/Konan/Maven); **clean** builds use an ephemeral tree then may **promote** cache on success (see existing script/workflow logic you port).
+- **Incremental** builds reuse **`~/gitlab-runner/cache`** (Gradle/Konan/Maven); **clean** builds use an ephemeral tree then may **promote** cache on success (see existing script/workflow logic you port).
 - **GitCode via SSH** — host identity only for clones where designed.
 - **prepare-repo** for commit/branch/MR selection (see action README).
 - **Artifacts** under **`~/runner/artifact`** with names that encode revision, pipeline id, and platform.
@@ -115,8 +115,8 @@ Keep these in mind when changing **`scripts/`** or CI:
 **LLVM**
 
 - Produce OH-oriented **`llvm/packages`** on **macOS**, **Linux** (Docker), and validate **Windows** packages as needed.
-- **Persistent LLVM workspace** under the job checkout when not cleaning; **`~/runner/cache`** for sysroot/ccache, not the main monorepo tree.
-- **ccache** via [**`scripts/setup-llvm-ccache.sh`**](scripts/setup-llvm-ccache.sh); Docker jobs should mount or place **`CCACHE_DIR`** on persistent storage (**`CI_PROJECT_DIR/.ccache`** or **`~/runner/cache`**).
+- **Persistent LLVM workspace** under the job checkout when not cleaning; **`~/gitlab-runner/cache`** for sysroot/ccache, not the main monorepo tree.
+- **ccache** via [**`scripts/setup-llvm-ccache.sh`**](scripts/setup-llvm-ccache.sh); Docker jobs should mount or place **`CCACHE_DIR`** on persistent storage (**`CI_PROJECT_DIR/.ccache`** or **`~/gitlab-runner/cache`**).
 - **Conditional `env_prepare`** when the tree lacks bootstrap markers.
 - **Repo** via [**`scripts/setup-repo-tool.sh`**](scripts/setup-repo-tool.sh) (Windows wrapper for **`python`**).
 - **Artifacts** and **`platform_package.sh`** naming aligned with Konan dependency layout (flattened host trees in published tarballs/zip).
@@ -230,7 +230,7 @@ Exactly **three** tags: **`kotlin`** or **`llvm`**, OS, arch. Never both roles o
 | **Docker** | Ephemeral unless volumes mounted; persist **ccache** / large trees on the host. |
 | **`cache:` in `.gitlab-ci.yml`** | Keyed caches for Gradle/Maven, etc. |
 
-**Kotlin** incremental layout should still use **`~/runner/cache`** (or clean trees under **`CI_PROJECT_DIR`**) as scripts expect.
+**Kotlin** incremental layout should still use **`~/gitlab-runner/cache`** (or clean trees under **`CI_PROJECT_DIR`**) as scripts expect.
 
 ### Multiple pipelines in one GitLab project
 

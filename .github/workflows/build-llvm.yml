@@ -53,7 +53,7 @@ env:
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
   OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02
   OHOS_SYSROOT_URL: https://maven.eazytec-cloud.com/nexus/repository/file-storage/sysroot-ohos-aarch64-6.0.2.640-02.tar.gz
-  OHOS_SYSROOT_CACHE_DIR: ~/runner/cache
+  OHOS_SYSROOT_CACHE_DIR: ~/gitlab-runner/cache
   # Upstream Kotlin/Native naming pattern (adapted here to dev-stem artifacts): https://download.jetbrains.com/kotlin/native/resources/llvm/<major>-<triple>/llvm-<major>-<triple>-essentials-<id>.tar.gz
   # Extracting yields a single top-level directory matching the dev stem (see ~/.konan/dependencies). Published LAN artifacts use ...-dev-<id>-run<run_id> (Linux/macOS .tar.gz, Windows .zip); inner dir stays ...-dev-<id>.
   LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
@@ -562,7 +562,7 @@ jobs:
             exit 1
           fi
           echo "LLVM_ESS_ROOT=$ROOT" >> "$GITHUB_ENV"
-          CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-~/runner/cache}"
+          CACHE_BASE="${OHOS_SYSROOT_CACHE_DIR:-~/gitlab-runner/cache}"
           CACHE_BASE="${CACHE_BASE/#\~/$HOME}"
           CACHE_BASE="$(win_paths "$CACHE_BASE")"
           mkdir -p "$CACHE_BASE"

@@ -1,7 +1,7 @@
 # Build Kotlin for OpenHarmony: clone CPF-KMP-CMP/kotlin from GitCode and run scripts/build-ohos.sh
 # Target: Mac ARM64 self-hosted runner. Build steps per: linhandev.github.io/_posts/KMP/2026-02-11-Building-Kotlin (mac arm)
 # Requires: runner env has GitCode SSH access configured (no secrets used).
-# Incremental by default: caches in $HOME/runner/cache/. Clean build uses a fresh RUNNER_TEMP dir for Gradle/Konan.
+# Incremental by default: caches in $HOME/gitlab-runner/cache/. Clean build uses a fresh RUNNER_TEMP dir for Gradle/Konan.
 
 name: Build Kotlin
 
@@ -44,7 +44,7 @@ env:
   REPO_URL: git@gitcode.com:CPF-KMP-CMP/kotlin.git
   WORKSPACE_DIR: ci-workspace
   LOCAL_REFERENCE_DIR: ~/git/ci/
-  PERSISTED_CACHE_ROOT: ~/runner/cache
+  PERSISTED_CACHE_ROOT: ~/gitlab-runner/cache
   ARTIFACT_LOCAL_PATH: ~/runner/artifact
 
 jobs:

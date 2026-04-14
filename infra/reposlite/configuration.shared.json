@@ -38,6 +38,9 @@
             "reference": "https://maven.pkg.jetbrains.space/kotlin/p/kotlin/bootstrap/",
             "store": true,
             "allowedExtensions": [
+              ".tar.gz",
+              ".tgz",
+              ".zip",
               ".jar",
               ".pom",
               ".xml",
@@ -74,6 +77,9 @@
             "reference": "https://maven.eazytec-cloud.com/nexus/repository/maven-public/",
             "store": true,
             "allowedExtensions": [
+              ".tar.gz",
+              ".tgz",
+              ".zip",
               ".jar",
               ".pom",
               ".xml",
@@ -113,6 +119,31 @@
               ".sha1",
               ".md5",
               ".xml"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "file-storage",
+        "visibility": "PUBLIC",
+        "redeployment": false,
+        "proxied": [
+          {
+            "reference": "https://maven.eazytec-cloud.com/nexus/repository/file-storage/",
+            "store": true,
+            "allowedExtensions": [
+              ".tar.gz",
+              ".tgz",
+              ".zip",
+              ".jar",
+              ".pom",
+              ".xml",
+              ".module",
+              ".sha1",
+              ".sha256",
+              ".md5",
+              ".asc",
+              ".kotlin_module"
             ]
           }
         ]
