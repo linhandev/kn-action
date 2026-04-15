@@ -5,6 +5,8 @@ set -euo pipefail
 PLATFORM="${1:?usage: ohos-test-build.sh linux-x64|windows-x64|macos-arm64|macos-x64}"
 : "${CI_PROJECT_DIR:?}"
 : "${CI_PIPELINE_ID:?}"
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_SCRIPT_DIR/logging.sh"
 
 case "$PLATFORM" in
   linux-x64) n="${archive_linux:?}" ;;
@@ -32,7 +34,9 @@ cd "$W"
 # Git for Windows: PATH can expose Windows find.exe before /usr/bin/find; the latter is required.
 if [ -x /usr/bin/find ]; then FIND=/usr/bin/find; else FIND=find; fi
 
-"$CI_PROJECT_DIR/scripts/ci/download-artifact-local.sh" --name="$n" --dir="$W/dl"
+_SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
+log_info "downloading final package: $_SERVER/artifacts/$n"
+curl -fsSL -o "$W/dl/$n" "$_SERVER/artifacts/$n"
 
 LLVM_TAR="$W/dl/$n"
 W_U="$W"
@@ -134,17 +138,33 @@ for triple in aarch64-unknown-linux-ohos aarch64-linux-ohos; do
   [ -d "$SYSROOT/usr/lib/$triple" ] && OHOS_FLAGS+=(-L"$SYSROOT/usr/lib/$triple")
 done
 
-set +e
-CLOG="$("$OHOS_CC" "${OHOS_FLAGS[@]}" -O2 -o src/hello_ohos_c src/test.c 2>&1)"
-CRC=$?
-set -e
-if [ "$CRC" -ne 0 ]; then echo "C compile failed: $CLOG"; exit 1; fi
+# shellcheck source=junit-helpers.sh
+source "$_SCRIPT_DIR/junit-helpers.sh"
 
-set +e
-CXXLOG="$("$OHOS_CXX" "${OHOS_FLAGS[@]}" -std=c++17 -O2 -o src/hello_ohos_cpp src/test.cpp 2>&1)"
-CXXRC=$?
-set -e
-if [ "$CXXRC" -ne 0 ]; then echo "C++ compile failed: $CXXLOG"; exit 1; fi
+JUNIT_FILE="${CI_PROJECT_DIR}/.junit/ohos-test-build-${PLATFORM}.xml"
+CLASS="ohos-cross-compile.${PLATFORM}"
+
+compile_test() {
+  local name="$1" compiler="$2" src="$3" out="$4"; shift 4
+  local t0 t1 dur log rc
+  t0="$(junit_ts)"
+  set +e; log="$("$compiler" "$@" -o "$out" "$src" 2>&1)"; rc=$?; set -e
+  t1="$(junit_ts)"
+  dur="$(junit_duration "$t0" "$t1")"
+  if [ "$rc" -eq 0 ]; then
+    junit_pass "$CLASS" "$name" "$dur"
+    echo "$name: OK"
+  else
+    junit_fail "$CLASS" "$name" "$dur" "exit code $rc" "$log"
+    echo "$name: FAILED (rc=$rc)"
+    echo "$log"
+  fi
+}
+
+compile_test "c-compile" "$OHOS_CC" src/test.c src/hello_ohos_c "${OHOS_FLAGS[@]}" -O2
+compile_test "cpp-compile" "$OHOS_CXX" src/test.cpp src/hello_ohos_cpp "${OHOS_FLAGS[@]}" -std=c++17 -O2
+
+junit_write "ohos-cross-compile-${PLATFORM}" "$JUNIT_FILE" || exit 1
 
 if [ "$PLATFORM" = "linux-x64" ] || [ "$PLATFORM" = "windows-x64" ]; then
   ls -la src/hello_ohos_c src/hello_ohos_cpp 2>/dev/null || ls -la src/hello_ohos_c.exe src/hello_ohos_cpp.exe 2>/dev/null || ls -la src
@@ -167,14 +187,7 @@ done
 # Git Bash GNU tar treats "C:/..." archive paths as host:file remote specs; write via cwd + basename.
 ( cd "$W" && tar -czf "$NAME" -C src "${members[@]}" )
 
-export INPUT_PATH="$W/$NAME"
-export INPUT_SERVER_URL="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
-AP="${ARTIFACT_LOCAL_PATH:-$HOME/runner/artifact}"
-export INPUT_CACHE_DIR="${AP/#\~/$HOME}"
-KND="$(mktemp)"
-export KNACTION_DOTENV_FILE="$KND"
-# shellcheck source=/dev/null
-source "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh"
-rm -f "$KND"
-
-echo "Uploaded $NAME"
+TEST_OUT="${CI_PROJECT_DIR}/.ohos-test-binaries"
+mkdir -p "$TEST_OUT"
+cp "$W/$NAME" "$TEST_OUT/"
+echo "Saved test binary: $TEST_OUT/$NAME"

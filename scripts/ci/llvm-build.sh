@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# GitLab CI: matrix legs for .github/workflows/build-llvm.yml "build" job.
+# GitLab CI: matrix legs for LLVM build.
 # Usage: llvm-build.sh linux | macos-arm64 | macos-x64
 set -euo pipefail
 
 : "${CI_PROJECT_DIR:?}"
-mkdir -p "${CI_PROJECT_DIR}/.llvm-ci-meta"
-source "$CI_PROJECT_DIR/scripts/ci/logging.sh"
-
 : "${CI_PIPELINE_ID:?}"
+source "$CI_PROJECT_DIR/scripts/ci/logging.sh"
 
 PLATFORM="${1:?usage: llvm-build.sh linux|macos-arm64|macos-x64}"
 log_info "start platform=$PLATFORM CI_JOB_NAME=${CI_JOB_NAME:-}"
@@ -20,44 +18,10 @@ case "$PLATFORM" in
   macos-arm64)
     export RUNNER_OS=macOS
     export RUNNER_ARCH=ARM64
-    export HOMEBREW_NO_AUTO_UPDATE=1
-    export HOMEBREW_NO_ENV_HINTS=1
-    export CI=1
-    log_info "homebrew deps"
-    command -v brew >/dev/null 2>&1 || {
-      log_error "brew not on PATH"
-      exit 1
-    }
-    echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python, ccache, ninja)…"
-    for pkg in swig git-lfs java coreutils wget pigz python ccache ninja; do
-      if brew list "$pkg" &>/dev/null; then
-        log_info "brew already installed: $pkg"
-      else
-        log_info "brew install: $pkg"
-        brew install "$pkg"
-      fi
-    done
     ;;
   macos-x64)
     export RUNNER_OS=macOS
     export RUNNER_ARCH=X64
-    export HOMEBREW_NO_AUTO_UPDATE=1
-    export HOMEBREW_NO_ENV_HINTS=1
-    export CI=1
-    log_info "homebrew deps"
-    command -v brew >/dev/null 2>&1 || {
-      log_error "brew not on PATH"
-      exit 1
-    }
-    echo "Installing LLVM build deps via Homebrew (swig, git-lfs, java, coreutils, wget, pigz, python, ccache, ninja)…"
-    for pkg in swig git-lfs java coreutils wget pigz python ccache ninja; do
-      if brew list "$pkg" &>/dev/null; then
-        log_info "brew already installed: $pkg"
-      else
-        log_info "brew install: $pkg"
-        brew install "$pkg"
-      fi
-    done
     ;;
   *)
     log_error "Unknown platform: $PLATFORM"
@@ -65,15 +29,31 @@ case "$PLATFORM" in
     ;;
 esac
 
-# Keep one uniform workspace convention across runners/hosts:
-# host path ~/gitlab-runner/llvm/... must be mounted into Docker at the same path.
+# macOS: install build deps via Homebrew
+case "$PLATFORM" in
+  macos-*)
+    export HOMEBREW_NO_AUTO_UPDATE=1
+    export HOMEBREW_NO_ENV_HINTS=1
+    export CI=1
+    log_info "homebrew deps"
+    command -v brew >/dev/null 2>&1 || { log_error "brew not on PATH"; exit 1; }
+    for pkg in swig git-lfs java coreutils wget pigz python ccache ninja; do
+      if brew list "$pkg" &>/dev/null; then
+        log_info "brew already installed: $pkg"
+      else
+        log_info "brew install: $pkg"
+        brew install "$pkg"
+      fi
+    done
+    ;;
+esac
+
 export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/llvm}"
 export REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
-export ARTIFACT_LOCAL_PATH="${ARTIFACT_LOCAL_PATH:-${HOME}/runner/artifact}"
 export MANIFEST_URL="${MANIFEST_URL:-https://gitcode.com/linhandev/manifest.git}"
 export MANIFEST_FILE="${MANIFEST_FILE:-llvm-toolchain.xml}"
 
-if [ "${LLVM_CLEAN_BUILD:-false}" = "true" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "1" ]; then
+if [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
   rm -rf "$LLVM_WORKSPACE"
 fi
 mkdir -p "$LLVM_WORKSPACE"
@@ -89,139 +69,78 @@ log_info "setup-repo-tool"
 bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
 export PATH="$REPO_DIR:$PATH"
 
-if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "1" ]; then
+if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
   cd "$LLVM_WORKSPACE"
   REFERENCE_FLAG=""
   ref_dir="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
-  if [ -d "$ref_dir" ]; then
-    REFERENCE_FLAG="--reference=$ref_dir"
-  fi
+  [ -d "$ref_dir" ] && REFERENCE_FLAG="--reference=$ref_dir"
   log_info "repo init"
   repo init -u "$MANIFEST_URL" -m "$MANIFEST_FILE" $REFERENCE_FLAG
 else
-  log_info "repo init skipped (.repo present, LLVM_CLEAN_BUILD not set)"
+  log_warn "repo init skipped (.repo present, LLVM_CLEAN_BUILD not set)"
 fi
 
 export GIT_TERMINAL_PROMPT=0
 cd "$LLVM_WORKSPACE"
 log_info "repo sync"
-# --force-sync: overwrite work trees when .repo/project-objects vs checkout disagree (hooks/remap); required on reused runners.
-# Omit -v (noisy/slow logs).
+# --force-sync: overwrite work trees when .repo/project-objects vs checkout disagree; required on reused runners.
 repo sync -c --force-sync -j 16
-log_info "git lfs"
+log_info "git lfs pull (per sub-repo)"
+set +e
 repo forall -c git lfs pull
+_lfs_rc=$?
+set -e
+log_info "git lfs pull done (rc=$_lfs_rc)"
+if [ "$_lfs_rc" -ne 0 ]; then
+  log_warn "repo forall git lfs pull exited $_lfs_rc; continuing without LFS objects"
+fi
 
-# env_prepare.sh downloads CMake, Ninja under prebuilts/, etc. Run it when the tree is
-# incomplete — not only when prebuilts/cmake is missing (e.g. incremental sync can leave
-# prebuilts/cmake but drop build-tools/ninja; CMake then fails running ninja --version).
-prebuilt_ninja_ok() {
-  case "$PLATFORM" in
-    linux)
-      [ -x "${LLVM_WORKSPACE}/prebuilts/build-tools/linux-x64/bin/ninja" ]
-      ;;
-    macos-arm64)
-      [ -x "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-arm64/bin/ninja" ]
-      ;;
-    macos-x64)
-      [ -x "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x64/bin/ninja" ] ||
-        [ -x "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x86_64/bin/ninja" ]
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+# env_prepare.sh downloads CMake, Ninja, Clang bootstrap, Python3 under prebuilts/.
+# Platform→subpath map matches env_prepare.sh layout and build.py platform_prefix().
+case "$PLATFORM" in
+  linux)      _CMAKE=linux-x86;        _NINJA=linux-x86;   _CLANG=linux-x86_64;  _PY3=linux-x86 ;;
+  macos-arm64) _CMAKE=darwin-universal; _NINJA=darwin-arm64; _CLANG=darwin-arm64;  _PY3=darwin-arm64 ;;
+  macos-x64)  _CMAKE=darwin-universal;  _NINJA=darwin-x86;   _CLANG=darwin-x86_64; _PY3=darwin-x86 ;;
+esac
+
+prebuilts_complete() {
+  local ws="$LLVM_WORKSPACE"
+  [ -x "$ws/prebuilts/cmake/${_CMAKE}/bin/cmake" ] &&
+  [ -x "$ws/prebuilts/build-tools/${_NINJA}/bin/ninja" ] &&
+  [ -d "$ws/prebuilts/clang/ohos/${_CLANG}" ] &&
+  [ -d "$ws/prebuilts/python3/${_PY3}" ]
 }
 
-NEED_ENV_PREPARE="false"
-if [ ! -d "$LLVM_WORKSPACE/prebuilts/cmake" ]; then
-  NEED_ENV_PREPARE="true"
-fi
-if ! prebuilt_ninja_ok; then
-  log_warn "prebuilts incomplete (cmake dir or prebuilt ninja); will run env_prepare.sh"
-  NEED_ENV_PREPARE="true"
-fi
-
-if [ "$NEED_ENV_PREPARE" = "true" ]; then
+if ! prebuilts_complete; then
+  log_info "prebuilts incomplete; running env_prepare"
   cd "$LLVM_WORKSPACE"
-  log_info "running env_prepare"
-  bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
+  for _attempt in 1 2; do
+    bash -x toolchain/llvm-project/llvm-build/env_prepare.sh || true
+    if prebuilts_complete; then break; fi
+    log_warn "env_prepare attempt $_attempt incomplete; cleaning download_packages and retrying"
+    rm -rf "$LLVM_WORKSPACE/download_packages"
+  done
+  prebuilts_complete || { log_error "prebuilts still incomplete after env_prepare"; exit 1; }
 fi
+log_info "prebuilts OK"
 
-# Linux: OH CMake invokes prebuilts/build-tools/linux-x64/bin/ninja. Incremental repo sync can
-# leave a broken or missing prebuilt ninja; prefer distro ninja-build (Dockerfile) or Homebrew
-# ninja on Linux hosts that use linuxbrew — symlink into the tree CMake expects.
-if [ "$PLATFORM" = "linux" ]; then
-  log_info "Linux: ensure ninja for prebuilts path (apt ninja-build or Homebrew)"
-  if command -v apt-get >/dev/null 2>&1; then
-    if ! command -v ninja >/dev/null 2>&1; then
-      log_info "apt-get install ninja-build"
-      apt-get update
-      apt-get install -y --no-install-recommends ninja-build
-    fi
-  elif command -v brew >/dev/null 2>&1; then
-    brew list ninja &>/dev/null || brew install ninja
-  fi
-  if command -v ninja >/dev/null 2>&1; then
-    sys_ninja="$(command -v ninja)"
-    mkdir -p "${LLVM_WORKSPACE}/prebuilts/build-tools/linux-x64/bin"
-    ln -sf "$sys_ninja" "${LLVM_WORKSPACE}/prebuilts/build-tools/linux-x64/bin/ninja"
-    log_info "Linux: linked ninja -> $sys_ninja"
-  else
-    log_error "Linux: ninja not available after install attempts"
-    exit 1
-  fi
+if command -v ccache >/dev/null 2>&1; then
+  export CCACHE_DIR="${CCACHE_DIR:-${HOME}/gitlab-runner/cache/llvm-ccache}"
+  mkdir -p "$CCACHE_DIR"
+  ccache -M 50G 2>/dev/null || true
+  export CMAKE_C_COMPILER_LAUNCHER=ccache
+  export CMAKE_CXX_COMPILER_LAUNCHER=ccache
+  ccache --zero-stats 2>/dev/null || true
+  log_info "ccache enabled: CCACHE_DIR=$CCACHE_DIR  max_size=$(ccache -p 2>/dev/null | grep max_size | head -1)"
 fi
-
-# Last resort on macOS: Homebrew ninja at the path OH build.py passes to CMake.
-if ! prebuilt_ninja_ok; then
-  case "$PLATFORM" in
-    macos-arm64 | macos-x64)
-      log_warn "prebuilt ninja still missing after env_prepare; linking Homebrew ninja into prebuilts/build-tools"
-      command -v brew >/dev/null 2>&1 || {
-        log_error "brew not on PATH"
-        exit 1
-      }
-      brew list ninja &>/dev/null || brew install ninja
-      sys_ninja="$(command -v ninja)"
-      mkdir -p "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-arm64/bin"
-      ln -sf "$sys_ninja" "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-arm64/bin/ninja"
-      if [ "$PLATFORM" = "macos-x64" ]; then
-        mkdir -p "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x64/bin" \
-          "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x86_64/bin"
-        ln -sf "$sys_ninja" "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x64/bin/ninja"
-        ln -sf "$sys_ninja" "${LLVM_WORKSPACE}/prebuilts/build-tools/darwin-x86_64/bin/ninja"
-      fi
-      ;;
-    *)
-      log_error "prebuilt ninja missing after env_prepare (fix prebuilts or install ninja for $PLATFORM)"
-      exit 1
-      ;;
-  esac
-fi
-if ! prebuilt_ninja_ok; then
-  log_error "prebuilt ninja still not usable under prebuilts/build-tools"
-  exit 1
-fi
-
-# log_info "ccache setup"
-# if ! source "$CI_PROJECT_DIR/scripts/setup-llvm-ccache.sh"; then
-#   log_warn "ccache setup failed; running env_prepare on demand and retrying"
-#   cd "$LLVM_WORKSPACE"
-#   log_info "running env_prepare (ccache/toolchain bootstrap)"
-#   bash -x toolchain/llvm-project/llvm-build/env_prepare.sh
-#   log_info "ccache setup retry"
-#   source "$CI_PROJECT_DIR/scripts/setup-llvm-ccache.sh"
-# fi
 
 log_info "running build.sh"
 cd "$LLVM_WORKSPACE"
 bash toolchain/llvm-project/llvm-build/build.sh
 if command -v ccache >/dev/null 2>&1; then
+  log_info "ccache stats after build:"
   ccache -s || true
 fi
-
-AP="${ARTIFACT_LOCAL_PATH/#\~/$HOME}"
-mkdir -p "$AP"
 
 LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
 LLVM_SHA="$(git -C "$LLVM_PROJECT_DIR" rev-parse HEAD)"
@@ -231,16 +150,9 @@ if [ -z "${COMMIT_SHORT// }" ]; then
   COMMIT_SHORT="$(git -C "$CI_PROJECT_DIR" rev-parse --short=7 HEAD 2>/dev/null || true)"
 fi
 if [ -z "${COMMIT_SHORT// }" ]; then
-  log_error "Could not determine commit short SHA (CI_COMMIT_SHA / git rev-parse)."
+  log_error "Could not determine commit short SHA."
   exit 1
 fi
-
-META_DIR="${CI_PROJECT_DIR}/.llvm-ci-meta"
-SAFE_JOB="$(echo "${CI_JOB_NAME:-llvm-build}" | tr ':/' '__')"
-{
-  echo "LLVM_SHA_SHORT=${LLVM_SHA_SHORT}"
-  echo "ACT_SHA_SHORT=${COMMIT_SHORT}"
-} >"${META_DIR}/${SAFE_JOB}.env"
 
 PACKAGES_DIR="$LLVM_WORKSPACE/packages"
 if [ ! -d "$PACKAGES_DIR" ] || [ -z "$(ls -A "$PACKAGES_DIR" 2>/dev/null)" ]; then
@@ -249,25 +161,23 @@ if [ ! -d "$PACKAGES_DIR" ] || [ -z "$(ls -A "$PACKAGES_DIR" 2>/dev/null)" ]; th
 fi
 
 ARCHIVE_NAME="llvm-packages-${LLVM_SHA_SHORT}_act-${COMMIT_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar"
-OUT_PATH="$AP/$ARCHIVE_NAME"
+GL_PKG_DIR="${CI_PROJECT_DIR}/.llvm-packages"
+mkdir -p "$GL_PKG_DIR"
+OUT_PATH="$GL_PKG_DIR/$ARCHIVE_NAME"
 log_info "tar packages -> $OUT_PATH"
 tar -cf "$OUT_PATH" -C "$LLVM_WORKSPACE" packages
 
-export INPUT_PATH="$OUT_PATH"
-export INPUT_SERVER_URL="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
-export INPUT_CACHE_DIR="$AP"
-KNACTION_DOTENV_FILE="$(mktemp)"
-export KNACTION_DOTENV_FILE
-log_info "upload artifact server ${INPUT_SERVER_URL:-}"
-# shellcheck source=/dev/null
-if ! source "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh"; then
-  log_warn "Artifact upload failed (retry once after 5s)."
-  log_warn "Check Docker runner LAN reachability to ARTIFACT_SERVER_URL (${INPUT_SERVER_URL:-})."
-  sleep 5
-  log_info "upload retry"
-  # shellcheck source=/dev/null
-  source "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh"
-fi
-rm -f "$KNACTION_DOTENV_FILE"
-
 echo "LLVM packages archive: $OUT_PATH"
+
+# Upload outer tar to LAN artifact server so future pipelines with
+# KNACTION_LLVM_RUN_BUILD=false can reuse this build.
+_SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
+if curl -sS --connect-timeout 5 -o /dev/null "$_SERVER/" 2>/dev/null; then
+  log_info "uploading outer tar to artifact server"
+  INPUT_PATH="$OUT_PATH" INPUT_SERVER_URL="$_SERVER" INPUT_CACHE_DIR="${HOME}/runner/artifact" \
+    bash "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh" \
+    || log_warn "artifact server upload failed (non-fatal)"
+  log_info "outer tar artifact: $_SERVER/artifacts/$ARCHIVE_NAME"
+else
+  log_warn "artifact server unreachable at $_SERVER; skipping upload"
+fi

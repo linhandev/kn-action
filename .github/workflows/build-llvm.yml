@@ -36,7 +36,7 @@ on:
   #   paths:
   #     - '.github/workflows/build-llvm.yml'
   #     - 'scripts/setup-repo-tool.sh'
-  #     - 'scripts/setup-llvm-ccache.sh'
+  #     # ccache setup is now inline in scripts/ci/llvm-build.sh
   #     - 'scripts/platform_package.sh'
   #     # Windows LLVM scripts (not in active matrix):
   #     # - 'scripts/ohos-env-prepare-windows.sh'
@@ -211,9 +211,14 @@ jobs:
           RUNNER_ARCH: ${{ runner.arch }}
         run: |
           set -euo pipefail
-          # Incremental ninja/cmake objects live under LLVM_WORKSPACE (persists on self-hosted unless clean_build).
-          # ccache speeds recompiles after repo sync / header churn; Linux keeps CCACHE_DIR under CI_PROJECT_DIR (Docker mount).
-          source "$CI_PROJECT_DIR/scripts/setup-llvm-ccache.sh"
+          if command -v ccache >/dev/null 2>&1; then
+            export CCACHE_DIR="${HOME}/gitlab-runner/cache/llvm-ccache"
+            mkdir -p "$CCACHE_DIR"
+            ccache -M 50G 2>/dev/null || true
+            export CMAKE_C_COMPILER_LAUNCHER=ccache
+            export CMAKE_CXX_COMPILER_LAUNCHER=ccache
+            ccache --zero-stats 2>/dev/null || true
+          fi
           cd "${{ steps.vars.outputs.LLVM_WORKSPACE }}"
           bash toolchain/llvm-project/llvm-build/build.sh
           if command -v ccache >/dev/null 2>&1; then

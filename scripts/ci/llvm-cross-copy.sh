@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# GHA cross-copy job: merge llvm/packages outer tars and run platform_package RUN_FINAL_PACKAGE=1.
-# GitLab: intended to run on macOS arm64 only—artifact server locality; no requirement to execute
-# the merged LLVM on this host (see .gitlab/ci/llvm.yml and AGENTS.md).
+# Cross-copy job: merge per-OS llvm/packages outer tars and run platform_package RUN_FINAL_PACKAGE=1.
+# Outer tars arrive via GitLab artifacts when builds ran, or are downloaded from the LAN artifact
+# server when builds were skipped (LLVM_ARTIFACT_SOURCE=server, set by llvm-artifact-refs.sh).
 set -euo pipefail
 : "${CI_PROJECT_DIR:?}"
 : "${OUTER_LINUX_NAME:?}"
 : "${OUTER_MAC_ARM_NAME:?}"
 : "${OUTER_MAC_X64_NAME:?}"
+source "$CI_PROJECT_DIR/scripts/ci/logging.sh"
 
-echo "llvm-cross-copy: downloading outer tars from artifact server"
-echo "  Linux:    $OUTER_LINUX_NAME"
+log_info "resolving outer tars (source=${LLVM_ARTIFACT_SOURCE:-build})"
+echo "  Linux:       $OUTER_LINUX_NAME"
 echo "  macOS arm64: $OUTER_MAC_ARM_NAME"
 echo "  macOS x64:   $OUTER_MAC_X64_NAME"
 
@@ -19,16 +20,29 @@ mkdir -p "$WORK/downloads"
 cd "$WORK"
 DL="$(pwd)/downloads"
 
-"$CI_PROJECT_DIR/scripts/ci/download-artifact-local.sh" --name="$OUTER_LINUX_NAME" --dir="$DL"
-"$CI_PROJECT_DIR/scripts/ci/download-artifact-local.sh" --name="$OUTER_MAC_ARM_NAME" --dir="$DL"
-"$CI_PROJECT_DIR/scripts/ci/download-artifact-local.sh" --name="$OUTER_MAC_X64_NAME" --dir="$DL"
+GL_PKG="${CI_PROJECT_DIR}/.llvm-packages"
+SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
+for name in "$OUTER_LINUX_NAME" "$OUTER_MAC_ARM_NAME" "$OUTER_MAC_X64_NAME"; do
+  if [ -f "$GL_PKG/$name" ]; then
+    log_info "using GitLab artifact: $name"
+    cp "$GL_PKG/$name" "$DL/"
+  else
+    log_info "downloading from artifact server: $name"
+    curl -fsSL -o "$DL/$name" "$SERVER/artifacts/$name"
+  fi
+done
 
 mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 staging
+log_info "decompressing $OUTER_LINUX_NAME"
 tar -xf "$DL/$OUTER_LINUX_NAME" -C extract-linux
-tar -xf "$DL/$OUTER_MAC_ARM_NAME" -C extract-mac-arm64
-tar -xf "$DL/$OUTER_MAC_X64_NAME" -C extract-mac-x64
 cp -f extract-linux/packages/*.tar.gz staging/
+
+log_info "decompressing $OUTER_MAC_ARM_NAME"
+tar -xf "$DL/$OUTER_MAC_ARM_NAME" -C extract-mac-arm64
 cp -f extract-mac-arm64/packages/clang-dev-darwin-arm64.tar.gz staging/
+
+log_info "decompressing $OUTER_MAC_X64_NAME"
+tar -xf "$DL/$OUTER_MAC_X64_NAME" -C extract-mac-x64
 cp -f extract-mac-x64/packages/clang-dev-darwin-x86_64.tar.gz staging/
 
 if [ ! -f staging/clang-dev-windows-x86_64.tar.gz ]; then
@@ -63,19 +77,15 @@ for key in archive_linux archive_mac_arm64 archive_mac_x64 archive_windows; do
   echo "Verified $key -> $fname"
 done
 
-AP="${ARTIFACT_LOCAL_PATH:-$HOME/runner/artifact}"
-AP="${AP/#\~/$HOME}"
-UP_DOT="$(mktemp)"
-export INPUT_SERVER_URL="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
-export INPUT_CACHE_DIR="$AP"
-export KNACTION_DOTENV_FILE="$UP_DOT"
-
+FINAL_DIR="${CI_PROJECT_DIR}/.llvm-final-packages"
+mkdir -p "$FINAL_DIR"
+_SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
 for key in archive_linux archive_mac_arm64 archive_mac_x64 archive_windows; do
-  export INPUT_PATH="$WORK/staging/${!key}"
-  # shellcheck source=/dev/null
-  source "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh"
+  cp "$WORK/staging/${!key}" "$FINAL_DIR/"
+  INPUT_PATH="$FINAL_DIR/${!key}" INPUT_SERVER_URL="$_SERVER" INPUT_CACHE_DIR="${HOME}/runner/artifact" \
+    bash "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh"
+  log_info "final artifact: $_SERVER/artifacts/${!key}"
 done
-rm -f "$UP_DOT"
 
 echo "cross-copy.env (for downstream jobs):"
 cat "$DOTENV"
