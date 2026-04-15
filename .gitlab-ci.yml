@@ -16,7 +16,7 @@ variables:
       - "kotlin"
       - "test-prepare-repo"
   KNACTION_LLVM_RUN_BUILD:
-    value: "false"
+    value: "true"
     options:
       - "true"
       - "false"
@@ -27,6 +27,21 @@ variables:
       - "true"
       - "false"
     description: "When true, wipe the LLVM workspace before building (forces full rebuild)."
+  LLVM_ESSENTIALS_ID:
+    value: "204"
+    description: "LLVM Essentials version ID passed to platform_package.sh for final archive naming."
+  LLVM_MAJOR_FOR_PACKAGE:
+    value: "19"
+    description: "LLVM major version for platform_package.sh archive stem."
+  CLANG_RESOURCE_VERSION:
+    value: "19"
+    description: "Clang resource dir version embedded in final packages."
+  RUN_FINAL_PACKAGE:
+    value: "1"
+    options:
+      - "1"
+      - "0"
+    description: "When 1, platform_package.sh produces final distributable archives; 0 skips that step."
 
 workflow:
   rules:

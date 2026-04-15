@@ -26,6 +26,10 @@ for name in "$OUTER_LINUX_NAME" "$OUTER_MAC_ARM_NAME" "$OUTER_MAC_X64_NAME"; do
   if [ -f "$GL_PKG/$name" ]; then
     log_info "using GitLab artifact: $name"
     cp "$GL_PKG/$name" "$DL/"
+  elif [ "${LLVM_ARTIFACT_SOURCE:-}" = "build" ]; then
+    log_error "LLVM_ARTIFACT_SOURCE=build but GitLab artifact missing: $name"
+    ls -la "$GL_PKG/" || true
+    exit 1
   else
     log_info "downloading from artifact server: $name"
     curl -fsSL -o "$DL/$name" "$SERVER/artifacts/$name"
@@ -58,8 +62,8 @@ export KNACTION_STEP_SUMMARY="${KNACTION_STEP_SUMMARY:-/dev/null}"
 (
   cd staging
   export LLVM_MAJOR_FOR_PACKAGE="${LLVM_MAJOR_FOR_PACKAGE:-19}"
-  export LLVM_ESSENTIALS_ID="${LLVM_ESSENTIALS_ID:-203}"
-  export RUN_FINAL_PACKAGE=1
+  export LLVM_ESSENTIALS_ID="${LLVM_ESSENTIALS_ID:-204}"
+  export RUN_FINAL_PACKAGE="${RUN_FINAL_PACKAGE:-1}"
   export CLANG_RESOURCE_VERSION="${CLANG_RESOURCE_VERSION:-19}"
   export COPYFILE_DISABLE=1
   bash "$CI_PROJECT_DIR/scripts/platform_package.sh"

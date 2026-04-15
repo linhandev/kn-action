@@ -49,6 +49,7 @@ case "$PLATFORM" in
 esac
 
 export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/llvm}"
+LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
 export REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 export MANIFEST_URL="${MANIFEST_URL:-https://gitcode.com/linhandev/manifest.git}"
 export MANIFEST_FILE="${MANIFEST_FILE:-llvm-toolchain.xml}"
@@ -85,6 +86,8 @@ cd "$LLVM_WORKSPACE"
 log_info "repo sync"
 # --force-sync: overwrite work trees when .repo/project-objects vs checkout disagree; required on reused runners.
 repo sync -c --force-sync -j 16
+log_info "toolchain/llvm-project last 5 commits (full id, title)"
+git -C "$LLVM_PROJECT_DIR" log -n 5 --format='%H %s' >&2 || log_warn "could not read git log for toolchain/llvm-project"
 log_info "git lfs pull (per sub-repo)"
 set +e
 repo forall -c git lfs pull
@@ -142,7 +145,6 @@ if command -v ccache >/dev/null 2>&1; then
   ccache -s || true
 fi
 
-LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
 LLVM_SHA="$(git -C "$LLVM_PROJECT_DIR" rev-parse HEAD)"
 LLVM_SHA_SHORT="${LLVM_SHA:0:7}"
 COMMIT_SHORT="${CI_COMMIT_SHA:0:7}"

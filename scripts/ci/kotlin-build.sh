@@ -145,11 +145,12 @@ if [ "$RUNNER_OS" = "macOS" ] && [ -x /usr/libexec/java_home ]; then
     export JAVA_HOME="${JAVA_HOME_11:-$(/usr/libexec/java_home -v 11 2>/dev/null || /usr/libexec/java_home 2>/dev/null || true)}"
   fi
 elif [ "$RUNNER_OS" = "Linux" ]; then
-  for d in /usr/lib/jvm/java-8-openjdk-amd64 /usr/lib/jvm/java-1.8.0-openjdk-amd64; do
+  for d in /usr/lib/jvm/java-8-openjdk-amd64 /usr/lib/jvm/java-1.8.0-openjdk-amd64 \
+           /usr/lib/jvm/java-8-openjdk /usr/lib/jvm/zulu-8; do
     [ -d "$d" ] && export JDK_18="${JDK_18:-$d}" && break
   done
   for d in /usr/lib/jvm/java-21-openjdk-amd64 /usr/lib/jvm/java-21-openjdk \
-           /usr/lib/jvm/temurin-21-amd64; do
+           /usr/lib/jvm/temurin-21-amd64 /usr/lib/jvm/java-11-openjdk; do
     if [ -d "$d" ]; then
       export JAVA_HOME="${JAVA_HOME_21:-$d}"
       break
@@ -160,15 +161,27 @@ elif [ "$RUNNER_OS" = "Linux" ]; then
     export PATH="$JAVA_HOME/bin:$PATH"
   fi
   if [ -z "${JAVA_HOME:-}" ] && command -v java >/dev/null 2>&1; then
-    export JAVA_HOME="$(dirname "$(dirname "$(command -v java)")")"
+    export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
   fi
 elif [ "$RUNNER_OS" = "Windows" ]; then
   shopt -s nullglob
-  for d in /c/Program\ Files/Eclipse\ Adoptium/jdk-* /c/Program\ Files/Microsoft/jdk-*; do
+  for d in /c/Program\ Files/Eclipse\ Adoptium/jdk-8* \
+           /c/Program\ Files/Eclipse\ Adoptium/jdk8u* \
+           /c/Program\ Files/BellSoft/LibericaJDK-8* \
+           /c/Program\ Files/Zulu/zulu-8* \
+           /c/Program\ Files/Java/jdk1.8* \
+           /c/Program\ Files/Java/jdk-8*; do
     [ -d "$d" ] || continue
-    case "$d" in
-      *jdk-21*|*jdk-17*) export JAVA_HOME="${JAVA_HOME_21:-$d}"; break ;;
-    esac
+    export JDK_18="${JDK_18:-$d}"; break
+  done
+  for d in /c/Program\ Files/Eclipse\ Adoptium/jdk-21* \
+           /c/Program\ Files/Eclipse\ Adoptium/jdk-17* \
+           /c/Program\ Files/Microsoft/jdk-21* \
+           /c/Program\ Files/Microsoft/jdk-17* \
+           /c/Program\ Files/BellSoft/LibericaJDK-21* \
+           /c/Program\ Files/Zulu/zulu-21*; do
+    [ -d "$d" ] || continue
+    export JAVA_HOME="${JAVA_HOME_21:-$d}"; break
   done
   shopt -u nullglob
   [ -n "${JAVA_HOME_21:-}" ] && export JAVA_HOME="$JAVA_HOME_21"

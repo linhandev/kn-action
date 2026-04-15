@@ -191,10 +191,6 @@ llvm:cross-copy:
       artifacts: true
       optional: true
   timeout: 2h
-  variables:
-    LLVM_ESSENTIALS_ID: "203"
-    LLVM_MAJOR_FOR_PACKAGE: "19"
-    CLANG_RESOURCE_VERSION: "19"
   script:
     - bash scripts/ci/llvm-cross-copy.sh
   artifacts:
