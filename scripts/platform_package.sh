@@ -50,24 +50,32 @@ libcxx_ndk_windows_x86_64="libcxx-ndk_windows-x86_64-${commit_id}-${date}"
 
 V="${CLANG_RESOURCE_VERSION}"
 
+_extract() {
+  if command -v pigz >/dev/null 2>&1; then
+    pigz -dc "$1" | tar -xf -
+  else
+    tar -xzf "$1"
+  fi
+}
+
 # --- 1. Extract all tarballs ---
 
-tar -xf ${clang_linux_x86_64_tar}
+_extract ${clang_linux_x86_64_tar}
 mv clang-dev ${clang_linux_x86_64}
-tar -xf ${clang_darwin_arm64_tar}
+_extract ${clang_darwin_arm64_tar}
 mv clang-dev ${clang_darwin_arm64}
-tar -xf ${clang_darwin_x86_64_tar}
+_extract ${clang_darwin_x86_64_tar}
 mv clang-dev ${clang_darwin_x86_64}
-tar -xf ${clang_windows_x86_64_tar}
+_extract ${clang_windows_x86_64_tar}
 mv clang-dev ${clang_windows_x86_64}
-tar -xf ${libcxx_ndk_linux_x86_64_tar}
+_extract ${libcxx_ndk_linux_x86_64_tar}
 mv libcxx-ndk ${libcxx_ndk_linux_x86_64}
-tar -xf ${libcxx_ndk_darwin_x86_64_tar}
+_extract ${libcxx_ndk_darwin_x86_64_tar}
 mv libcxx-ndk ${libcxx_ndk_darwin_x86_64}
-tar -xf ${libcxx_ndk_darwin_arm64_tar}
+_extract ${libcxx_ndk_darwin_arm64_tar}
 mv libcxx-ndk ${libcxx_ndk_darwin_arm64}
 cp -a ${libcxx_ndk_linux_x86_64} ${libcxx_ndk_ohos_arm64}
-tar -xf ${libcxx_ndk_linux_aarch64_tar}
+_extract ${libcxx_ndk_linux_aarch64_tar}
 mv libcxx-ndk ${libcxx_ndk_linux_aarch64}
 cp -a ${libcxx_ndk_linux_x86_64} ${libcxx_ndk_windows_x86_64}
 
@@ -149,7 +157,11 @@ if [ "${RUN_FINAL_PACKAGE:-0}" = "1" ]; then
       [ "$first" = "${stem}/" ] || { echo "::error::Expected first member ${stem}/, got $first"; exit 1; }
     else
       archive="${stem}-run${_rid}.tar.gz"
-      GZIP=-9 tar -czf "$archive" "$stem"
+      if command -v pigz >/dev/null 2>&1; then
+        tar -cf - "$stem" | pigz -9 > "$archive"
+      else
+        GZIP=-9 tar -czf "$archive" "$stem"
+      fi
       first="$(tar -tzf "$archive" | head -1)"
       [ "$first" = "${stem}/" ] || { echo "::error::Expected first member ${stem}/, got $first"; exit 1; }
     fi

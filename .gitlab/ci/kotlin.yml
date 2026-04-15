@@ -1,12 +1,12 @@
 # Kotlin OH build — port of .github/workflows/build-kotlin.yml (GitLab matrix).
-# Web: set CI variable KNACTION_CI_PROFILE=kotlin (same idea as LLVM’s llvm profile).
+# Web or API (e.g. glab ci run): set KNACTION_CI_PROFILE=kotlin (same idea as LLVM’s llvm profile).
 # Runners: kotlin + OS + arch (AGENTS.md). Requires GITCODE_SSH_PRIVATE_KEY for kotlin clone.
 
 .kotlin-build-rules:
   rules:
     - if: '$KNACTION_CI_PROFILE == "llvm"'
       when: never
-    - if: '$CI_PIPELINE_SOURCE == "web" && $KNACTION_CI_PROFILE == "kotlin"'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $KNACTION_CI_PROFILE == "kotlin"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .gitlab-ci.yml

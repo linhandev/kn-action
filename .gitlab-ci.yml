@@ -13,15 +13,25 @@ variables:
     value: "llvm"
     options:
       - "llvm"
+      - "kotlin"
       - "test-prepare-repo"
   KNACTION_LLVM_RUN_BUILD:
     value: "false"
-    description: "When true, run the three build:llvm:* jobs; when false, llvm:artifact-refs uses latest-per-OS outer tars from the LAN artifact server (regex)."
+    options:
+      - "true"
+      - "false"
+    description: "When true, run the three build:llvm:* compile jobs."
+  LLVM_CLEAN_BUILD:
+    value: "false"
+    options:
+      - "true"
+      - "false"
+    description: "When true, wipe the LLVM workspace before building (forces full rebuild)."
 
 workflow:
   rules:
     # llvm-sync (origin→GL mirror) disabled; re-add with sync:llvm:origin-to-gl rules in .gitlab/ci/llvm.yml.
-    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .github/actions/prepare-repo/**/*
@@ -32,14 +42,11 @@ workflow:
         - .github/workflows/build-llvm.yml
         - .gitlab/ci/**/*
         - scripts/ci/llvm-build.sh
-        - scripts/ci/download-artifact-local.sh
         - scripts/ci/llvm-artifact-refs.sh
-        - scripts/ci/artifact-server-latest.sh
         - scripts/ci/llvm-cross-copy.sh
         - scripts/ci/ohos-test-build.sh
         - scripts/ci/hdc-verify-all.sh
         - scripts/setup-repo-tool.sh
-        - scripts/setup-llvm-ccache.sh
         - scripts/platform_package.sh
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
@@ -58,7 +65,7 @@ workflow:
 include:
   - local: .gitlab/ci/prepare-repo.yml
   - local: .gitlab/ci/llvm.yml
-  # - local: .gitlab/ci/kotlin.yml
+  - local: .gitlab/ci/kotlin.yml
 
 stages:
   - test
