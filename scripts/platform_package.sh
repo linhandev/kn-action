@@ -17,13 +17,14 @@
 #
 # Expects *.tar.gz blobs in cwd (staging).
 # CLANG_RESOURCE_VERSION must match lib/clang/<ver> (e.g. 19).
-#
-# When RUN_FINAL_PACKAGE=1, produces versioned per-host archives (llvm-<ver>-…)
-# and skips the legacy per-component target_location/ archives.
+# LLVM_MAJOR_FOR_PACKAGE and CLANG_RESOURCE_VERSION default here (override only for local/debug).
+# Produces versioned per-host archives (llvm-<ver>-…) named with LLVM_VERSION (dev id / essentials id).
 
 set -euo pipefail
 
 : "${CLANG_RESOURCE_VERSION:=19}"
+: "${LLVM_MAJOR_FOR_PACKAGE:=19}"
+: "${LLVM_VERSION:=204}"
 
 commit_id=""
 date="$(date '+%Y-%m-%dT%H:%M:%S')"
@@ -138,76 +139,57 @@ fixup_libcxx_linker_script "$clang_darwin_arm64"
 fixup_libcxx_linker_script "$clang_darwin_x86_64"
 fixup_libcxx_linker_script "$clang_windows_x86_64"
 
-# --- 4. Archive ---
+# --- 4. Archive (versioned per-host artifacts) ---
 
-if [ "${RUN_FINAL_PACKAGE:-0}" = "1" ]; then
-  # Final packaging mode (cross-copy CI): produce versioned per-host archives.
-  # Skips the legacy per-component target_location/ compression entirely.
-
-  pack_host_tree() {
-    local source_dir="$1" stem="$2" ext="$3"
-    local archive
-    [ -d "$source_dir/bin" ] || { echo "::error::Expected $source_dir/bin"; ls -la "$source_dir"; exit 1; }
-    mv "$source_dir" "$stem"
-    _rid="${CI_PIPELINE_ID:-${KNACTION_PIPELINE_ID:-}}"
-    if [ "$ext" = "zip" ]; then
-      archive="${stem}-run${_rid}.zip"
-      zip -qry "$archive" "$stem"
-      first="$(unzip -Z1 "$archive" | head -1)"
-      [ "$first" = "${stem}/" ] || { echo "::error::Expected first member ${stem}/, got $first"; exit 1; }
-    else
-      archive="${stem}-run${_rid}.tar.gz"
-      if command -v pigz >/dev/null 2>&1; then
-        tar -cf - "$stem" | pigz -9 > "$archive"
-      else
-        GZIP=-9 tar -czf "$archive" "$stem"
-      fi
-      first="$(tar -tzf "$archive" | head -1)"
-      [ "$first" = "${stem}/" ] || { echo "::error::Expected first member ${stem}/, got $first"; exit 1; }
-    fi
-    printf '%s' "$archive"
-  }
-
-  [ -n "${LLVM_MAJOR_FOR_PACKAGE:-}" ] || { echo "::error::LLVM_MAJOR_FOR_PACKAGE is required when RUN_FINAL_PACKAGE=1"; exit 1; }
-  [ -n "${LLVM_ESSENTIALS_ID:-}" ] || { echo "::error::LLVM_ESSENTIALS_ID is required when RUN_FINAL_PACKAGE=1"; exit 1; }
-  [ -n "${CI_PIPELINE_ID:-${KNACTION_PIPELINE_ID:-}}" ] || { echo "::error::CI_PIPELINE_ID or KNACTION_PIPELINE_ID is required when RUN_FINAL_PACKAGE=1"; exit 1; }
-  [ -d "$clang_linux_x86_64" ] || { echo "::error::Missing linux clang tree $clang_linux_x86_64"; exit 1; }
-
-  STEM_LINUX="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-dev-${LLVM_ESSENTIALS_ID}"
-  STEM_MAC_ARM64="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-dev-${LLVM_ESSENTIALS_ID}"
-  STEM_MAC_X64="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-dev-${LLVM_ESSENTIALS_ID}"
-  STEM_WINDOWS="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-windows-dev-${LLVM_ESSENTIALS_ID}"
-
-  ARCHIVE_LINUX="$(pack_host_tree "$clang_linux_x86_64" "$STEM_LINUX" "tar.gz")"
-  ARCHIVE_MAC_ARM64="$(pack_host_tree "$clang_darwin_arm64" "$STEM_MAC_ARM64" "tar.gz")"
-  ARCHIVE_MAC_X64="$(pack_host_tree "$clang_darwin_x86_64" "$STEM_MAC_X64" "tar.gz")"
-  ARCHIVE_WINDOWS="$(pack_host_tree "$clang_windows_x86_64" "$STEM_WINDOWS" "zip")"
-
-  {
-    echo "Packed $ARCHIVE_LINUX (top-level dir $STEM_LINUX)"
-    echo "Packed $ARCHIVE_MAC_ARM64 (top-level dir $STEM_MAC_ARM64)"
-    echo "Packed $ARCHIVE_MAC_X64 (top-level dir $STEM_MAC_X64)"
-    echo "Packed $ARCHIVE_WINDOWS (top-level dir $STEM_WINDOWS)"
-  } >> "${KNACTION_STEP_SUMMARY:-/dev/null}"
-
-  if [ -n "${KNACTION_DOTENV_FILE:-}" ]; then
-    {
-      echo "archive_linux=$ARCHIVE_LINUX"
-      echo "archive_mac_arm64=$ARCHIVE_MAC_ARM64"
-      echo "archive_mac_x64=$ARCHIVE_MAC_X64"
-      echo "archive_windows=$ARCHIVE_WINDOWS"
-    } >> "$KNACTION_DOTENV_FILE"
-  fi
-else
-  # Legacy mode: per-component archives in target_location/.
-  llvm_list=($clang_linux_x86_64 $clang_darwin_arm64 $clang_darwin_x86_64 $clang_windows_x86_64 $libcxx_ndk_linux_x86_64 $libcxx_ndk_darwin_x86_64 $libcxx_ndk_darwin_arm64 $libcxx_ndk_ohos_arm64 $libcxx_ndk_linux_aarch64 $libcxx_ndk_windows_x86_64)
-  mkdir target_location
-  for i in "${llvm_list[@]}"; do
+pack_host_tree() {
+  local source_dir="$1" stem="$2" ext="$3"
+  local archive
+  [ -d "$source_dir/bin" ] || { echo "::error::Expected $source_dir/bin"; ls -la "$source_dir"; exit 1; }
+  mv "$source_dir" "$stem"
+  _rid="${CI_PIPELINE_ID:-${KNACTION_PIPELINE_ID:-}}"
+  if [ "$ext" = "zip" ]; then
+    archive="${stem}-run${_rid}.zip"
+    zip -qry "$archive" "$stem"
+    first="$(unzip -Z1 "$archive" | head -1)"
+    [ "$first" = "${stem}/" ] || { echo "::error::Expected first member ${stem}/, got $first"; exit 1; }
+  else
+    archive="${stem}-run${_rid}.tar.gz"
     if command -v pigz >/dev/null 2>&1; then
-      tar -cf - "${i}" | pigz -9 > "target_location/${i}.tar.gz"
+      tar -cf - "$stem" | pigz -9 > "$archive"
     else
-      tar zcf "target_location/${i}.tar.gz" "${i}"
+      GZIP=-9 tar -czf "$archive" "$stem"
     fi
-    sha256sum "target_location/${i}.tar.gz" | awk '{print $1}' > "target_location/${i}.tar.gz.sha256"
-  done
+    first="$(tar -tzf "$archive" | head -1)"
+    [ "$first" = "${stem}/" ] || { echo "::error::Expected first member ${stem}/, got $first"; exit 1; }
+  fi
+  printf '%s' "$archive"
+}
+
+[ -n "${CI_PIPELINE_ID:-${KNACTION_PIPELINE_ID:-}}" ] || { echo "::error::CI_PIPELINE_ID or KNACTION_PIPELINE_ID is required"; exit 1; }
+[ -d "$clang_linux_x86_64" ] || { echo "::error::Missing linux clang tree $clang_linux_x86_64"; exit 1; }
+
+STEM_LINUX="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-dev-${LLVM_VERSION}"
+STEM_MAC_ARM64="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-dev-${LLVM_VERSION}"
+STEM_MAC_X64="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-dev-${LLVM_VERSION}"
+STEM_WINDOWS="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-windows-dev-${LLVM_VERSION}"
+
+ARCHIVE_LINUX="$(pack_host_tree "$clang_linux_x86_64" "$STEM_LINUX" "tar.gz")"
+ARCHIVE_MAC_ARM64="$(pack_host_tree "$clang_darwin_arm64" "$STEM_MAC_ARM64" "tar.gz")"
+ARCHIVE_MAC_X64="$(pack_host_tree "$clang_darwin_x86_64" "$STEM_MAC_X64" "tar.gz")"
+ARCHIVE_WINDOWS="$(pack_host_tree "$clang_windows_x86_64" "$STEM_WINDOWS" "zip")"
+
+{
+  echo "Packed $ARCHIVE_LINUX (top-level dir $STEM_LINUX)"
+  echo "Packed $ARCHIVE_MAC_ARM64 (top-level dir $STEM_MAC_ARM64)"
+  echo "Packed $ARCHIVE_MAC_X64 (top-level dir $STEM_MAC_X64)"
+  echo "Packed $ARCHIVE_WINDOWS (top-level dir $STEM_WINDOWS)"
+} >> "${KNACTION_STEP_SUMMARY:-/dev/null}"
+
+if [ -n "${KNACTION_DOTENV_FILE:-}" ]; then
+  {
+    echo "archive_linux=$ARCHIVE_LINUX"
+    echo "archive_mac_arm64=$ARCHIVE_MAC_ARM64"
+    echo "archive_mac_x64=$ARCHIVE_MAC_X64"
+    echo "archive_windows=$ARCHIVE_WINDOWS"
+  } >> "$KNACTION_DOTENV_FILE"
 fi

@@ -24,7 +24,7 @@ artifact_server_latest_basename() {
   case "$http" in
     301 | 302 | 303 | 307 | 308) ;;
     404)
-      echo "No artifact matching pattern: $pattern (HTTP 404). Upload outer tars or set KNACTION_LLVM_RUN_BUILD=true." >&2
+      echo "No artifact matching pattern: $pattern (HTTP 404). Upload outer tars or run build:llvm with SKIP_LLVM_BUILD=false." >&2
       echo "Hint: curl -sS -H 'Accept: application/json' ${server_url}/artifacts/ | head" >&2
       rm -f "$hdr"
       return 1

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Cross-copy job: merge per-OS llvm/packages outer tars and run platform_package RUN_FINAL_PACKAGE=1.
-# Outer tars arrive via GitLab artifacts when builds ran, or are downloaded from the LAN artifact
-# server when builds were skipped (LLVM_ARTIFACT_SOURCE=server, set by llvm-artifact-refs.sh).
+# Cross-copy job: download per-OS llvm/packages outer tars from LAN artifact server,
+# merge and run platform_package.sh (final archives).
 set -euo pipefail
 : "${CI_PROJECT_DIR:?}"
 : "${OUTER_LINUX_NAME:?}"
@@ -9,7 +8,7 @@ set -euo pipefail
 : "${OUTER_MAC_X64_NAME:?}"
 source "$CI_PROJECT_DIR/scripts/ci/logging.sh"
 
-log_info "resolving outer tars (source=${LLVM_ARTIFACT_SOURCE:-build})"
+log_info "downloading outer tars from artifact server"
 echo "  Linux:       $OUTER_LINUX_NAME"
 echo "  macOS arm64: $OUTER_MAC_ARM_NAME"
 echo "  macOS x64:   $OUTER_MAC_X64_NAME"
@@ -20,20 +19,10 @@ mkdir -p "$WORK/downloads"
 cd "$WORK"
 DL="$(pwd)/downloads"
 
-GL_PKG="${CI_PROJECT_DIR}/.llvm-packages"
 SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
 for name in "$OUTER_LINUX_NAME" "$OUTER_MAC_ARM_NAME" "$OUTER_MAC_X64_NAME"; do
-  if [ -f "$GL_PKG/$name" ]; then
-    log_info "using GitLab artifact: $name"
-    cp "$GL_PKG/$name" "$DL/"
-  elif [ "${LLVM_ARTIFACT_SOURCE:-}" = "build" ]; then
-    log_error "LLVM_ARTIFACT_SOURCE=build but GitLab artifact missing: $name"
-    ls -la "$GL_PKG/" || true
-    exit 1
-  else
-    log_info "downloading from artifact server: $name"
-    curl -fsSL -o "$DL/$name" "$SERVER/artifacts/$name"
-  fi
+  log_info "downloading $name"
+  curl -fsSL -o "$DL/$name" "$SERVER/artifacts/$name"
 done
 
 mkdir -p extract-linux extract-mac-arm64 extract-mac-x64 staging
@@ -61,10 +50,6 @@ export KNACTION_DOTENV_FILE="$DOTENV"
 export KNACTION_STEP_SUMMARY="${KNACTION_STEP_SUMMARY:-/dev/null}"
 (
   cd staging
-  export LLVM_MAJOR_FOR_PACKAGE="${LLVM_MAJOR_FOR_PACKAGE:-19}"
-  export LLVM_ESSENTIALS_ID="${LLVM_ESSENTIALS_ID:-204}"
-  export RUN_FINAL_PACKAGE="${RUN_FINAL_PACKAGE:-1}"
-  export CLANG_RESOURCE_VERSION="${CLANG_RESOURCE_VERSION:-19}"
   export COPYFILE_DISABLE=1
   bash "$CI_PROJECT_DIR/scripts/platform_package.sh"
 )

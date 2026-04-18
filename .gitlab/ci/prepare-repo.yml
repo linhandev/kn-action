@@ -2,7 +2,7 @@
   stage: test
   interruptible: true
   rules:
-    - if: '$KNACTION_CI_PROFILE == "test-prepare-repo"'
+    - if: '$TARGET == "test-prepare-repo"'
   variables:
     GIT_STRATEGY: fetch
     GIT_DEPTH: "0"

@@ -132,8 +132,8 @@ Keep these in mind when changing **`scripts/`** or CI:
 - **Repo** via [**`scripts/setup-repo-tool.sh`**](scripts/setup-repo-tool.sh) (Windows wrapper for **`python`**).
 - **Artifacts** and **`platform_package.sh`** naming aligned with Konan dependency layout (flattened host trees in published tarballs/zip).
 - **Multi-platform**: prefer **`fail-fast: false`** so one OS does not cancel others.
-- **GitLab merge (`llvm:cross-copy`)**: run on **`chore-macos-arm64`** (Apple Silicon **chore** runner, e.g. **studio**). Cross-copy is **merge + `platform_package.sh` packaging** over tarballs; it does **not** require executing the produced LLVM on the merge host—downstream **`ohos:build-test:*`** jobs validate per OS.
-- **Artifacts**: Build jobs produce per-platform outer tars as **GitLab artifacts** (`.llvm-packages/`). Cross-copy receives them via `needs:` and falls back to the LAN artifact server when builds are skipped.
+- **GitLab merge (`llvm:cross-copy`)**: run on **`chore-macos-arm64`** (Apple Silicon **chore** runner, e.g. **studio`). Cross-copy is **merge + `platform_package.sh` packaging** over tarballs; it does **not** require executing the produced LLVM on the merge host—downstream **`ohos:build-test:*`** jobs validate per OS.
+- **Artifacts**: Build jobs upload outer tars directly to **LAN artifact server** (no GitLab artifacts). `llvm:artifact-refs` waits for build jobs (optional) then queries server for latest names. `llvm:cross-copy` downloads from server and produces final archives. Dependency: `artifact-refs` → `build:llvm:*` (optional) → `cross-copy` → `artifact-refs` only.
 
 ### LLVM build performance checklist
 
