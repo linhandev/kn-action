@@ -172,7 +172,7 @@ tar -cf "$OUT_PATH" -C "$LLVM_WORKSPACE" packages
 echo "LLVM packages archive: $OUT_PATH"
 
 # Upload outer tar to LAN artifact server so future pipelines with
-# KNACTION_LLVM_RUN_BUILD=false can reuse this build.
+# SKIP_LLVM_BUILD=true pipelines can reuse this build via the artifact server.
 _SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
 if curl -sS --connect-timeout 5 -o /dev/null "$_SERVER/" 2>/dev/null; then
   log_info "uploading outer tar to artifact server"

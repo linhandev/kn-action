@@ -1,51 +1,56 @@
+spec:
+  inputs:
+    target:
+      type: string
+      default: "llvm"
+      options:
+        - "llvm"
+        - "kotlin"
+        - "test-prepare-repo"
+      description: "Select CI profile to run"
+    skip_llvm_build:
+      type: boolean
+      default: false
+      description: "When true, skip the three build:llvm:* compile jobs (cross-copy uses artifact server)."
+    llvm_clean_build:
+      type: boolean
+      default: false
+      description: "When true, wipe the LLVM workspace before building (forces full rebuild)."
+    llvm_version:
+      type: string
+      default: "204"
+      description: "Dev / essentials id for final archive naming (platform_package.sh)."
+---
 # GitLab CI — kn-action (LAN). Runner fleet: AGENTS.md → "Four-host runner matrix".
 # prepare-repo tests: Kotlin runners only, three tags each (kotlin + OS + arch).
 #
 # Workflows: merge requests (path-gated), manual “Run pipeline” (web), no push pipelines for LLVM paths (avoids duplicate push+MR runs).
-# Per-job rules gate prepare-repo vs LLVM via path changes; web uses KNACTION_CI_PROFILE.
+# Per-job rules gate prepare-repo vs LLVM via path changes; web uses TARGET.
 #
-# Manual LLVM-only: Run pipeline (web) with variable KNACTION_CI_PROFILE=llvm.
-# Manual prepare-repo tests: Run pipeline (web) with KNACTION_CI_PROFILE=test-prepare-repo.
+# Manual LLVM-only: Run pipeline (web) with input target=llvm.
+# Manual prepare-repo tests: Run pipeline (web) with input target=test-prepare-repo.
+#
+# Scheduled LLVM clean matrix: CI/CD → Schedules with variables TARGET=llvm,
+# LLVM_DAILY_CLEAN_SCHEDULE=true (see .gitlab/ci/llvm.yml). Example (Asia/Shanghai = UTC+8):
+#   glab schedule create --cron "0 2 * * *" --cronTimeZone "Asia/Shanghai" --ref develop \
+#     --description "LLVM clean matrix (daily)" \
+#     --variable "TARGET:llvm" --variable "LLVM_DAILY_CLEAN_SCHEDULE:true"
 
 variables:
-  KNACTION_CI_PROFILE:
-    description: "Select CI profile to run"
-    value: "llvm"
-    options:
-      - "llvm"
-      - "kotlin"
-      - "test-prepare-repo"
-  KNACTION_LLVM_RUN_BUILD:
-    value: "true"
-    options:
-      - "true"
-      - "false"
-    description: "When true, run the three build:llvm:* compile jobs."
-  LLVM_CLEAN_BUILD:
-    value: "false"
-    options:
-      - "true"
-      - "false"
-    description: "When true, wipe the LLVM workspace before building (forces full rebuild)."
-  LLVM_ESSENTIALS_ID:
-    value: "204"
-    description: "LLVM Essentials version ID passed to platform_package.sh for final archive naming."
-  LLVM_MAJOR_FOR_PACKAGE:
-    value: "19"
-    description: "LLVM major version for platform_package.sh archive stem."
-  CLANG_RESOURCE_VERSION:
-    value: "19"
-    description: "Clang resource dir version embedded in final packages."
-  RUN_FINAL_PACKAGE:
-    value: "1"
-    options:
-      - "1"
-      - "0"
-    description: "When 1, platform_package.sh produces final distributable archives; 0 skips that step."
+  TARGET: "$[[ inputs.target ]]"
+  SKIP_LLVM_BUILD: "$[[ inputs.skip_llvm_build ]]"
+  LLVM_CLEAN_BUILD: "$[[ inputs.llvm_clean_build ]]"
+  LLVM_VERSION: "$[[ inputs.llvm_version ]]"
 
 workflow:
+  # Cancel jobs from the previous pipeline on the same branch when a new commit lands (e.g. MR updates).
+  # Requires project setting CI/CD → General pipelines → "Auto-cancel redundant pipelines" (usually on).
+  # With `interruptible`, only jobs marked `interruptible: true` are cancelled; LLVM compile jobs use that.
+  auto_cancel:
+    on_new_commit: interruptible
   rules:
     # llvm-sync (origin→GL mirror) disabled; re-add with sync:llvm:origin-to-gl rules in .gitlab/ci/llvm.yml.
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $LLVM_DAILY_CLEAN_SCHEDULE == "true" && $TARGET == "llvm"'
     - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
@@ -85,6 +90,7 @@ include:
 stages:
   - test
   - build
+  - kotlin_verify
   - llvm_merge
   - llvm_verify
 

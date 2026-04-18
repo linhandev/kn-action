@@ -239,18 +239,18 @@ if [ -n "$PROXY_URL" ]; then
         </repository>
       </repositories>
       <pluginRepositories>
-        <repository>
+        <pluginRepository>
           <id>${LOCAL_BUILD_REPO_ID}</id>
           <url>${FILE_BUILD_REPO_URL}</url>
           <releases><enabled>true</enabled></releases>
           <snapshots><enabled>true</enabled></snapshots>
-        </repository>
-        <repository>
+        </pluginRepository>
+        <pluginRepository>
           <id>${LAN_RELEASES_ID}</id>
           <url>$PROXY_URL</url>
           <releases><enabled>true</enabled></releases>
           <snapshots><enabled>true</enabled></snapshots>
-        </repository>
+        </pluginRepository>
       </pluginRepositories>
     </profile>
   </profiles>
@@ -290,6 +290,9 @@ else
 fi
 
 cd "$KOTLIN_ROOT"
+# Workaround: build-ohos.sh's cleanDependencyCache sometimes fails on macOS
+# when rm -rf hits a partially-locked gradle modules-2 directory.
+sed -i.bak 's#rm -rf "\$gradleHome/caches/modules-2"#rm -rf "\$gradleHome/caches/modules-2" 2>/dev/null || true#' scripts/build-ohos.sh
 bash scripts/build-ohos.sh
 ./gradlew --stop
 

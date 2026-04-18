@@ -1,12 +1,12 @@
 # Kotlin OH build — port of .github/workflows/build-kotlin.yml (GitLab matrix).
-# Web or API (e.g. glab ci run): set KNACTION_CI_PROFILE=kotlin (same idea as LLVM’s llvm profile).
+# Web or API (e.g. glab ci run): set TARGET=kotlin (same idea as LLVM’s llvm profile).
 # Runners: kotlin + OS + arch (AGENTS.md). Requires GITCODE_SSH_PRIVATE_KEY for kotlin clone.
 
 .kotlin-build-rules:
   rules:
-    - if: '$KNACTION_CI_PROFILE == "llvm"'
+    - if: '$TARGET == "llvm"'
       when: never
-    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $KNACTION_CI_PROFILE == "kotlin"'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "kotlin"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .gitlab-ci.yml
@@ -40,15 +40,16 @@
         ssh-add ~/.ssh/id_ed25519
       fi
 
-build:kotlin:linux:x64:
-  extends: .kotlin-build-common
-  needs: []
-  tags:
-    - kotlin
-    - linux
-    - x64
-  script:
-    - bash scripts/ci/kotlin-build.sh linux-x64
+# Temporarily disabled to focus on debugging macOS arm64 for PR 98
+# build:kotlin:linux:x64:
+#   extends: .kotlin-build-common
+#   needs: []
+#   tags:
+#     - kotlin
+#     - linux
+#     - x64
+#   script:
+#     - bash scripts/ci/kotlin-build.sh linux-x64
 
 build:kotlin:macos:arm64:
   extends: .kotlin-build-common
@@ -57,25 +58,50 @@ build:kotlin:macos:arm64:
     - kotlin
     - macos
     - arm64
+  artifacts:
+    when: always
+    paths:
+      - ci-workspace/kotlin-native/kotlin-native-macos-aarch64-*.tar.gz
+    expire_in: 2 days
   script:
     - bash scripts/ci/kotlin-build.sh macos-arm64
 
-build:kotlin:macos:x64:
-  extends: .kotlin-build-common
-  needs: []
+# Smoke-test the freshly-built Kotlin/Native compiler by compiling kn_samples bare branch
+# into a HarmonyOS HAP and running it on a connected device.
+test:kotlin:hap:macos-arm64:
+  stage: kotlin_verify
+  interruptible: true
+  timeout: 30m
+  extends: .kotlin-build-rules
+  needs:
+    - job: build:kotlin:macos:arm64
+      artifacts: true
   tags:
-    - kotlin
+    - chore
     - macos
-    - x64
+    - arm64
+  variables:
+    PATH: "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   script:
-    - bash scripts/ci/kotlin-build.sh macos-x64
+    - bash scripts/ci/kotlin-hap-smoke-test.sh
 
-build:kotlin:windows:x64:
-  extends: .kotlin-build-common
-  needs: []
-  tags:
-    - kotlin
-    - windows
-    - x64
-  script:
-    - bash scripts/ci/kotlin-build.sh windows-x64
+# Temporarily disabled to focus on debugging macOS arm64 for PR 98
+# build:kotlin:macos:x64:
+#   extends: .kotlin-build-common
+#   needs: []
+#   tags:
+#     - kotlin
+#     - macos
+#     - x64
+#   script:
+#     - bash scripts/ci/kotlin-build.sh macos-x64
+
+# build:kotlin:windows:x64:
+#   extends: .kotlin-build-common
+#   needs: []
+#   tags:
+#     - kotlin
+#     - windows
+#     - x64
+#   script:
+#     - bash scripts/ci/kotlin-build.sh windows-x64

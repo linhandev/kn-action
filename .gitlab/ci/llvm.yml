@@ -1,18 +1,25 @@
 # Ported from .github/workflows/build-llvm.yml (build → llvm-artifact-refs → cross-copy → ohos-test → hdc).
 #
-# Web + MR only for LLVM (no branch push pipeline; see root .gitlab-ci.yml workflow). Web: set KNACTION_CI_PROFILE=llvm for LLVM-only (no prepare-repo matrix).
+# Web + MR + scheduled clean for LLVM (no branch push pipeline; see root .gitlab-ci.yml workflow).
+# Web: set TARGET=llvm for LLVM-only (no prepare-repo matrix).
+# Schedule: set TARGET=llvm and LLVM_DAILY_CLEAN_SCHEDULE=true on the pipeline schedule; optional cron example in root .gitlab-ci.yml.
 #
-# LLVM compile matrix is off by default (see root variables KNACTION_LLVM_RUN_BUILD). Set it true
-# to run build:llvm:*. When builds are skipped, downstream merge/verify jobs fall back to the latest
-# outer tars from the LAN artifact server (scripts/ci/llvm-artifact-refs.sh).
+# By default build:llvm:* runs (SKIP_LLVM_BUILD=false). Set SKIP_LLVM_BUILD=true to skip compile;
+# downstream merge/verify jobs fall back to the latest outer tars from the LAN artifact server
+# (scripts/ci/llvm-artifact-refs.sh).
 
 .llvm-build-matrix-common:
   stage: build # TODO: change to build-llvm
-  interruptible: false
+  # true so workflow:auto_cancel:on_new_commit:interruptible can stop in-flight builds when the MR gets a new commit.
+  interruptible: true
   timeout: 6h
   # Same as scripts/ci/llvm-build.sh default and GHA build-llvm.yml: repo init --reference when present.
   # Use before_script so $HOME expands (GitLab variables: do not expand $HOME reliably).
   before_script:
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "schedule" ] && [ "${LLVM_DAILY_CLEAN_SCHEDULE:-}" = "true" ]; then
+        export LLVM_CLEAN_BUILD=true
+      fi
     - export LOCAL_REFERENCE_DIR="${HOME}/git/ci/llvm-project-kmp"
   variables:
     GIT_STRATEGY: fetch
@@ -23,7 +30,8 @@
 
 .llvm-build-rules:
   rules:
-    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $KNACTION_CI_PROFILE == "llvm"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $LLVM_DAILY_CLEAN_SCHEDULE == "true" && $TARGET == "llvm"'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "llvm"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .github/workflows/build-llvm.yml
@@ -37,14 +45,15 @@
         - scripts/setup-repo-tool.sh
         - scripts/platform_package.sh
 
-# Same triggers as .llvm-build-rules but compile jobs are skipped unless KNACTION_LLVM_RUN_BUILD=true.
+# Same triggers as .llvm-build-rules but compile jobs are skipped when SKIP_LLVM_BUILD=true.
 # Only build:llvm:* jobs use this rule. Downstream merge/verify jobs use .llvm-build-rules and fall
 # back to the LAN artifact server when builds are skipped.
 .llvm-compile-job-rules:
   rules:
-    - if: '$KNACTION_LLVM_RUN_BUILD != "true"'
+    - if: '$SKIP_LLVM_BUILD == "true"'
       when: never
-    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $KNACTION_CI_PROFILE == "llvm"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $LLVM_DAILY_CLEAN_SCHEDULE == "true" && $TARGET == "llvm"'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "llvm"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .github/workflows/build-llvm.yml
@@ -100,26 +109,17 @@ build:llvm:linux:x64:
     - x64
   variables:
     FF_NETWORK_PER_BUILD: "false"
-  artifacts:
-    when: always
-    paths:
-      - .llvm-packages/
-    expire_in: 2 days
   script:
     - bash scripts/ci/llvm-build.sh linux
 
 # macOS shell legs: two explicit jobs (studio arm64, mini x64), no Docker `image` (see .llvm-linux-builder-image).
 # Three build jobs total: linux + mac arm64 + mac x64 (same matrix shape as GHA build-llvm.yml).
+# All build outputs uploaded to LAN artifact server (llvm-build.sh), no GitLab artifacts needed.
 .llvm-build-macos-common:
   extends:
     - .llvm-build-matrix-common
     - .llvm-compile-job-rules
   needs: []
-  artifacts:
-    when: always
-    paths:
-      - .llvm-packages/
-    expire_in: 2 days
 
 build:llvm:macos:arm64:
   extends: .llvm-build-macos-common
@@ -154,13 +154,10 @@ llvm:artifact-refs:
     - x64
   needs:
     - job: build:llvm:linux:x64
-      artifacts: true
       optional: true
     - job: build:llvm:macos:arm64
-      artifacts: true
       optional: true
     - job: build:llvm:macos:x64
-      artifacts: true
       optional: true
   script:
     - bash scripts/ci/llvm-artifact-refs.sh
@@ -181,15 +178,6 @@ llvm:cross-copy:
   needs:
     - job: llvm:artifact-refs
       artifacts: true
-    - job: build:llvm:linux:x64
-      artifacts: true
-      optional: true
-    - job: build:llvm:macos:arm64
-      artifacts: true
-      optional: true
-    - job: build:llvm:macos:x64
-      artifacts: true
-      optional: true
   timeout: 2h
   script:
     - bash scripts/ci/llvm-cross-copy.sh

@@ -2,7 +2,7 @@
 # Linux (Docker) + macOS (ARM64/X64) on self-hosted runners. Windows host toolchain is produced in the Linux build (packages/clang-dev-windows-x86_64.tar.gz) and merged in cross-copy.
 # Linux: runs inside OpenHarmony build env Docker image (empty `container.image` skips Docker; see actions/runner#265).
 # Incremental by default: workspace persists next to action checkout. Clean build wipes it first.
-# workflow_dispatch skip_build: three independent download-artifact-local pattern= calls (latest per OS via server); outer tars need not share the same llvm/act SHA.
+# workflow_dispatch skip_llvm_build: three independent download-artifact-local pattern= calls (latest per OS via server); outer tars need not share the same llvm/act SHA.
 # Repo sync uses public HTTPS remotes (or SSH where configured on the runner).
 
 name: Build LLVM
@@ -12,21 +12,26 @@ run-name: ${{ github.event.inputs.run_name || 'Build LLVM' }}
 on:
   workflow_dispatch:
     inputs:
-      clean_build:
-        description: 'Wipe workspace and build from scratch'
+      # Names align with GitLab CI variables in .gitlab-ci.yml (TARGET, SKIP_LLVM_BUILD, LLVM_CLEAN_BUILD, LLVM_VERSION).
+      target:
+        description: 'CI profile (GitLab TARGET). This workflow runs the LLVM pipeline only — use llvm.'
+        type: choice
+        default: llvm
+        options:
+          - llvm
+          - kotlin
+          - test-prepare-repo
+      skip_llvm_build:
+        description: 'When true, skip the compile matrix; cross-copy uses latest-per-OS llvm-packages outer tars from the artifact server'
         default: false
         type: boolean
-      skip_build:
-        description: 'Skip the compile matrix; cross-copy uses latest-per-OS llvm-packages outer tars from the artifact server (need not be the same build)'
+      llvm_clean_build:
+        description: 'When true, wipe the LLVM workspace and build from scratch (GitLab LLVM_CLEAN_BUILD)'
         default: false
         type: boolean
-      final_llvm_artifact_version:
-        description: 'Dev id for final OHOS LLVM artifacts (JetBrains-style). Linux/macOS publish llvm-<major>-<triple>-dev-<id>-run<run_id>.tar.gz, Windows publishes llvm-<major>-<triple>-dev-<id>-run<run_id>.zip; extracting yields one top-level dir llvm-<major>-<triple>-dev-<id> (no -run suffix on the folder).'
-        default: '203'
-        type: string
-      llvm_major_version:
-        description: 'LLVM major version segment in published names (matches CLANG_RESOURCE_VERSION / konan layout)'
-        default: '19'
+      llvm_version:
+        description: 'Dev / essentials id for final archive names (GitLab LLVM_VERSION)'
+        default: '204'
         type: string
       run_name:
         description: 'Custom title for this run (shown in Actions UI)'
@@ -56,14 +61,25 @@ env:
   OHOS_SYSROOT_CACHE_DIR: ~/gitlab-runner/cache
   # Upstream Kotlin/Native naming pattern (adapted here to dev-stem artifacts): https://download.jetbrains.com/kotlin/native/resources/llvm/<major>-<triple>/llvm-<major>-<triple>-essentials-<id>.tar.gz
   # Extracting yields a single top-level directory matching the dev stem (see ~/.konan/dependencies). Published LAN artifacts use ...-dev-<id>-run<run_id> (Linux/macOS .tar.gz, Windows .zip); inner dir stays ...-dev-<id>.
-  LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
-  LLVM_MAJOR_FOR_PACKAGE: ${{ github.event.inputs.llvm_major_version || '19' }}
 
 jobs:
+  assert-target-llvm:
+    name: Assert TARGET=llvm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check target (GitLab TARGET parity)
+        run: |
+          t="${{ github.event.inputs.target }}"
+          if [ "$t" != "llvm" ]; then
+            echo "::error::This workflow implements the LLVM pipeline only; set target=llvm. Got: $t"
+            exit 1
+          fi
+
   build:
     name: build (${{ matrix.runner[1] }}-${{ matrix.runner[2] }})
+    needs: [assert-target-llvm]
     # gh/API often pass booleans as the string "true"; accept both.
-    if: ${{ !(github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true')) }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_llvm_build == true || github.event.inputs.skip_llvm_build == 'true')) }}
     environment: env
     env:
       CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
@@ -107,7 +123,7 @@ jobs:
           else
             echo "$AP"
           fi
-          CLEAN_BUILD="${{ github.event.inputs.clean_build || 'false' }}"
+          CLEAN_BUILD="${{ github.event.inputs.llvm_clean_build || 'false' }}"
 
           if [ "$CLEAN_BUILD" = "true" ]; then
             # Wipe the entire Actions work dir for this repo (e.g. .../_work/kn-action), not just llvm/.
@@ -262,10 +278,11 @@ jobs:
         with:
           path: ${{ steps.archive.outputs.path }}
 
-  # When workflow_dispatch skip_build: three independent latest outer tars (pattern each via download-artifact-local); they need not share llvm/act SHA.
+  # When workflow_dispatch skip_llvm_build: three independent latest outer tars (pattern each via download-artifact-local); they need not share llvm/act SHA.
   resolve-packages-skip-build:
     name: Get latest artifacts names
-    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
+    needs: [assert-target-llvm]
+    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_llvm_build == true || github.event.inputs.skip_llvm_build == 'true') }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     env:
       CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
@@ -312,15 +329,15 @@ jobs:
           echo "- macOS ARM64: \`$(basename "${{ steps.dl_mac_arm.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- macOS X64: \`$(basename "${{ steps.dl_mac_x64.outputs.path }}")\`" >> "$GITHUB_STEP_SUMMARY"
 
-  # Outer llvm-packages tar basenames for cross-copy / tests (same triple from one build, or three independent latest when skip_build).
+  # Outer llvm-packages tar basenames for cross-copy / tests (same triple from one build, or three independent latest when skip_llvm_build).
   llvm-artifact-refs:
     name: Resolve artifact names
     needs: [build, resolve-packages-skip-build]
     if: ${{ always() && (needs.build.result == 'success' || needs['resolve-packages-skip-build'].result == 'success') }}
     runs-on: ubuntu-latest
     env:
-      # Only workflow_dispatch + skip_build uses pattern-resolved latest tars; never fall back when a real build failed.
-      SKIP_BUILD_LATEST: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_build == true || github.event.inputs.skip_build == 'true') }}
+      # Only workflow_dispatch + skip_llvm_build uses pattern-resolved latest tars; never fall back when a real build failed.
+      SKIP_BUILD_LATEST: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_llvm_build == true || github.event.inputs.skip_llvm_build == 'true') }}
     outputs:
       outer_linux_name: ${{ steps.pick.outputs.outer_linux_name }}
       outer_mac_arm_name: ${{ steps.pick.outputs.outer_mac_arm_name }}
@@ -340,7 +357,7 @@ jobs:
             echo "outer_mac_arm_name=llvm-packages-${L}_act-${A}_macOS_ARM64.tar" >> "$GITHUB_OUTPUT"
             echo "outer_mac_x64_name=llvm-packages-${L}_act-${A}_macOS_X64.tar" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::Build did not succeed; not using skip_build pattern-resolved artifacts (set skip_build only when intentionally skipping compile)."
+            echo "::error::Build did not succeed; not using skip_llvm_build pattern-resolved artifacts (set skip_llvm_build only when intentionally skipping compile)."
             exit 1
           fi
 
@@ -351,8 +368,7 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, llvm]
     env:
       CI_PROJECT_DIR: ${{ github.workspace }}/kn-action
-      LLVM_ESSENTIALS_ID: ${{ github.event.inputs.final_llvm_artifact_version || '200' }}
-      LLVM_MAJOR_FOR_PACKAGE: ${{ github.event.inputs.llvm_major_version || '19' }}
+      LLVM_VERSION: ${{ github.event.inputs.llvm_version || '204' }}
     outputs:
       archive_linux: ${{ steps.finalize.outputs.archive_linux }}
       archive_mac_arm64: ${{ steps.finalize.outputs.archive_mac_arm64 }}
@@ -395,8 +411,6 @@ jobs:
       - name: Extract outer tars, merge packages, and pack final artifacts
         id: finalize
         env:
-          CLANG_RESOURCE_VERSION: '19'
-          RUN_FINAL_PACKAGE: '1'
           COPYFILE_DISABLE: 1
         run: |
           set -euo pipefail
@@ -418,13 +432,9 @@ jobs:
           fi
           (
             cd staging
-            LLVM_MAJOR_FOR_PACKAGE="${LLVM_MAJOR_FOR_PACKAGE}" \
-            LLVM_ESSENTIALS_ID="${LLVM_ESSENTIALS_ID}" \
-            CI_PIPELINE_ID="${CI_PIPELINE_ID}" \
-            KNACTION_DOTENV_FILE="${GITHUB_OUTPUT}" \
-            KNACTION_STEP_SUMMARY="${GITHUB_STEP_SUMMARY}" \
-            RUN_FINAL_PACKAGE="${RUN_FINAL_PACKAGE}" \
-            CLANG_RESOURCE_VERSION="${CLANG_RESOURCE_VERSION}" \
+            export CI_PIPELINE_ID="${CI_PIPELINE_ID}"
+            export KNACTION_DOTENV_FILE="${GITHUB_OUTPUT}"
+            export KNACTION_STEP_SUMMARY="${GITHUB_STEP_SUMMARY}"
             bash "$CI_PROJECT_DIR/scripts/platform_package.sh"
           )
           # OHOS sysroot comes from deveco, hosted on maven, ohos-sysroot-dev.tar.gz isn't used.
@@ -675,7 +685,7 @@ jobs:
   hdc-ohos-verify:
     name: Execute test artifacts (${{ matrix.host_suffix }})
     needs: [ohos-test-build]
-    # always(): skip_build skips `build`; implicit success() would skip this job even when ohos-test-build matrix succeeds.
+    # always(): skip_llvm_build skips `build`; implicit success() would skip this job even when ohos-test-build matrix succeeds.
     if: ${{ always() && !cancelled() && needs['ohos-test-build'].result == 'success' }}
     runs-on: [self-hosted, macOS, ARM64, llvm]
     env:
