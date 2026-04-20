@@ -55,10 +55,11 @@ case "$PLATFORM" in
     ;;
 esac
 
-export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/llvm}"
-LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
 export REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 export MANIFEST_FILE="${MANIFEST_FILE:-llvm-1914.xml}"
+MANIFEST_BASENAME="${MANIFEST_FILE%.xml}"
+export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/llvm-${MANIFEST_BASENAME}}"
+LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
 
 if [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
   rm -rf "$LLVM_WORKSPACE"
