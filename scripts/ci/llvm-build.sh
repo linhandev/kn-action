@@ -57,8 +57,7 @@ esac
 
 export REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 export MANIFEST_FILE="${MANIFEST_FILE:-llvm-1914.xml}"
-MANIFEST_BASENAME="${MANIFEST_FILE%.xml}"
-export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/llvm-${MANIFEST_BASENAME}}"
+export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/${MANIFEST_FILE%.xml}}"
 LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
 
 if [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
@@ -85,7 +84,7 @@ if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]
   log_info "repo init (manifest=$MANIFEST_FILE from $MANIFEST_URL)"
   repo init -u "$MANIFEST_URL" -b main -m "$MANIFEST_FILE" $REFERENCE_FLAG
 else
-  log_warn "repo init skipped (.repo exists for manifest $MANIFEST_BASENAME)"
+  log_warn "repo init skipped (.repo exists for $MANIFEST_FILE)"
 fi
 
 export GIT_TERMINAL_PROMPT=0
