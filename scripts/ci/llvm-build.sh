@@ -208,7 +208,7 @@ cd "$LLVM_WORKSPACE"
 if [ -f "toolchain/llvm-project/llvm-build/build.sh" ]; then
   bash toolchain/llvm-project/llvm-build/build.sh
 elif [ -f "toolchain/llvm-project/llvm-build/build.py" ]; then
-  python3 toolchain/llvm-project/llvm-build/build.py
+  python3 toolchain/llvm-project/llvm-build/build.py --no-build-riscv64 --no-build-loongarch64 --no-build-mipsel --no-build lldb-server --compression-format gz
 else
   log_error "No build script found in toolchain/llvm-project/llvm-build/"
   exit 1
