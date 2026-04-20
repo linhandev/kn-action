@@ -1,6 +1,7 @@
 # Kotlin OH build — port of .github/workflows/build-kotlin.yml (GitLab matrix).
-# Web or API (e.g. glab ci run): set TARGET=kotlin (same idea as LLVM’s llvm profile).
+# Web or API (e.g. glab ci run): set TARGET=kotlin (same idea as LLVM's llvm profile).
 # Runners: kotlin + OS + arch (AGENTS.md). Requires GITCODE_SSH_PRIVATE_KEY for kotlin clone.
+# Trigger: changes to this file will run Kotlin build matrix.
 
 .kotlin-build-rules:
   rules:
