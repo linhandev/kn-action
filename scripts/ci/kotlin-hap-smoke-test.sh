@@ -80,6 +80,20 @@ BEFORE=""
 BEFORE="$("$HDC_BIN" -t "$HDC_TARGET" shell "ls -t /data/log/faultlog/faultlogger/" 2>/dev/null | tr -d '\r' | grep -F "$BUNDLE_NAME" | head -1 || true)"
 [[ -n "$BEFORE" ]] && log_info "Pre-run faultlog: $BEFORE"
 
+# --- DevEco environment setup ---
+# hvigor daemon can get into a corrupted state where worker threads' cwd becomes invalid,
+# causing "ENOENT: no such file or directory, uv_cwd" errors. Stop daemon and clear cache.
+DEVECO_STUDIO_DIR="${DEVECO_STUDIO_DIR:-/Applications/DevEco-Studio.app}"
+DEVECO_SDK_HOME="$DEVECO_STUDIO_DIR/Contents/sdk"
+NODE_HOME="$DEVECO_STUDIO_DIR/Contents/tools/node"
+export DEVECO_SDK_HOME NODE_HOME
+log_info "DevEco SDK: $DEVECO_SDK_HOME"
+
+# Stop any stale hvigor daemon processes to prevent uv_cwd errors in worker threads
+pkill -f 'hvigor' 2>/dev/null || true
+rm -rf ~/.hvigor/daemon/cache/*.json ~/.hvigor/project_caches/* 2>/dev/null || true
+log_info "Cleaned hvigor daemon cache"
+
 # --- build and run HAP ---
 log_info "Building and launching HAP..."
 if ! ./gradlew :kotlinApp:startHarmonyAppDebug --rerun-tasks --no-daemon; then
