@@ -12,7 +12,7 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 REPO_SCRIPT="$REPO_DIR/repo.py"
 REPO_WRAPPER="$REPO_DIR/repo"
-REPO_DOWNLOAD_URL="${REPO_DOWNLOAD_URL:-https://gitee.com/oschina/repo/raw/fork_flow/repo-py3}"
+REPO_DOWNLOAD_URL="${REPO_DOWNLOAD_URL:-https://storage.googleapis.com/gitlab-repo-tool/repo}"
 REPO_CACHE="${HOME}/gitlab-runner/cache/repo.py"
 
 mkdir -p "$REPO_DIR" "$(dirname "$REPO_CACHE")"
@@ -21,10 +21,23 @@ mkdir -p "$REPO_DIR" "$(dirname "$REPO_CACHE")"
 [ -f "$REPO_WRAPPER" ] && [ ! -f "$REPO_SCRIPT" ] && mv "$REPO_WRAPPER" "$REPO_SCRIPT"
 
 # Restore from persistent cache, or download once.
+# Force re-download if cached version lacks --standalone-manifest support.
+repo_has_standalone_manifest() {
+  $PY "$1" help init 2>&1 | grep -q "standalone-manifest" || return 1
+}
+
+if [ -f "$REPO_SCRIPT" ]; then
+  if ! repo_has_standalone_manifest "$REPO_SCRIPT"; then
+    echo "Cached repo lacks --standalone-manifest, re-downloading..."
+    rm -f "$REPO_SCRIPT" "$REPO_CACHE"
+  fi
+fi
+
 if [ ! -f "$REPO_SCRIPT" ]; then
-  if [ -f "$REPO_CACHE" ]; then
+  if [ -f "$REPO_CACHE" ] && repo_has_standalone_manifest "$REPO_CACHE"; then
     cp "$REPO_CACHE" "$REPO_SCRIPT"
   else
+    rm -f "$REPO_CACHE"
     curl -fSL -sS --connect-timeout 30 -o "$REPO_SCRIPT" "$REPO_DOWNLOAD_URL"
     cp "$REPO_SCRIPT" "$REPO_CACHE" 2>/dev/null || true
   fi
