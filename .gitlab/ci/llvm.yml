@@ -135,10 +135,6 @@ llvm:cross-copy:
     - job: build:llvm:macos:x64
       optional: true
       artifacts: true
-  rules:
-    - if: '$SKIP_BUILD_ALL == "true"'
-      when: never
-    - when: on_success
   timeout: 2h
   script:
     - bash scripts/ci/llvm-cross-copy.sh

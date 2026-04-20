@@ -8,6 +8,17 @@ source "$CI_PROJECT_DIR/llvm-build-linux.env"
 source "$CI_PROJECT_DIR/llvm-build-macos-arm64.env"
 source "$CI_PROJECT_DIR/llvm-build-macos-x64.env"
 
+SKIP_ALL=true
+grep -q "SKIP_BUILD=false" "$CI_PROJECT_DIR/llvm-build-linux.env" && SKIP_ALL=false
+grep -q "SKIP_BUILD=false" "$CI_PROJECT_DIR/llvm-build-macos-arm64.env" && SKIP_ALL=false
+grep -q "SKIP_BUILD=false" "$CI_PROJECT_DIR/llvm-build-macos-x64.env" && SKIP_ALL=false
+
+if [ "$SKIP_ALL" = "true" ]; then
+  log_info "All builds skipped; cross-copy not needed"
+  echo "SKIP_BUILD_ALL=true" > "$CI_PROJECT_DIR/cross-copy.env"
+  exit 0
+fi
+
 OUTER_LINUX_NAME="$(grep '^OUTER_NAME=' "$CI_PROJECT_DIR/llvm-build-linux.env" | cut -d= -f2 || true)"
 OUTER_MAC_ARM_NAME="$(grep '^OUTER_NAME=' "$CI_PROJECT_DIR/llvm-build-macos-arm64.env" | cut -d= -f2 || true)"
 OUTER_MAC_X64_NAME="$(grep '^OUTER_NAME=' "$CI_PROJECT_DIR/llvm-build-macos-x64.env" | cut -d= -f2 || true)"
