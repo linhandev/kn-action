@@ -12,7 +12,7 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 REPO_SCRIPT="$REPO_DIR/repo.py"
 REPO_WRAPPER="$REPO_DIR/repo"
-REPO_DOWNLOAD_URL="${REPO_DOWNLOAD_URL:-https://storage.googleapis.com/git-repo-downloads/repo}"
+REPO_DOWNLOAD_URL="${REPO_DOWNLOAD_URL:-https://gitee.com/oschina/repo/raw/fork_flow/repo-py3}"
 REPO_CACHE="${HOME}/gitlab-runner/cache/repo.py"
 
 mkdir -p "$REPO_DIR" "$(dirname "$REPO_CACHE")"
