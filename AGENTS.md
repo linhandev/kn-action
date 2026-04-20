@@ -161,7 +161,8 @@ GitLab and runners are **LAN-only**. URLs use the GitLab host’s **static LAN I
 | Item | Value |
 |------|--------|
 | **Web UI (LAN)** | `http://192.168.3.6:8929` |
-| **Web UI (public)** | `http://139.159.236.211:11000` — same instance, different route; both URLs work with **`glab`** |
+| **Web UI (public)** | `http://139.159.236.211:11000` — same instance, different route |
+| **`glab` CLI** | **Do NOT configure `GITLAB_HOST` or use `--hostname` flag** — the self-hosted GitLab serves HTTP, not HTTPS. Let `glab` use its default remote detection from the repo's `gl` remote URL (SSH `git@192.168.3.6:2222`). Commands like `glab ci status -R linhandev/kn-action` work without host overrides. |
 | **Git over SSH** | `git@192.168.3.6`, port **2222** (GitLab shell in Docker; host SSH stays **22**) |
 | **Deployment** | Docker **`gitlab/gitlab-ce`**, data under **`~/gitlab/`** on **`linux`** |
 | **Operator notes** | **`~/gitlab/SETUP.txt`** on **`linux`** — e.g. **`docker restart gitlab`**; initial root password via **`docker exec gitlab grep '^Password:' /etc/gitlab/initial_root_password`** |

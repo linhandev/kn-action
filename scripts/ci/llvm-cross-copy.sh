@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# Cross-copy job: download per-OS llvm/packages outer tars from LAN artifact server,
-# merge and run platform_package.sh (final archives).
+# Cross-copy job: download per-OS llvm/packages outer tars, merge and run platform_package.sh.
 set -euo pipefail
 : "${CI_PROJECT_DIR:?}"
-: "${OUTER_LINUX_NAME:?}"
-: "${OUTER_MAC_ARM_NAME:?}"
-: "${OUTER_MAC_X64_NAME:?}"
 source "$CI_PROJECT_DIR/scripts/ci/logging.sh"
+
+source "$CI_PROJECT_DIR/llvm-build-linux.env"
+source "$CI_PROJECT_DIR/llvm-build-macos-arm64.env"
+source "$CI_PROJECT_DIR/llvm-build-macos-x64.env"
+
+OUTER_LINUX_NAME="$(grep '^OUTER_NAME=' "$CI_PROJECT_DIR/llvm-build-linux.env" | cut -d= -f2 || true)"
+OUTER_MAC_ARM_NAME="$(grep '^OUTER_NAME=' "$CI_PROJECT_DIR/llvm-build-macos-arm64.env" | cut -d= -f2 || true)"
+OUTER_MAC_X64_NAME="$(grep '^OUTER_NAME=' "$CI_PROJECT_DIR/llvm-build-macos-x64.env" | cut -d= -f2 || true)"
+
+[ -n "$OUTER_LINUX_NAME" ] || { log_error "Missing OUTER_NAME in llvm-build-linux.env"; exit 1; }
+[ -n "$OUTER_MAC_ARM_NAME" ] || { log_error "Missing OUTER_NAME in llvm-build-macos-arm64.env"; exit 1; }
+[ -n "$OUTER_MAC_X64_NAME" ] || { log_error "Missing OUTER_NAME in llvm-build-macos-x64.env"; exit 1; }
 
 log_info "downloading outer tars from artifact server"
 echo "  Linux:       $OUTER_LINUX_NAME"
@@ -48,6 +56,9 @@ DOTENV="${CI_PROJECT_DIR}/cross-copy.env"
 : >"$DOTENV"
 export KNACTION_DOTENV_FILE="$DOTENV"
 export KNACTION_STEP_SUMMARY="${KNACTION_STEP_SUMMARY:-/dev/null}"
+
+export LLVM_SHA_SHORT ACT_SHA_SHORT MANIFEST_MD5
+
 (
   cd staging
   export COPYFILE_DISABLE=1
@@ -68,12 +79,13 @@ done
 
 FINAL_DIR="${CI_PROJECT_DIR}/.llvm-final-packages"
 mkdir -p "$FINAL_DIR"
-_SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
+SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
 for key in archive_linux archive_mac_arm64 archive_mac_x64 archive_windows; do
   cp "$WORK/staging/${!key}" "$FINAL_DIR/"
-  INPUT_PATH="$FINAL_DIR/${!key}" INPUT_SERVER_URL="$_SERVER" INPUT_CACHE_DIR="${HOME}/runner/artifact" \
+  INPUT_PATH="$FINAL_DIR/${!key}" INPUT_SERVER_URL="$SERVER" INPUT_CACHE_DIR="${HOME}/runner/artifact" \
+    INPUT_RETAIN_DAYS=14 \
     bash "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh"
-  log_info "final artifact: $_SERVER/artifacts/${!key}"
+  log_info "final artifact (14d): $SERVER/artifacts/${!key}"
 done
 
 echo "cross-copy.env (for downstream jobs):"
