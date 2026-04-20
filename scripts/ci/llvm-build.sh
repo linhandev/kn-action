@@ -74,16 +74,29 @@ log_info "setup-repo-tool"
 bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
 export PATH="$REPO_DIR:$PATH"
 
-if [ ! -d "$LLVM_WORKSPACE/.repo/manifests" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
+MANIFEST_URL="${MANIFEST_URL:-http://192.168.3.6:8929/linhandev/manifest.git}"
+
+repo_needs_init() {
+  [ ! -d "$LLVM_WORKSPACE/.repo/manifests" ] && return 0
+  [ "${LLVM_CLEAN_BUILD:-false}" = "true" ] && return 0
+  local current_manifest="$LLVM_WORKSPACE/.repo/manifest.xml"
+  [ ! -f "$current_manifest" ] && return 0
+  local llvm_rev=$(sed -n 's/.*name="third_party_llvm-project".*revision="\([^"]*\)".*/\1/p' "$current_manifest" 2>/dev/null || sed -n 's/.*name="mpcore-llvm-kmp".*revision="\([^"]*\)".*/\1/p' "$current_manifest" 2>/dev/null)
+  local expected_rev=$(sed -n 's/.*name="third_party_llvm-project".*revision="\([^"]*\)".*/\1/p' "$CI_PROJECT_DIR/manifest/$MANIFEST_FILE" 2>/dev/null || sed -n 's/.*name="mpcore-llvm-kmp".*revision="\([^"]*\)".*/\1/p' "$CI_PROJECT_DIR/manifest/$MANIFEST_FILE" 2>/dev/null)
+  [ -z "$llvm_rev" ] || [ -z "$expected_rev" ] && return 0
+  [ "$llvm_rev" != "$expected_rev" ] && return 0
+  return 1
+}
+
+if repo_needs_init; then
   cd "$LLVM_WORKSPACE"
   REFERENCE_FLAG=""
   ref_dir="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
   [ -d "$ref_dir" ] && REFERENCE_FLAG="--reference=$ref_dir"
-  MANIFEST_URL="${MANIFEST_URL:-http://192.168.3.6:8929/linhandev/manifest.git}"
   log_info "repo init (manifest=$MANIFEST_FILE from $MANIFEST_URL)"
   repo init -u "$MANIFEST_URL" -m "$MANIFEST_FILE" $REFERENCE_FLAG
 else
-  log_warn "repo init skipped (.repo valid, LLVM_CLEAN_BUILD not set)"
+  log_warn "repo init skipped (manifest unchanged)"
 fi
 
 export GIT_TERMINAL_PROMPT=0
