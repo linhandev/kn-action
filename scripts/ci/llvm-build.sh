@@ -98,6 +98,15 @@ if [ "$_lfs_rc" -ne 0 ]; then
   log_warn "repo forall git lfs pull exited $_lfs_rc; continuing without LFS objects"
 fi
 
+log_info "generating revision-locked manifest for cache signature"
+MANIFEST_LOCKED="$LLVM_WORKSPACE/.repo-manifest-locked.xml"
+repo manifest -r -o "$MANIFEST_LOCKED"
+SIGNATURE_MD5="$(md5sum "$MANIFEST_LOCKED" | awk '{print $1}' | cut -c1-16)"
+KN_ACTION_SHA="${CI_COMMIT_SHA:-$(git -C "$CI_PROJECT_DIR" rev-parse HEAD)}"
+KN_ACTION_SHA="${KN_ACTION_SHA:0:7}"
+LLVM_SIGNATURE="${SIGNATURE_MD5}_act-${KN_ACTION_SHA}"
+log_info "LLVM signature: $LLVM_SIGNATURE (manifest_md5=$SIGNATURE_MD5 kn_action=$KN_ACTION_SHA)"
+
 # env_prepare.sh downloads CMake, Ninja, Clang bootstrap, Python3 under prebuilts/.
 # Platform→subpath map matches env_prepare.sh layout and build.py platform_prefix().
 case "$PLATFORM" in
@@ -147,6 +156,8 @@ fi
 
 LLVM_SHA="$(git -C "$LLVM_PROJECT_DIR" rev-parse HEAD)"
 LLVM_SHA_SHORT="${LLVM_SHA:0:7}"
+log_info "llvm-project HEAD: $LLVM_SHA_SHORT"
+
 COMMIT_SHORT="${CI_COMMIT_SHA:0:7}"
 if [ -z "${COMMIT_SHORT// }" ]; then
   COMMIT_SHORT="$(git -C "$CI_PROJECT_DIR" rev-parse --short=7 HEAD 2>/dev/null || true)"
@@ -162,7 +173,7 @@ if [ ! -d "$PACKAGES_DIR" ] || [ -z "$(ls -A "$PACKAGES_DIR" 2>/dev/null)" ]; th
   exit 1
 fi
 
-ARCHIVE_NAME="llvm-packages-${LLVM_SHA_SHORT}_act-${COMMIT_SHORT}_${RUNNER_OS}_${RUNNER_ARCH}.tar"
+ARCHIVE_NAME="llvm-packages-${LLVM_SIGNATURE}_${RUNNER_OS}_${RUNNER_ARCH}.tar"
 GL_PKG_DIR="${CI_PROJECT_DIR}/.llvm-packages"
 mkdir -p "$GL_PKG_DIR"
 OUT_PATH="$GL_PKG_DIR/$ARCHIVE_NAME"
