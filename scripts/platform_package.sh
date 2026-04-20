@@ -18,13 +18,13 @@
 # Expects *.tar.gz blobs in cwd (staging).
 # CLANG_RESOURCE_VERSION must match lib/clang/<ver> (e.g. 19).
 # LLVM_MAJOR_FOR_PACKAGE and CLANG_RESOURCE_VERSION default here (override only for local/debug).
-# Produces versioned per-host archives (llvm-<ver>-…) named with LLVM_VERSION (dev id / essentials id).
+# Produces per-host archives named: llvm-<major>-<arch>-<os>-dev-oh-<OH_VERSION>.zip or .tar.gz
 
 set -euo pipefail
 
 : "${CLANG_RESOURCE_VERSION:=19}"
 : "${LLVM_MAJOR_FOR_PACKAGE:=19}"
-: "${LLVM_VERSION:=204}"
+: "${OH_VERSION:=1}"
 
 commit_id=""
 date="$(date '+%Y-%m-%dT%H:%M:%S')"
@@ -148,12 +148,12 @@ pack_host_tree() {
   mv "$source_dir" "$stem"
   _rid="${CI_PIPELINE_ID:-${KNACTION_PIPELINE_ID:-}}"
   if [ "$ext" = "zip" ]; then
-    archive="${stem}-run${_rid}.zip"
+    archive="${stem}-run${_rid}.${ext}"
     zip -qry "$archive" "$stem"
     first="$(unzip -Z1 "$archive" | head -1)"
     [ "$first" = "${stem}/" ] || { echo "::error::Expected first member ${stem}/, got $first"; exit 1; }
   else
-    archive="${stem}-run${_rid}.tar.gz"
+    archive="${stem}-run${_rid}.${ext}"
     if command -v pigz >/dev/null 2>&1; then
       tar -cf - "$stem" | pigz -9 > "$archive"
     else
@@ -168,10 +168,10 @@ pack_host_tree() {
 [ -n "${CI_PIPELINE_ID:-${KNACTION_PIPELINE_ID:-}}" ] || { echo "::error::CI_PIPELINE_ID or KNACTION_PIPELINE_ID is required"; exit 1; }
 [ -d "$clang_linux_x86_64" ] || { echo "::error::Missing linux clang tree $clang_linux_x86_64"; exit 1; }
 
-STEM_LINUX="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-dev-${LLVM_VERSION}"
-STEM_MAC_ARM64="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-dev-${LLVM_VERSION}"
-STEM_MAC_X64="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-dev-${LLVM_VERSION}"
-STEM_WINDOWS="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-windows-dev-${LLVM_VERSION}"
+STEM_LINUX="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-dev-oh-${OH_VERSION}"
+STEM_MAC_ARM64="llvm-${LLVM_MAJOR_FOR_PACKAGE}-aarch64-macos-dev-oh-${OH_VERSION}"
+STEM_MAC_X64="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-macos-dev-oh-${OH_VERSION}"
+STEM_WINDOWS="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-windows-dev-oh-${OH_VERSION}"
 
 ARCHIVE_LINUX="$(pack_host_tree "$clang_linux_x86_64" "$STEM_LINUX" "tar.gz")"
 ARCHIVE_MAC_ARM64="$(pack_host_tree "$clang_darwin_arm64" "$STEM_MAC_ARM64" "tar.gz")"
