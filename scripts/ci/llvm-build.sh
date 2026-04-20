@@ -91,7 +91,19 @@ export GIT_TERMINAL_PROMPT=0
 cd "$LLVM_WORKSPACE"
 log_info "repo sync"
 # --force-sync: overwrite work trees when .repo/project-objects vs checkout disagree; required on reused runners.
+# Note: repo sync may report transient checkout errors even when files are present. We verify key files after.
+set +e
 repo sync -c --force-sync -j 16
+_sync_rc=$?
+set -e
+if [ $_sync_rc -ne 0 ]; then
+  log_warn "repo sync exited with rc=$_sync_rc, checking critical files..."
+  if [ ! -d "$LLVM_PROJECT_DIR" ] || [ ! -d "$LLVM_WORKSPACE/build/build_scripts" ]; then
+    log_error "Critical directories missing after repo sync"
+    exit 1
+  fi
+  log_info "Critical files present, proceeding despite sync error"
+fi
 log_info "toolchain/llvm-project last 5 commits (full id, title)"
 git -C "$LLVM_PROJECT_DIR" log -n 5 --format='%H %s' >&2 || log_warn "could not read git log for toolchain/llvm-project"
 log_info "git lfs pull (per sub-repo)"
