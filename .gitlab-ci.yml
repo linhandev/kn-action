@@ -90,7 +90,7 @@ include:
 stages:
   - test
   - llvm_build
-  - llvm_merge
+  - llvm_artifact
   - llvm_verify
   - kotlin_build
   - kotlin_verify

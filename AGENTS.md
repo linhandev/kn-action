@@ -263,7 +263,69 @@ Exactly **three** tags: **`kotlin`**, **`llvm`**, or **`chore`** (one role only)
 
 ### Multiple pipelines in one GitLab project
 
-Use **`include:`** (e.g. **`.gitlab/ci/kotlin.yml`**, **`.gitlab/ci/llvm.yml`**), **`workflow:rules:`**, per-job **`rules:`**, and optional child pipelines.
+Use **`include:`** (e.g. **`.gitlab/ci/kotlin.yml`**, **`.gitlab/ci/llvm.yml`**), **`workflow:rules:``, per-job **`rules:`**, and optional child pipelines.
+
+### Build efficiency troubleshooting
+
+When build times are unexpectedly long or inconsistent across platforms, check these areas:
+
+#### ccache configuration
+
+LLVM builds use **ccache** for compiler output caching. Key points:
+
+| Platform | CCACHE_DIR | Notes |
+|----------|------------|-------|
+| **Linux (Docker)** | `/root/gitlab-runner/cache/llvm-ccache` | Hardcoded path; Docker HOME=/home/user but volumes mount to /root/... |
+| **macOS** | `$HOME/gitlab-runner/cache/llvm-ccache` | Normal expansion |
+
+**Docker ccache gotcha:** Container HOME differs from volume mount paths. If CCACHE_DIR uses `$HOME`, ccache falls back to `~/.ccache` (ephemeral, lost between builds). Always verify with `ccache -s` inside the container.
+
+#### Checking ccache effectiveness
+
+During or after LLVM builds, check hit rate:
+
+```bash
+# Linux: inside Docker container
+docker exec <container> ccache -s
+
+# macOS: on runner host
+ssh <host> 'ccache -s'
+```
+
+Target: **>50% hit rate** after first build on unchanged source. Low hit rate (<20%) indicates:
+- CCACHE_DIR not persisted (Docker volume misconfiguration)
+- Source changed significantly (expected)
+- ccache size limit too small
+
+#### Diagnosing slow builds
+
+1. **Check job duration** via GitLab API:
+   ```bash
+   glab api "projects/1/pipelines/<id>/jobs" | jq '.[] | select(.name | contains("llvm")) | {name, status, duration}'
+   ```
+
+2. **Compare across platforms** — Linux Docker vs macOS shell. Large disparities often indicate cache issues.
+
+3. **Verify volume mounts** on Linux runner:
+   ```bash
+   ssh linux 'cat ~/gitlab-runner/config/config.toml | grep -A5 "runners.docker"'
+   # Expected: volumes includes "/home/user/gitlab-runner/cache:/root/gitlab-runner/cache"
+   ```
+
+4. **Check ccache directory size**:
+   ```bash
+   ssh linux 'du -sh ~/gitlab-runner/cache/llvm-ccache/'
+   # Target: 3-5GB after several builds
+   ```
+
+#### Efficiency optimization checklist
+
+- [ ] ccache hit rate >50% on repeat builds
+- [ ] CCACHE_DIR persisted across jobs (Docker volumes, host directories)
+- [ ] ccache max_size >= 5G (configured in llvm-build.sh)
+- [ ] No "dubious ownership" git errors slowing repo sync
+
+When efficiency issues are found, update this section with the root cause and fix.
 
 ---
 

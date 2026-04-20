@@ -119,7 +119,7 @@ build:llvm:macos:x64:
 
 llvm:cross-copy:
   extends: .llvm-build-rules
-  stage: llvm_merge
+  stage: llvm_artifact
   tags:
     - chore
     - macos
@@ -150,7 +150,7 @@ llvm:cross-copy:
 
 llvm:provide-artifacts:
   extends: .llvm-build-rules
-  stage: llvm_merge
+  stage: llvm_artifact
   tags:
     - chore
     - linux

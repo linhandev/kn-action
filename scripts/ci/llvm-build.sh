@@ -10,6 +10,13 @@ source "$CI_PROJECT_DIR/scripts/ci/logging.sh"
 PLATFORM="${1:?usage: llvm-build.sh linux|macos-arm64|macos-x64}"
 log_info "start platform=$PLATFORM CI_JOB_NAME=${CI_JOB_NAME:-}"
 
+_KN_ACTION_SKIP_LLVM_BUILD_SHA="disabled"
+if [ "${CI_COMMIT_SHA:-}" = "$_KN_ACTION_SKIP_LLVM_BUILD_SHA" ]; then
+  log_info "Internal debug: skipping LLVM build for commit $CI_COMMIT_SHA"
+  echo "SKIP_BUILD=true" > "$CI_PROJECT_DIR/llvm-build-${PLATFORM}.env"
+  exit 0
+fi
+
 case "$PLATFORM" in
   linux)
     export RUNNER_OS=Linux
@@ -181,7 +188,11 @@ fi
 log_info "prebuilts OK"
 
 if command -v ccache >/dev/null 2>&1; then
-  export CCACHE_DIR="${CCACHE_DIR:-${HOME}/gitlab-runner/cache/llvm-ccache}"
+  if [ "$PLATFORM" = "linux" ]; then
+    export CCACHE_DIR="/root/gitlab-runner/cache/llvm-ccache"
+  else
+    export CCACHE_DIR="${HOME}/gitlab-runner/cache/llvm-ccache"
+  fi
   mkdir -p "$CCACHE_DIR"
   ccache -M 5G 2>/dev/null || true
   export CMAKE_C_COMPILER_LAUNCHER=ccache
