@@ -74,16 +74,16 @@ log_info "setup-repo-tool"
 bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
 export PATH="$REPO_DIR:$PATH"
 
-if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
+if [ ! -d "$LLVM_WORKSPACE/.repo/manifests" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
   cd "$LLVM_WORKSPACE"
   REFERENCE_FLAG=""
   ref_dir="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
   [ -d "$ref_dir" ] && REFERENCE_FLAG="--reference=$ref_dir"
-  MANIFEST_PATH="$CI_PROJECT_DIR/manifest/$MANIFEST_FILE"
-  log_info "repo init --standalone-manifest (manifest=$MANIFEST_FILE)"
-  repo init --standalone-manifest -u "file://$MANIFEST_PATH" $REFERENCE_FLAG
+  MANIFEST_URL="${MANIFEST_URL:-http://192.168.3.6:8929/linhandev/manifest.git}"
+  log_info "repo init (manifest=$MANIFEST_FILE from $MANIFEST_URL)"
+  repo init -u "$MANIFEST_URL" -m "$MANIFEST_FILE" $REFERENCE_FLAG
 else
-  log_warn "repo init skipped (.repo present, LLVM_CLEAN_BUILD not set)"
+  log_warn "repo init skipped (.repo valid, LLVM_CLEAN_BUILD not set)"
 fi
 
 export GIT_TERMINAL_PROMPT=0
