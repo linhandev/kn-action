@@ -290,10 +290,38 @@ else
 fi
 
 cd "$KOTLIN_ROOT"
-# Workaround: build-ohos.sh's cleanDependencyCache sometimes fails on macOS
-# when rm -rf hits a partially-locked gradle modules-2 directory.
+
+KONAN_PROXY_BASE="http://192.168.3.5:8080/file-storage"
+
+rewrite_konan_properties() {
+  local props_file="$1"
+  if [ -f "$props_file" ]; then
+    sed -i.bak \
+      -e "s|dependenciesUrl = https://maven\.eazytec-cloud\.com/nexus/repository/file-storage|dependenciesUrl = ${KONAN_PROXY_BASE}|g" \
+      -e "s|dependenciesUrl = https://download\.jetbrains\.com/kotlin/native|dependenciesUrl = ${KONAN_PROXY_BASE}|g" \
+      "$props_file"
+    echo "Rewrote konan.properties ($props_file)"
+  fi
+}
+
+for cand in \
+  "$CI_PROJECT_DIR/ci-workspace/kotlin-native/konan/konan.properties" \
+  "$KOTLIN_ROOT/native/konan.properties" \
+  "$KOTLIN_ROOT/konan/konan.properties" \
+  "$KOTLIN_ROOT/kotlin-native/konan/konan.properties"; do
+  [ -f "$cand" ] && rewrite_konan_properties "$cand"
+done
+
+BUILD_OHOS="$KOTLIN_ROOT/scripts/build-ohos.sh"
+if [ -f "$BUILD_OHOS" ]; then
+  awk '/^run_gradle --stop$/ { print; print "for f in ./kotlin-native/konan/konan.properties ./kotlin-native/dist/konan/konan.properties; do [ -f \"$f\" ] && sed -i.bak -e \"s|dependenciesUrl = https://maven.eazytec-cloud.com/nexus/repository/file-storage|dependenciesUrl = http://192.168.3.5:8080/file-storage|g\" -e \"s|dependenciesUrl = https://download.jetbrains.com/kotlin/native|dependenciesUrl = http://192.168.3.5:8080/file-storage|g\" \"$f\"; done"; next } { print }' "$BUILD_OHOS" > "$BUILD_OHOS.bak2" && mv "$BUILD_OHOS.bak2" "$BUILD_OHOS"
+fi
+
+rm -rf "$KOTLIN_ROOT/.gradle/configuration-cache" "$KOTLIN_ROOT/kotlin-native/.gradle/configuration-cache" 2>/dev/null || true
+
 sed -i.bak 's#rm -rf "\$gradleHome/caches/modules-2"#rm -rf "\$gradleHome/caches/modules-2" 2>/dev/null || true#' scripts/build-ohos.sh
 bash scripts/build-ohos.sh
+
 ./gradlew --stop
 
 # --- promote clean cache ---
