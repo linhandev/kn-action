@@ -25,6 +25,16 @@ set -euo pipefail
 : "${CLANG_RESOURCE_VERSION:=19}"
 : "${LLVM_MAJOR_FOR_PACKAGE:=19}"
 : "${OH_VERSION:=1}"
+: "${LLVM_SHA_SHORT:=}"
+: "${ACT_SHA_SHORT:=}"
+: "${MANIFEST_MD5:=}"
+
+if [ -z "$LLVM_SHA_SHORT" ] || [ -z "$ACT_SHA_SHORT" ] || [ -z "$MANIFEST_MD5" ]; then
+  echo "::error::LLVM_SHA_SHORT, ACT_SHA_SHORT, and MANIFEST_MD5 must be set"
+  exit 1
+fi
+
+ID_SUFFIX="_llvm-${LLVM_SHA_SHORT}_act-${ACT_SHA_SHORT}_manifest-${MANIFEST_MD5}"
 
 commit_id=""
 date="$(date '+%Y-%m-%dT%H:%M:%S')"
@@ -146,14 +156,12 @@ pack_host_tree() {
   local archive
   [ -d "$source_dir/bin" ] || { echo "::error::Expected $source_dir/bin"; ls -la "$source_dir"; exit 1; }
   mv "$source_dir" "$stem"
-  _rid="${CI_PIPELINE_ID:-${KNACTION_PIPELINE_ID:-}}"
+  archive="${stem}${ID_SUFFIX}.${ext}"
   if [ "$ext" = "zip" ]; then
-    archive="${stem}-run${_rid}.${ext}"
     zip -qry "$archive" "$stem"
     first="$(unzip -Z1 "$archive" | head -1)"
     [ "$first" = "${stem}/" ] || { echo "::error::Expected first member ${stem}/, got $first"; exit 1; }
   else
-    archive="${stem}-run${_rid}.${ext}"
     if command -v pigz >/dev/null 2>&1; then
       tar -cf - "$stem" | pigz -9 > "$archive"
     else
@@ -165,7 +173,6 @@ pack_host_tree() {
   printf '%s' "$archive"
 }
 
-[ -n "${CI_PIPELINE_ID:-${KNACTION_PIPELINE_ID:-}}" ] || { echo "::error::CI_PIPELINE_ID or KNACTION_PIPELINE_ID is required"; exit 1; }
 [ -d "$clang_linux_x86_64" ] || { echo "::error::Missing linux clang tree $clang_linux_x86_64"; exit 1; }
 
 STEM_LINUX="llvm-${LLVM_MAJOR_FOR_PACKAGE}-x86_64-linux-dev-oh-${OH_VERSION}"

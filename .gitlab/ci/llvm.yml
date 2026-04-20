@@ -1,20 +1,14 @@
-# Ported from .github/workflows/build-llvm.yml (build → llvm-artifact-refs → cross-copy → ohos-test → hdc).
+# LLVM pipeline: build → cross-copy (if builds ran) → provide-artifacts → test
 #
 # Web + MR + scheduled clean for LLVM (no branch push pipeline; see root .gitlab-ci.yml workflow).
-# Web: set TARGET=llvm for LLVM-only (no prepare-repo matrix).
-# Schedule: set TARGET=llvm and LLVM_DAILY_CLEAN_SCHEDULE=true on the pipeline schedule; optional cron example in root .gitlab-ci.yml.
-#
-# By default build:llvm:* runs (SKIP_LLVM_BUILD=false). Set SKIP_LLVM_BUILD=true to skip compile;
-# downstream merge/verify jobs fall back to the latest outer tars from the LAN artifact server
-# (scripts/ci/llvm-artifact-refs.sh).
+# Build jobs check artifact server for cached final artifacts; skip compile if found.
+# Cross-copy runs only when at least one build job compiled (not skipped).
+# provide-artifacts aggregates final artifact names for downstream test jobs.
 
 .llvm-build-matrix-common:
-  stage: build # TODO: change to build-llvm
-  # true so workflow:auto_cancel:on_new_commit:interruptible can stop in-flight builds when the MR gets a new commit.
+  stage: llvm_build
   interruptible: true
   timeout: 6h
-  # Same as scripts/ci/llvm-build.sh default and GHA build-llvm.yml: repo init --reference when present.
-  # Use before_script so $HOME expands (GitLab variables: do not expand $HOME reliably).
   before_script:
     - |
       if [ "$CI_PIPELINE_SOURCE" = "schedule" ] && [ "${LLVM_DAILY_CLEAN_SCHEDULE:-}" = "true" ]; then
@@ -24,9 +18,8 @@
   variables:
     GIT_STRATEGY: fetch
     GIT_DEPTH: "0"
-    # Exclude llvm/ (repo sync tree, prebuilts, build output) and bin/ (repo tool) from git clean
-    # so incremental builds reuse the workspace. -e excludes matching paths from removal.
     GIT_CLEAN_FLAGS: "-ffd -e llvm/ -e bin/"
+    MANIFEST_FILE: "$LLVM_MANIFEST"
 
 .llvm-build-rules:
   rules:
@@ -39,42 +32,18 @@
         - .gitlab/ci/llvm.yml
         - .gitlab/ci/prepare-repo.yml
         - scripts/ci/llvm-build.sh
-        - scripts/ci/llvm-artifact-refs.sh
         - scripts/ci/llvm-cross-copy.sh
-        - scripts/ci/ohos-test-build.sh
-        - scripts/ci/hdc-verify-all.sh
-        - scripts/setup-repo-tool.sh
-        - scripts/platform_package.sh
-
-# Same triggers as .llvm-build-rules but compile jobs are skipped when SKIP_LLVM_BUILD=true.
-# Only build:llvm:* jobs use this rule. Downstream merge/verify jobs use .llvm-build-rules and fall
-# back to the LAN artifact server when builds are skipped.
-.llvm-compile-job-rules:
-  rules:
-    - if: '$SKIP_LLVM_BUILD == "true"'
-      when: never
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $LLVM_DAILY_CLEAN_SCHEDULE == "true" && $TARGET == "llvm"'
-    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "llvm"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes:
-        - .github/workflows/build-llvm.yml
-        - .gitlab-ci.yml
-        - .gitlab/ci/llvm.yml
-        - .gitlab/ci/prepare-repo.yml
-        - scripts/ci/llvm-build.sh
-        - scripts/ci/llvm-artifact-refs.sh
-        - scripts/ci/llvm-cross-copy.sh
+        - scripts/ci/llvm-provide-artifacts.sh
         - scripts/ci/ohos-test-build.sh
         - scripts/ci/hdc-verify-all.sh
         - scripts/setup-repo-tool.sh
         - scripts/platform_package.sh
 
 sync:llvm:origin-to-gl:
-  stage: test
+  stage: llvm_build
   interruptible: true
   timeout: 30m
   rules:
-    # Disabled temporarily (re-enable schedule/web llvm-sync workflow in root .gitlab-ci.yml too).
     - when: never
   tags:
     - kotlin
@@ -87,22 +56,15 @@ sync:llvm:origin-to-gl:
   script:
     - bash scripts/ci/llvm-sync-origin-to-gl.sh
 
-# Linux Docker image (pin matches infra/docker/Dockerfile). Prefer local cache: avoid runner default
-# pull_policy=always (re-pull every job). If a runner rejects non-default policies, set
-# [runners.docker] pull_policy = ["if-not-present"] on llvm-linux-x64 or allow the job keyword.
-# Runner config.toml must bind-mount ~/gitlab-runner/cache into the container (ccache, sysroot).
-# Only set to docker execution legs.
 .llvm-linux-builder-image:
   image:
     name: ghcr.io/linhandev/kn-action-linux-llvm-builder:bc3de27
     pull_policy: if-not-present
 
-# Linux Docker is its own job (image, FF_*) — do not mix with macOS shell legs in one matrix.
-# FF_NETWORK_PER_BUILD=true isolates each job on a bridge that often cannot reach LAN GitCode.
 build:llvm:linux:x64:
   extends:
     - .llvm-build-matrix-common
-    - .llvm-compile-job-rules
+    - .llvm-build-rules
     - .llvm-linux-builder-image
   needs: []
   tags:
@@ -113,14 +75,17 @@ build:llvm:linux:x64:
     FF_NETWORK_PER_BUILD: "false"
   script:
     - bash scripts/ci/llvm-build.sh linux
+  artifacts:
+    paths:
+      - llvm-build-linux.env
+    reports:
+      dotenv: llvm-build-linux.env
+    expire_in: 2 days
 
-# macOS shell legs: two explicit jobs (studio arm64, mini x64), no Docker `image` (see .llvm-linux-builder-image).
-# Three build jobs total: linux + mac arm64 + mac x64 (same matrix shape as GHA build-llvm.yml).
-# All build outputs uploaded to LAN artifact server (llvm-build.sh), no GitLab artifacts needed.
 .llvm-build-macos-common:
   extends:
     - .llvm-build-matrix-common
-    - .llvm-compile-job-rules
+    - .llvm-build-rules
   needs: []
 
 build:llvm:macos:arm64:
@@ -131,25 +96,62 @@ build:llvm:macos:arm64:
     - arm64
   script:
     - bash scripts/ci/llvm-build.sh macos-arm64
+  artifacts:
+    paths:
+      - llvm-build-macos-arm64.env
+    reports:
+      dotenv: llvm-build-macos-arm64.env
+    expire_in: 2 days
 
 build:llvm:macos:x64:
-  extends:
-    - .llvm-build-macos-common
+  extends: .llvm-build-macos-common
   tags:
     - llvm
     - macos
     - x64
   script:
     - bash scripts/ci/llvm-build.sh macos-x64
+  artifacts:
+    paths:
+      - llvm-build-macos-x64.env
+    reports:
+      dotenv: llvm-build-macos-x64.env
+    expire_in: 2 days
 
-# --- merge outer tars (llvm-artifact-refs + cross-copy) ---
-#
-# artifact-refs and cross-copy run on chore runners (lightweight, concurrent=2).
-# Build jobs stay on llvm runners (heavyweight, concurrent=1).
-
-llvm:artifact-refs:
+llvm:cross-copy:
   extends: .llvm-build-rules
-  stage: llvm_merge
+  stage: llvm_artifact
+  tags:
+    - chore
+    - macos
+    - arm64
+  needs:
+    - job: build:llvm:linux:x64
+      optional: true
+      artifacts: true
+    - job: build:llvm:macos:arm64
+      optional: true
+      artifacts: true
+    - job: build:llvm:macos:x64
+      optional: true
+      artifacts: true
+  rules:
+    - if: '$SKIP_BUILD_ALL == "true"'
+      when: never
+    - when: on_success
+  timeout: 2h
+  script:
+    - bash scripts/ci/llvm-cross-copy.sh
+  artifacts:
+    paths:
+      - cross-copy.env
+    reports:
+      dotenv: cross-copy.env
+    expire_in: 2 days
+
+llvm:provide-artifacts:
+  extends: .llvm-build-rules
+  stage: llvm_artifact
   tags:
     - chore
     - linux
@@ -157,38 +159,24 @@ llvm:artifact-refs:
   needs:
     - job: build:llvm:linux:x64
       optional: true
+      artifacts: true
     - job: build:llvm:macos:arm64
       optional: true
+      artifacts: true
     - job: build:llvm:macos:x64
       optional: true
-  script:
-    - bash scripts/ci/llvm-artifact-refs.sh
-  artifacts:
-    reports:
-      dotenv: llvm-artifact-refs.env
-    expire_in: 2 days
-
-# Cross-copy merges outer tars and runs platform_package.sh; it does not execute the built LLVM
-# toolchain. Pinned to macOS arm64 (studio) for native tar handling of macOS extended attributes.
-llvm:cross-copy:
-  extends: .llvm-build-rules
-  stage: llvm_merge
-  tags:
-    - chore
-    - macos
-    - arm64
-  needs:
-    - job: llvm:artifact-refs
       artifacts: true
-  timeout: 2h
+    - job: llvm:cross-copy
+      optional: true
+      artifacts: true
   script:
-    - bash scripts/ci/llvm-cross-copy.sh
+    - bash scripts/ci/llvm-provide-artifacts.sh
   artifacts:
+    paths:
+      - llvm-artifacts.env
     reports:
-      dotenv: cross-copy.env
-    expire_in: 1 week
-
-# --- OHOS compile smoke per host (GHA ohos-test-build) ---
+      dotenv: llvm-artifacts.env
+    expire_in: 2 days
 
 .ohos-build-test-common:
   extends: .llvm-build-rules
@@ -196,7 +184,7 @@ llvm:cross-copy:
   interruptible: true
   timeout: 45m
   needs:
-    - job: llvm:cross-copy
+    - job: llvm:provide-artifacts
       artifacts: true
   variables:
     OHOS_SYSROOT: sysroot-ohos-aarch64-6.0.2.640-02

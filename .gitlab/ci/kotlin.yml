@@ -26,10 +26,14 @@
         - .github/actions/download-artifact-local/**/*
 
 .kotlin-build-common:
-  stage: build
+  stage: kotlin_build
   interruptible: true
   timeout: 6h
   extends: .kotlin-build-rules
+  needs:
+    - job: ohos:execute:macos-arm64
+      optional: true
+      artifacts: false
   variables:
     GIT_STRATEGY: fetch
     GIT_DEPTH: "0"
@@ -58,7 +62,6 @@
 
 build:kotlin:macos:arm64:
   extends: .kotlin-build-common
-  needs: []
   tags:
     - kotlin
     - macos

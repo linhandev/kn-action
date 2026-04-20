@@ -8,18 +8,21 @@ spec:
         - "kotlin"
         - "test-prepare-repo"
       description: "Select CI profile to run"
-    skip_llvm_build:
-      type: boolean
-      default: false
-      description: "When true, skip the three build:llvm:* compile jobs (cross-copy uses artifact server)."
     llvm_clean_build:
       type: boolean
       default: false
-      description: "When true, wipe the LLVM workspace before building (forces full rebuild)."
+      description: "When true, wipe the LLVM workspace before building (forces full rebuild, skips cache check)."
     llvm_version:
       type: string
       default: "204"
       description: "Dev / essentials id for final archive naming (platform_package.sh)."
+    llvm_manifest:
+      type: string
+      default: "llvm-1914.xml"
+      options:
+        - "llvm-1914.xml"
+        - "llvm-1917.xml"
+      description: "Manifest file for LLVM repo sync (llvm-1914.xml = KMP LLVM 19.1.4, llvm-1917.xml = OH LLVM 19.1.7)"
 ---
 # GitLab CI — kn-action (LAN). Runner fleet: AGENTS.md → "Four-host runner matrix".
 # prepare-repo tests: Kotlin runners only, three tags each (kotlin + OS + arch).
@@ -38,9 +41,9 @@ spec:
 
 variables:
   TARGET: "$[[ inputs.target ]]"
-  SKIP_LLVM_BUILD: "$[[ inputs.skip_llvm_build ]]"
   LLVM_CLEAN_BUILD: "$[[ inputs.llvm_clean_build ]]"
   LLVM_VERSION: "$[[ inputs.llvm_version ]]"
+  LLVM_MANIFEST: "$[[ inputs.llvm_manifest ]]"
 
 workflow:
   # Cancel jobs from the previous pipeline on the same branch when a new commit lands (e.g. MR updates).
@@ -65,8 +68,8 @@ workflow:
         - .gitlab/ci/llvm.yml
         - .gitlab/ci/prepare-repo.yml
         - scripts/ci/llvm-build.sh
-        - scripts/ci/llvm-artifact-refs.sh
         - scripts/ci/llvm-cross-copy.sh
+        - scripts/ci/llvm-provide-artifacts.sh
         - scripts/ci/ohos-test-build.sh
         - scripts/ci/hdc-verify-all.sh
         - scripts/setup-repo-tool.sh
@@ -94,8 +97,8 @@ include:
 
 stages:
   - test
-  - build
-  - kotlin_verify
-  - llvm_merge
+  - llvm_build
+  - llvm_artifact
   - llvm_verify
-
+  - kotlin_build
+  - kotlin_verify

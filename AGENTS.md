@@ -8,7 +8,7 @@ This file is for humans and coding agents working on **kn-action**: **GitLab CI*
 
 - **Orchestration**: Pipelines clone upstream repos (mostly **GitCode**), run long builds, and publish results; primary CI entry is **`.gitlab-ci.yml`** (expand with **`include:`** as Kotlin/LLVM jobs land).
 - **Kotlin / OH**: Building **Kotlin for OpenHarmony** via `scripts/build-ohos.sh` and repo prep through [`.github/actions/prepare-repo`](.github/actions/prepare-repo/README.md) (invoked from CI scripts; path is historical).
-- **LLVM / OH**: Google **repo** + a manifest on GitCode to sync an OH LLVM workspace, then OH build scripts; Linux LLVM builds typically use a **Docker** image built from [`infra/docker/Dockerfile`](infra/docker/Dockerfile).
+- **LLVM / OH**: Google **repo** with `--standalone-manifest` using manifest files in `manifest/` directory (llvm-1914.xml, llvm-1917.xml) to sync an OH LLVM workspace; Linux LLVM builds typically use a **Docker** image built from [`infra/docker/Dockerfile`](infra/docker/Dockerfile).
 - **Local artifacts**: Large outputs use **`~/runner/artifact`** and the LAN artifact server; **`upload-artifact-local` / `download-artifact-local`** composite actions implement the same contract for any CI that calls their shell scripts with the variables below.
 
 ---
@@ -126,8 +126,9 @@ Keep these in mind when changing **`scripts/`** or CI:
 **LLVM**
 
 - Produce OH-oriented **`llvm/packages`** on **macOS**, **Linux** (Docker), and validate **Windows** packages as needed.
+- **Manifest selection**: CI input `llvm_manifest` selects manifest file from `manifest/` directory. Options: `llvm-1914.xml` (KMP LLVM 19.1.4 from `linhandev/mpcore-llvm-kmp`), `llvm-1917.xml` (OH LLVM 19.1.7 from `openharmony/third_party_llvm-project`). Uses `repo init --standalone-manifest` with `file://` path; no separate manifest git repo needed.
 - **Persistent LLVM workspace** under the job checkout when not cleaning; **`~/gitlab-runner/cache`** for sysroot/ccache, not the main monorepo tree.
-- **ccache** is configured inline in [**`scripts/ci/llvm-build.sh`**](scripts/ci/llvm-build.sh): exports `CMAKE_{C,CXX}_COMPILER_LAUNCHER=ccache` (CMake 3.21+ reads these from env; OH `build.py` never sets them via `-D`). Default `CCACHE_DIR=${CCACHE_DIR:-~/gitlab-runner/cache/llvm-ccache}`, `max_size=50G`. CI jobs or `config.toml` can pre-set `CCACHE_DIR` when `$HOME` inside the container differs from the host (Docker root → `/root/…`). Docker runners must bind-mount **`~/gitlab-runner/cache`** into the container at the path matching the container's `$HOME`.
+- **ccache** is configured inline in [**`scripts/ci/llvm-build.sh`**](scripts/ci/llvm-build.sh): exports `CMAKE_{C,CXX}_COMPILER_LAUNCHER=ccache` (CMake 3.21+ reads these from env; OH `build.py` never sets them via `-D`). Default `CCACHE_DIR=${CCACHE_DIR:-~/gitlab-runner/cache/llvm-ccache}`, `max_size=10G`. CI jobs or `config.toml` can pre-set `CCACHE_DIR` when `$HOME` inside the container differs from the host (Docker root → `/root/…`). Docker runners must bind-mount **`~/gitlab-runner/cache`** into the container at the path matching the container's `$HOME`.
 - **Conditional `env_prepare`** when the tree lacks bootstrap markers.
 - **Repo** via [**`scripts/setup-repo-tool.sh`**](scripts/setup-repo-tool.sh) (Windows wrapper for **`python`**).
 - **Artifacts** and **`platform_package.sh`** naming aligned with Konan dependency layout (flattened host trees in published tarballs/zip).
@@ -161,7 +162,8 @@ GitLab and runners are **LAN-only**. URLs use the GitLab host’s **static LAN I
 | Item | Value |
 |------|--------|
 | **Web UI (LAN)** | `http://192.168.3.6:8929` |
-| **Web UI (public)** | `http://139.159.236.211:11000` — same instance, different route; both URLs work with **`glab`** |
+| **Web UI (public)** | `http://139.159.236.211:11000` — same instance, different route |
+| **`glab` CLI** | **Do NOT configure `GITLAB_HOST` or use `--hostname` flag** — the self-hosted GitLab serves HTTP, not HTTPS. Let `glab` use its default remote detection from the repo's `gl` remote URL (SSH `git@192.168.3.6:2222`). Commands like `glab ci status -R linhandev/kn-action` work without host overrides. |
 | **Git over SSH** | `git@192.168.3.6`, port **2222** (GitLab shell in Docker; host SSH stays **22**) |
 | **Deployment** | Docker **`gitlab/gitlab-ce`**, data under **`~/gitlab/`** on **`linux`** |
 | **Operator notes** | **`~/gitlab/SETUP.txt`** on **`linux`** — e.g. **`docker restart gitlab`**; initial root password via **`docker exec gitlab grep '^Password:' /etc/gitlab/initial_root_password`** |
@@ -262,7 +264,72 @@ Exactly **three** tags: **`kotlin`**, **`llvm`**, or **`chore`** (one role only)
 
 ### Multiple pipelines in one GitLab project
 
-Use **`include:`** (e.g. **`.gitlab/ci/kotlin.yml`**, **`.gitlab/ci/llvm.yml`**), **`workflow:rules:`**, per-job **`rules:`**, and optional child pipelines.
+Use **`include:`** (e.g. **`.gitlab/ci/kotlin.yml`**, **`.gitlab/ci/llvm.yml`**), **`workflow:rules:``, per-job **`rules:`**, and optional child pipelines.
+
+### Build efficiency troubleshooting
+
+When build times are unexpectedly long or inconsistent across platforms, check these areas:
+
+#### ccache configuration
+
+LLVM builds use **ccache** for compiler output caching. Key points:
+
+| Platform | CCACHE_DIR | Cache Size | Notes |
+|----------|------------|------------|-------|
+| **Linux (Docker)** | `/root/gitlab-runner/cache/llvm-ccache` | ~4-5GB | Hardcoded path; Docker HOME=/home/user but volumes mount to /root/... |
+| **macOS (studio)** | `$HOME/gitlab-runner/cache/llvm-ccache` | ~1GB | Normal expansion |
+| **macOS (mini)** | `$HOME/gitlab-runner/cache/llvm-ccache` | ~1GB | Normal expansion |
+
+**Docker ccache gotcha:** Container HOME differs from volume mount paths. If CCACHE_DIR uses `$HOME`, ccache falls back to `~/.ccache` (ephemeral, lost between builds). Always verify with `ccache -s` inside the container.
+
+**ccache internal errors:** `compile failed` and `preprocessor error` in ccache stats are normal for LLVM builds (config probes, try-compiles). They don't affect build success.
+
+#### Checking ccache effectiveness
+
+During or after LLVM builds, check hit rate:
+
+```bash
+# Linux: inside Docker container
+docker exec <container> ccache -s
+
+# macOS: on runner host
+ssh <host> 'ccache -s'
+```
+
+Target: **>50% hit rate** after first build on unchanged source. Low hit rate (<20%) indicates:
+- CCACHE_DIR not persisted (Docker volume misconfiguration)
+- Source changed significantly (expected)
+- ccache size limit too small
+
+#### Diagnosing slow builds
+
+1. **Check job duration** via GitLab API:
+   ```bash
+   glab api "projects/1/pipelines/<id>/jobs" | jq '.[] | select(.name | contains("llvm")) | {name, status, duration}'
+   ```
+
+2. **Compare across platforms** — Linux Docker vs macOS shell. Large disparities often indicate cache issues.
+
+3. **Verify volume mounts** on Linux runner:
+   ```bash
+   ssh linux 'cat ~/gitlab-runner/config/config.toml | grep -A5 "runners.docker"'
+   # Expected: volumes includes "/home/user/gitlab-runner/cache:/root/gitlab-runner/cache"
+   ```
+
+4. **Check ccache directory size**:
+   ```bash
+   ssh linux 'du -sh ~/gitlab-runner/cache/llvm-ccache/'
+   # Target: 3-5GB after several builds
+   ```
+
+#### Efficiency optimization checklist
+
+- [ ] ccache hit rate >50% on repeat builds
+- [ ] CCACHE_DIR persisted across jobs (Docker volumes, host directories)
+- [ ] ccache max_size >= 5G (configured in llvm-build.sh)
+- [ ] No "dubious ownership" git errors slowing repo sync
+
+When efficiency issues are found, update this section with the root cause and fix.
 
 ---
 
