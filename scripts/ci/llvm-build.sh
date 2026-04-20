@@ -76,7 +76,7 @@ export PATH="$REPO_DIR:$PATH"
 
 MANIFEST_URL="${MANIFEST_URL:-http://192.168.3.6:8929/linhandev/manifest.git}"
 
-if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
+if [ ! -d "$LLVM_WORKSPACE/.repo/repo" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
   cd "$LLVM_WORKSPACE"
   REFERENCE_FLAG=""
   ref_dir="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
