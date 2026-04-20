@@ -4,6 +4,7 @@ path="$INPUT_PATH"
 name="$(basename "$path")"
 server_url="${INPUT_SERVER_URL%/}"
 cache_dir="${INPUT_CACHE_DIR/#\~/$HOME}"
+retain_days="${INPUT_RETAIN_DAYS:-2}"
 
 if [ ! -f "$path" ]; then
   echo "::error::File not found: $path"
@@ -70,6 +71,7 @@ echo "Uploading to $server_url/upload ..."
 code=$(curl -sS -w '%{http_code}' -o /tmp/upload-artifact-local.out \
   -X POST \
   -F "file=@$path" \
+  -F "retain_days=$retain_days" \
   "$server_url/upload")
 if [ "$code" != "200" ]; then
   msg="$(cat /tmp/upload-artifact-local.out 2>/dev/null)"
@@ -84,5 +86,5 @@ download_url="${server_url}/artifacts/${name}"
 if [ -n "${KNACTION_DOTENV_FILE:-}" ]; then
   echo "download_url=$download_url" >>"$KNACTION_DOTENV_FILE"
 fi
-echo "Uploaded artifact: $name"
+echo "Uploaded artifact: $name (retain_days=$retain_days)"
 echo "Download: $download_url"
