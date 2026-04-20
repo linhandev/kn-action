@@ -94,7 +94,7 @@ if repo_needs_init; then
   ref_dir="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
   [ -d "$ref_dir" ] && REFERENCE_FLAG="--reference=$ref_dir"
   log_info "repo init (manifest=$MANIFEST_FILE from $MANIFEST_URL)"
-  repo init -u "$MANIFEST_URL" -m "$MANIFEST_FILE" $REFERENCE_FLAG
+  repo init -u "$MANIFEST_URL" -b main -m "$MANIFEST_FILE" $REFERENCE_FLAG
 else
   log_warn "repo init skipped (manifest unchanged)"
 fi
