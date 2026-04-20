@@ -88,6 +88,7 @@ include:
   - local: .gitlab/ci/kotlin.yml
 
 stages:
+  - test
   - llvm_build
   - llvm_merge
   - llvm_verify
