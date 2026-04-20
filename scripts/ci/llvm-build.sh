@@ -203,9 +203,16 @@ if command -v ccache >/dev/null 2>&1; then
   log_info "ccache enabled: CCACHE_DIR=$CCACHE_DIR  max_size=$(ccache -p 2>/dev/null | grep max_size | head -1)"
 fi
 
-log_info "running build.sh"
+log_info "running build"
 cd "$LLVM_WORKSPACE"
-bash toolchain/llvm-project/llvm-build/build.sh
+if [ -f "toolchain/llvm-project/llvm-build/build.sh" ]; then
+  bash toolchain/llvm-project/llvm-build/build.sh
+elif [ -f "toolchain/llvm-project/llvm-build/build.py" ]; then
+  python3 toolchain/llvm-project/llvm-build/build.py
+else
+  log_error "No build script found in toolchain/llvm-project/llvm-build/"
+  exit 1
+fi
 if command -v ccache >/dev/null 2>&1; then
   log_info "ccache stats after build:"
   ccache -s || true
