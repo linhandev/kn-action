@@ -281,7 +281,7 @@ else
 fi
 export KONAN_DATA_DIR
 export MAVEN_OPTS="-Duser.home=${MAVEN_USER_HOME}"
-export GRADLE_OPTS="-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000"
+export GRADLE_OPTS="-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000 -Dorg.spdx.useJARLicenseInfoOnly=true"
 
 if [ "$RUNNER_OS" = "macOS" ]; then
   export DEVELOPER_DIR="${XCODE_DEVELOPER_DIR:-/Applications/Xcode-26.2.app/Contents/Developer/}"
