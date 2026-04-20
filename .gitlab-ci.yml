@@ -16,6 +16,13 @@ spec:
       type: string
       default: "204"
       description: "Dev / essentials id for final archive naming (platform_package.sh)."
+    llvm_manifest:
+      type: string
+      default: "llvm-1914.xml"
+      options:
+        - "llvm-1914.xml"
+        - "llvm-1917.xml"
+      description: "Manifest file for LLVM repo sync (llvm-1914.xml = KMP LLVM 19.1.4, llvm-1917.xml = OH LLVM 19.1.7)"
 ---
 # GitLab CI — kn-action (LAN). Runner fleet: AGENTS.md → "Four-host runner matrix".
 # prepare-repo tests: Kotlin runners only, three tags each (kotlin + OS + arch).
@@ -36,6 +43,7 @@ variables:
   TARGET: "$[[ inputs.target ]]"
   LLVM_CLEAN_BUILD: "$[[ inputs.llvm_clean_build ]]"
   LLVM_VERSION: "$[[ inputs.llvm_version ]]"
+  LLVM_MANIFEST: "$[[ inputs.llvm_manifest ]]"
 
 workflow:
   # Cancel jobs from the previous pipeline on the same branch when a new commit lands (e.g. MR updates).

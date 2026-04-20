@@ -58,8 +58,7 @@ esac
 export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/llvm}"
 LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
 export REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
-export MANIFEST_URL="${MANIFEST_URL:-https://gitcode.com/linhandev/manifest.git}"
-export MANIFEST_FILE="${MANIFEST_FILE:-llvm-toolchain.xml}"
+export MANIFEST_FILE="${MANIFEST_FILE:-llvm-1914.xml}"
 
 if [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
   rm -rf "$LLVM_WORKSPACE"
@@ -79,8 +78,9 @@ if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]
   REFERENCE_FLAG=""
   ref_dir="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
   [ -d "$ref_dir" ] && REFERENCE_FLAG="--reference=$ref_dir"
-  log_info "repo init"
-  repo init -u "$MANIFEST_URL" -m "$MANIFEST_FILE" $REFERENCE_FLAG
+  MANIFEST_PATH="$CI_PROJECT_DIR/manifest/$MANIFEST_FILE"
+  log_info "repo init --standalone-manifest (manifest=$MANIFEST_FILE)"
+  repo init --standalone-manifest -u "file://$MANIFEST_PATH" $REFERENCE_FLAG
 else
   log_warn "repo init skipped (.repo present, LLVM_CLEAN_BUILD not set)"
 fi
@@ -194,7 +194,7 @@ if command -v ccache >/dev/null 2>&1; then
     export CCACHE_DIR="${HOME}/gitlab-runner/cache/llvm-ccache"
   fi
   mkdir -p "$CCACHE_DIR"
-  ccache -M 5G 2>/dev/null || true
+  ccache -M 10G 2>/dev/null || true
   export CMAKE_C_COMPILER_LAUNCHER=ccache
   export CMAKE_CXX_COMPILER_LAUNCHER=ccache
   ccache --zero-stats 2>/dev/null || true
@@ -231,8 +231,7 @@ if curl -sS --connect-timeout 5 -o /dev/null "$SERVER/" 2>/dev/null; then
   log_info "uploading outer tar to artifact server (retain_days=2)"
   INPUT_PATH="$OUT_PATH" INPUT_SERVER_URL="$SERVER" INPUT_CACHE_DIR="${HOME}/runner/artifact" \
     INPUT_RETAIN_DAYS=2 \
-    bash "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh" \
-    || log_warn "artifact server upload failed (non-fatal)"
+    bash "$CI_PROJECT_DIR/.github/actions/upload-artifact-local/upload.sh"
   log_info "outer tar artifact: $SERVER/artifacts/$OUTER_NAME"
 else
   log_warn "artifact server unreachable at $SERVER; skipping upload"
