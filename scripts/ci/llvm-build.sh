@@ -59,12 +59,9 @@ if [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
 fi
 mkdir -p "$LLVM_WORKSPACE"
 
-LLVM_PROJECT_BUILD="$LLVM_WORKSPACE/build"
-LLVM_MUSL="$LLVM_WORKSPACE/third_party/musl"
-git config --global --add safe.directory "$LLVM_PROJECT_BUILD" 2>/dev/null || true
-git config --global --add safe.directory "$LLVM_MUSL" 2>/dev/null || true
-git config --global user.email &>/dev/null || git config --global user.email "ci@ci.ci"
-git config --global user.name &>/dev/null || git config --global user.name "ci"
+git config --global --add safe.directory '*' 2>/dev/null || true
+git config --global user.email "ci@ci.ci" 2>/dev/null || true
+git config --global user.name "ci" 2>/dev/null || true
 
 log_info "setup-repo-tool"
 bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
