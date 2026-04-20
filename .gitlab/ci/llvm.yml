@@ -36,7 +36,8 @@
       changes:
         - .github/workflows/build-llvm.yml
         - .gitlab-ci.yml
-        - .gitlab/ci/**/*
+        - .gitlab/ci/llvm.yml
+        - .gitlab/ci/prepare-repo.yml
         - scripts/ci/llvm-build.sh
         - scripts/ci/llvm-artifact-refs.sh
         - scripts/ci/llvm-cross-copy.sh
@@ -58,7 +59,8 @@
       changes:
         - .github/workflows/build-llvm.yml
         - .gitlab-ci.yml
-        - .gitlab/ci/**/*
+        - .gitlab/ci/llvm.yml
+        - .gitlab/ci/prepare-repo.yml
         - scripts/ci/llvm-build.sh
         - scripts/ci/llvm-artifact-refs.sh
         - scripts/ci/llvm-cross-copy.sh
