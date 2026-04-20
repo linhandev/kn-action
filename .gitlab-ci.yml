@@ -52,15 +52,18 @@ workflow:
     # llvm-sync (origin→GL mirror) disabled; re-add with sync:llvm:origin-to-gl rules in .gitlab/ci/llvm.yml.
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $LLVM_DAILY_CLEAN_SCHEDULE == "true" && $TARGET == "llvm"'
     - if: '$CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"'
+    # Prepare-repo tests (independent path set)
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .github/actions/prepare-repo/**/*
         - .github/workflows/test-prepare-repo.yml
+    # LLVM pipeline (specific paths, not .gitlab/ci/**/*)
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .gitlab-ci.yml
         - .github/workflows/build-llvm.yml
-        - .gitlab/ci/**/*
+        - .gitlab/ci/llvm.yml
+        - .gitlab/ci/prepare-repo.yml
         - scripts/ci/llvm-build.sh
         - scripts/ci/llvm-artifact-refs.sh
         - scripts/ci/llvm-cross-copy.sh
@@ -68,12 +71,14 @@ workflow:
         - scripts/ci/hdc-verify-all.sh
         - scripts/setup-repo-tool.sh
         - scripts/platform_package.sh
+    # Kotlin pipeline (specific paths)
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .gitlab-ci.yml
         - .gitlab/ci/kotlin.yml
         - .github/workflows/build-kotlin.yml
         - scripts/ci/kotlin-build.sh
+        - scripts/ci/kotlin-hap-smoke-test.sh
         - scripts/proxy.init.gradle
         - scripts/rewrite-gradle-wrapper-reposlite.sh
         - patches/**/*
