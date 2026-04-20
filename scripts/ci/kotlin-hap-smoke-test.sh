@@ -36,7 +36,7 @@ fi
 log_info "Kotlin/Native home: $KN_DIST_ROOT"
 
 # --- clone kn_samples bare branch ---
-SAMPLES_REPO="${KN_SAMPLES_REPO:-https://github.com/linhandev/kn_samples.git}"
+SAMPLES_REPO="${KN_SAMPLES_REPO:-ssh://git@192.168.3.6:2222/linhandev/kn_samples.git}"
 SAMPLES_BRANCH="${KN_SAMPLES_BRANCH:-bare}"
 git clone --depth 1 --branch "$SAMPLES_BRANCH" "$SAMPLES_REPO" kn_samples
 cd kn_samples
@@ -96,6 +96,29 @@ fi
 
 # --- wait a moment for app to settle ---
 sleep 3
+
+APP_PID="$("$HDC_BIN" -t "$HDC_TARGET" shell "ps -ef | grep $BUNDLE_NAME | grep -v grep" 2>/dev/null | awk '{print $2}' | head -1 || true)"
+if [[ -z "$APP_PID" ]]; then
+  log_error "App process not found after launch"
+  exit 1
+fi
+log_info "App running with PID: $APP_PID"
+
+LOGCAT_FILE="$WORK_DIR/logcat-after-launch.txt"
+timeout 10 "$HDC_BIN" -t "$HDC_TARGET" shell "logcat -d" > "$LOGCAT_FILE" 2>/dev/null || true
+if grep -qE "FATAL|crash|signal 11|SIGSEGV|Abort message" "$LOGCAT_FILE"; then
+  log_error "Crash patterns found in logcat"
+  grep -E "FATAL|crash|signal|Abort" "$LOGCAT_FILE" | head -20 >&2
+  exit 1
+fi
+
+sleep 5
+APP_PID_AFTER="$("$HDC_BIN" -t "$HDC_TARGET" shell "ps -ef | grep $BUNDLE_NAME | grep -v grep" 2>/dev/null | awk '{print $2}' | head -1 || true)"
+if [[ -z "$APP_PID_AFTER" ]]; then
+  log_error "App process died after 8 seconds (late crash)"
+  exit 1
+fi
+log_info "App stable for 8+ seconds"
 
 # --- check for new crash log ---
 AFTER="$("$HDC_BIN" -t "$HDC_TARGET" shell "ls -t /data/log/faultlog/faultlogger/" 2>/dev/null | tr -d '\r' | grep -F "$BUNDLE_NAME" | head -1 || true)"
