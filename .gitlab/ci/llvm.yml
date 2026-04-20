@@ -75,6 +75,8 @@ build:llvm:linux:x64:
   script:
     - bash scripts/ci/llvm-build.sh linux
   artifacts:
+    paths:
+      - llvm-build-linux.env
     reports:
       dotenv: llvm-build-linux.env
     expire_in: 2 days
@@ -94,6 +96,8 @@ build:llvm:macos:arm64:
   script:
     - bash scripts/ci/llvm-build.sh macos-arm64
   artifacts:
+    paths:
+      - llvm-build-macos-arm64.env
     reports:
       dotenv: llvm-build-macos-arm64.env
     expire_in: 2 days
@@ -107,6 +111,8 @@ build:llvm:macos:x64:
   script:
     - bash scripts/ci/llvm-build.sh macos-x64
   artifacts:
+    paths:
+      - llvm-build-macos-x64.env
     reports:
       dotenv: llvm-build-macos-x64.env
     expire_in: 2 days
@@ -136,6 +142,8 @@ llvm:cross-copy:
   script:
     - bash scripts/ci/llvm-cross-copy.sh
   artifacts:
+    paths:
+      - cross-copy.env
     reports:
       dotenv: cross-copy.env
     expire_in: 2 days
@@ -163,6 +171,8 @@ llvm:provide-artifacts:
   script:
     - bash scripts/ci/llvm-provide-artifacts.sh
   artifacts:
+    paths:
+      - llvm-artifacts.env
     reports:
       dotenv: llvm-artifacts.env
     expire_in: 2 days
