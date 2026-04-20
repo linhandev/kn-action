@@ -12,37 +12,13 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 REPO_SCRIPT="$REPO_DIR/repo.py"
 REPO_WRAPPER="$REPO_DIR/repo"
-REPO_DOWNLOAD_URL="${REPO_DOWNLOAD_URL:-https://storage.googleapis.com/gitlab-repo-tool/repo}"
+REPO_DOWNLOAD_URL="${REPO_DOWNLOAD_URL:-https://storage.googleapis.com/git-repo-downloads/repo}"
 REPO_CACHE="${HOME}/gitlab-runner/cache/repo.py"
 
 mkdir -p "$REPO_DIR" "$(dirname "$REPO_CACHE")"
 
 # Legacy: rename bare `repo` to `repo.py` if someone left a raw copy.
 [ -f "$REPO_WRAPPER" ] && [ ! -f "$REPO_SCRIPT" ] && mv "$REPO_WRAPPER" "$REPO_SCRIPT"
-
-# Restore from persistent cache, or download once.
-# Force re-download if cached version lacks --standalone-manifest support.
-repo_has_standalone_manifest() {
-  $PY "$1" help init 2>&1 | grep -q "standalone-manifest" || return 1
-}
-
-if [ -f "$REPO_SCRIPT" ]; then
-  if ! repo_has_standalone_manifest "$REPO_SCRIPT"; then
-    echo "Cached repo lacks --standalone-manifest, re-downloading..."
-    rm -f "$REPO_SCRIPT" "$REPO_CACHE"
-  fi
-fi
-
-if [ ! -f "$REPO_SCRIPT" ]; then
-  if [ -f "$REPO_CACHE" ] && repo_has_standalone_manifest "$REPO_CACHE"; then
-    cp "$REPO_CACHE" "$REPO_SCRIPT"
-  else
-    rm -f "$REPO_CACHE"
-    curl -fSL -sS --connect-timeout 30 -o "$REPO_SCRIPT" "$REPO_DOWNLOAD_URL"
-    cp "$REPO_SCRIPT" "$REPO_CACHE" 2>/dev/null || true
-  fi
-  head -c 2 "$REPO_SCRIPT" | grep -q '#!' || { echo "Invalid repo script (no shebang)"; exit 1; }
-fi
 
 # Pick a working Python 3. macOS/Linux: python3. Windows (Git Bash): python, then py -3.
 pick_py() { command -v "$1" >/dev/null 2>&1 && "$1" --version >/dev/null 2>&1; }
@@ -53,6 +29,17 @@ elif pick_py python; then PY=python
 elif command -v py >/dev/null 2>&1 && py -3 --version >/dev/null 2>&1; then PY="py -3"
 fi
 [ -n "$PY" ] || { echo "No usable Python 3 found"; exit 1; }
+
+# Restore from persistent cache, or download once.
+if [ ! -f "$REPO_SCRIPT" ]; then
+  if [ -f "$REPO_CACHE" ]; then
+    cp "$REPO_CACHE" "$REPO_SCRIPT"
+  else
+    curl -fSL -sS --connect-timeout 30 -o "$REPO_SCRIPT" "$REPO_DOWNLOAD_URL"
+    cp "$REPO_SCRIPT" "$REPO_CACHE" 2>/dev/null || true
+  fi
+  head -c 2 "$REPO_SCRIPT" | grep -q '#!' || { echo "Invalid repo script (no shebang)"; exit 1; }
+fi
 
 # Ensure requests is available (repo.py imports it).
 has_requests() {
