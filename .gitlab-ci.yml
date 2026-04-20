@@ -18,7 +18,7 @@ spec:
       description: "Dev / essentials id for final archive naming (platform_package.sh)."
     llvm_manifest:
       type: string
-      default: "llvm-1914.xml"
+      default: "llvm-1917.xml"
       options:
         - "llvm-1914.xml"
         - "llvm-1917.xml"
