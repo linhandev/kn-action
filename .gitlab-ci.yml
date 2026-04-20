@@ -88,8 +88,8 @@ include:
   - local: .gitlab/ci/kotlin.yml
 
 stages:
-  - test
-  - build
-  - kotlin_verify
+  - llvm_build
   - llvm_merge
   - llvm_verify
+  - kotlin_build
+  - kotlin_verify

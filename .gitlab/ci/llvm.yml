@@ -6,7 +6,7 @@
 # provide-artifacts aggregates final artifact names for downstream test jobs.
 
 .llvm-build-matrix-common:
-  stage: build
+  stage: llvm_build
   interruptible: true
   timeout: 6h
   before_script:
@@ -39,7 +39,7 @@
         - scripts/platform_package.sh
 
 sync:llvm:origin-to-gl:
-  stage: test
+  stage: llvm_build
   interruptible: true
   timeout: 30m
   rules:
