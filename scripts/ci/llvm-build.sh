@@ -69,6 +69,7 @@ git config --global --add safe.directory '*' 2>/dev/null || true
 git config --global user.email "ci@ci.ci" 2>/dev/null || true
 git config --global user.name "ci" 2>/dev/null || true
 
+export REPO_URL="https://mirrors.tuna.tsinghua.edu.cn/git/git-repo"
 log_info "setup-repo-tool"
 bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
 export PATH="$REPO_DIR:$PATH"
