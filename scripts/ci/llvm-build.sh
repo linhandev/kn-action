@@ -218,7 +218,7 @@ if command -v ccache >/dev/null 2>&1; then
     export CCACHE_DIR="${HOME}/gitlab-runner/cache/llvm-ccache"
   fi
   mkdir -p "$CCACHE_DIR"
-  ccache -M 10G 2>/dev/null || true
+  ccache -M 20G 2>/dev/null || true
   export CMAKE_C_COMPILER_LAUNCHER=ccache
   export CMAKE_CXX_COMPILER_LAUNCHER=ccache
   ccache --zero-stats 2>/dev/null || true
