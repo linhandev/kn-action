@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Smoke-test a freshly-built Kotlin/Native compiler by building the kn_samples bare branch
-# into a HarmonyOS HAP, installing it, and asserting it does not crash on a connected device.
+# Smoke-test: download build/repo from LAN artifact server, find Kotlin/Native prebuilt inside that Maven tree,
+# clone kn_samples bare, align kotlinVersion with the compiler build, run HAP on device.
 set -euo pipefail
 
 : "${CI_PROJECT_DIR:?}"
@@ -9,24 +9,41 @@ set -euo pipefail
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_SCRIPT_DIR/logging.sh"
 
-# --- locate Kotlin/Native distribution tarball produced by the build job ---
-KN_TARBALL="$(ls -1 "$CI_PROJECT_DIR/ci-workspace/kotlin-native"/kotlin-native-macos-aarch64-*.tar.gz 2>/dev/null | head -1 || true)"
-if [[ -z "$KN_TARBALL" || ! -f "$KN_TARBALL" ]]; then
-  log_error "Kotlin/Native tarball not found in ci-workspace/kotlin-native/"
-  ls -la "$CI_PROJECT_DIR/ci-workspace/kotlin-native/" 2>/dev/null || true
-  exit 1
-fi
-log_info "Using Kotlin/Native tarball: $KN_TARBALL"
+# Injected by GitLab dotenv from build:kotlin:macos:arm64 (kotlin-version.env)
+: "${KOTLIN_VERSION:?KOTLIN_VERSION missing (dotenv from kotlin build)}"
+: "${ARTIFACT_SERVER_URL:?ARTIFACT_SERVER_URL missing}"
+: "${KOTLIN_ARTIFACT_BASENAME:?KOTLIN_ARTIFACT_BASENAME missing}"
 
-# --- prepare workspace ---
+SERVER="${ARTIFACT_SERVER_URL%/}"
+
 WORK_DIR="$CI_PROJECT_DIR/kn-samples-work"
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
-# --- extract Kotlin/Native distribution ---
+DL="$WORK_DIR/dl"
+mkdir -p "$DL"
+
+log_info "Downloading build/repo archive: $SERVER/artifacts/$KOTLIN_ARTIFACT_BASENAME"
+curl -fsSL -o "$DL/build-repo.tgz" "$SERVER/artifacts/$KOTLIN_ARTIFACT_BASENAME"
+
+mkdir -p "$DL/extract-repo"
+tar -xzf "$DL/build-repo.tgz" -C "$DL/extract-repo"
+export KN_ACTION_BUILD_REPO_ABS
+KN_ACTION_BUILD_REPO_ABS="$(cd "$DL/extract-repo/build/repo" && pwd -P)"
+log_info "KN_ACTION_BUILD_REPO_ABS=$KN_ACTION_BUILD_REPO_ABS"
+
+# kotlin.native.home: use prebuilt K/N tarball published under build/repo (Maven layout), not a separate host upload.
+KN_TARBALL_IN_REPO="$(find "$KN_ACTION_BUILD_REPO_ABS" -type f -name 'kotlin-native-macos-aarch64-*.tar.gz' 2>/dev/null | head -1 || true)"
+if [[ -z "$KN_TARBALL_IN_REPO" || ! -f "$KN_TARBALL_IN_REPO" ]]; then
+  log_error "No kotlin-native-macos-aarch64 *.tar.gz under build/repo (expected kotlin-native-prebuilt in Maven repo)"
+  find "$KN_ACTION_BUILD_REPO_ABS" -maxdepth 5 -type f -name '*.tar.gz' 2>/dev/null | head -20 || true
+  exit 1
+fi
+log_info "Using Kotlin/Native prebuilt from build/repo: $KN_TARBALL_IN_REPO"
+
 mkdir -p kn-dist
-tar -xzf "$KN_TARBALL" -C kn-dist
+tar -xzf "$KN_TARBALL_IN_REPO" -C kn-dist
 KN_DIST_ROOT="$(find "$WORK_DIR/kn-dist" -maxdepth 1 -type d | head -2 | tail -1 || true)"
 if [[ -z "$KN_DIST_ROOT" || ! -d "$KN_DIST_ROOT/bin" ]]; then
   log_error "Expected Kotlin/Native dist directory after extract"
@@ -35,14 +52,12 @@ if [[ -z "$KN_DIST_ROOT" || ! -d "$KN_DIST_ROOT/bin" ]]; then
 fi
 log_info "Kotlin/Native home: $KN_DIST_ROOT"
 
-# --- clone kn_samples bare branch ---
 SAMPLES_REPO="${KN_SAMPLES_REPO:-ssh://git@192.168.3.6:2222/linhandev/kn_samples.git}"
 SAMPLES_BRANCH="${KN_SAMPLES_BRANCH:-bare}"
 git clone --depth 1 --branch "$SAMPLES_BRANCH" "$SAMPLES_REPO" kn_samples
 cd kn_samples
 
-# --- point gradle at the freshly-built Kotlin/Native compiler ---
-# Append to gradle.properties so it overrides any existing kotlin.native.home
+# bare branch reads kotlinVersion from gradle.properties; CI passes -P to match the built compiler.
 if grep -q '^kotlin.native.home=' gradle.properties 2>/dev/null; then
   sed -i.bak "s|^kotlin.native.home=.*|kotlin.native.home=$KN_DIST_ROOT|" gradle.properties
 else
@@ -50,7 +65,6 @@ else
 fi
 log_info "Set kotlin.native.home=$KN_DIST_ROOT in gradle.properties"
 
-# --- verify hdc is available ---
 HDC_BIN="$(command -v hdc || true)"
 if [[ -z "$HDC_BIN" || ! -x "$HDC_BIN" ]]; then
   log_error "hdc not found on PATH"
@@ -66,49 +80,43 @@ fi
 HDC_TARGET="$("$HDC_BIN" list targets 2>/dev/null | head -1 | tr -d '\r' | awk '{print $1}')"
 log_info "hdc target: $HDC_TARGET"
 
-# --- resolve bundle name ---
 BUNDLE_NAME="$(grep '"bundleName"' harmonyApp/AppScope/app.json5 | sed -n 's/.*"bundleName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tr -d '\r')"
 [[ -n "$BUNDLE_NAME" ]] || { log_error "bundleName not found in harmonyApp/AppScope/app.json5"; exit 1; }
 log_info "Bundle name: $BUNDLE_NAME"
 
-# --- uninstall previous app ---
 log_info "Uninstalling previous app..."
 "$HDC_BIN" -t "$HDC_TARGET" uninstall "$BUNDLE_NAME" 2>/dev/null || true
 
-# --- record pre-run crash log (newest matching file) ---
 BEFORE=""
 BEFORE="$("$HDC_BIN" -t "$HDC_TARGET" shell "ls -t /data/log/faultlog/faultlogger/" 2>/dev/null | tr -d '\r' | grep -F "$BUNDLE_NAME" | head -1 || true)"
 [[ -n "$BEFORE" ]] && log_info "Pre-run faultlog: $BEFORE"
 
-# --- DevEco environment setup ---
-# hvigor daemon can get into a corrupted state where worker threads' cwd becomes invalid,
-# causing "ENOENT: no such file or directory, uv_cwd" errors. Stop daemon and clear cache.
 DEVECO_STUDIO_DIR="${DEVECO_STUDIO_DIR:-/Applications/DevEco-Studio.app}"
 DEVECO_SDK_HOME="$DEVECO_STUDIO_DIR/Contents/sdk"
 NODE_HOME="$DEVECO_STUDIO_DIR/Contents/tools/node"
 export DEVECO_SDK_HOME NODE_HOME
 log_info "DevEco SDK: $DEVECO_SDK_HOME"
 
-# Stop any stale hvigor daemon processes to prevent uv_cwd errors in worker threads
 pkill -f 'hvigor' 2>/dev/null || true
 rm -rf ~/.hvigor/daemon/cache/*.json ~/.hvigor/project_caches/* 2>/dev/null || true
 log_info "Cleaned hvigor daemon cache"
 
-# --- build and run HAP ---
-log_info "Building and launching HAP..."
-if ! ./gradlew :kotlinApp:startHarmonyAppDebug --rerun-tasks --no-daemon; then
+log_info "Building and launching HAP (kotlinVersion=$KOTLIN_VERSION)..."
+if ! ./gradlew :kotlinApp:startHarmonyAppDebug \
+  -PkotlinVersion="$KOTLIN_VERSION" \
+  --rerun-tasks \
+  --no-daemon \
+  --refresh-dependencies; then
   log_error "Gradle build/start failed"
   exit 1
 fi
 
-# --- verify the app was actually installed ---
 log_info "Verifying app installation..."
 if ! "$HDC_BIN" -t "$HDC_TARGET" shell "bm dump -n $BUNDLE_NAME" >/dev/null 2>&1; then
   log_error "App was not installed on the device (bm dump failed for $BUNDLE_NAME)"
   exit 1
 fi
 
-# --- wait a moment for app to settle ---
 sleep 3
 
 APP_PID="$("$HDC_BIN" -t "$HDC_TARGET" shell "ps -ef | grep $BUNDLE_NAME | grep -v grep" 2>/dev/null | awk '{print $2}' | head -1 || true)"
@@ -134,7 +142,6 @@ if [[ -z "$APP_PID_AFTER" ]]; then
 fi
 log_info "App stable for 8+ seconds"
 
-# --- check for new crash log ---
 AFTER="$("$HDC_BIN" -t "$HDC_TARGET" shell "ls -t /data/log/faultlog/faultlogger/" 2>/dev/null | tr -d '\r' | grep -F "$BUNDLE_NAME" | head -1 || true)"
 
 if [[ -n "$AFTER" && "$BEFORE" != "$AFTER" ]]; then

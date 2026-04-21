@@ -7,9 +7,26 @@ set -euo pipefail
 : "${CI_PIPELINE_ID:?}"
 source "$CI_PROJECT_DIR/scripts/ci/logging.sh"
 
+# GitLab / YAML / copy-paste can inject CR, LF, or spaces into MANIFEST_FILE. If unnormalized,
+# ${MANIFEST_FILE%.xml} does NOT strip the suffix (e.g. "llvm-1914-bare.xml\r" → wrong LLVM_WORKSPACE).
+_kn_action_normalize_manifest_name() {
+  local raw="${1:-llvm-1914.xml}"
+  raw="$(printf '%s' "$raw" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [ -n "$raw" ] || raw="llvm-1914.xml"
+  case "$raw" in
+    *.xml) ;;
+    *)
+      log_warn "MANIFEST_FILE had no .xml suffix (got '$raw'); appending .xml"
+      raw="${raw}.xml"
+      ;;
+  esac
+  printf '%s' "$raw"
+}
+
 export REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 export REPO_URL="${REPO_URL:-https://mirrors.tuna.tsinghua.edu.cn/git/git-repo}"
-export MANIFEST_FILE="${MANIFEST_FILE:-llvm-1914.xml}"
+MANIFEST_FILE="$(_kn_action_normalize_manifest_name "${MANIFEST_FILE:-llvm-1914.xml}")"
+export MANIFEST_FILE
 export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/${MANIFEST_FILE%.xml}}"
 export LOCAL_REFERENCE_DIR="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
 
@@ -77,31 +94,22 @@ log_info "setup-repo-tool"
 bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
 export PATH="$REPO_DIR:$PATH"
 
-# Check if .repo exists, manifest matches, and critical projects are checked out.
-_repo_valid() {
-  local repo_dir="$LLVM_WORKSPACE/.repo"
-  local manifest_marker="$repo_dir/.manifest_file"
-  [ -d "$repo_dir" ] && [ -f "$repo_dir/manifest.xml" ] && \
-  [ -f "$manifest_marker" ] && \
-  [ "$(cat "$manifest_marker")" = "$MANIFEST_FILE" ] && \
-  [ -d "$LLVM_WORKSPACE/toolchain/llvm-project" ] && \
-  [ -d "$LLVM_WORKSPACE/build" ]
-}
-
-if ! _repo_valid || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
+# Reuse the workspace whenever .repo exists; repo sync below repairs partial checkouts.
+# If .repo is missing (stale / never inited), clear the workspace and run repo init.
+if ! [ -d "$LLVM_WORKSPACE/.repo" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
   cd "$LLVM_WORKSPACE"
-  if [ -d "$LLVM_WORKSPACE/.repo" ]; then
-    if ! _repo_valid; then
-      log_warn "Removing stale .repo directory (manifest mismatch or incomplete)"
-    fi
-    rm -rf "$LLVM_WORKSPACE/.repo"
+  if ! [ -d "$LLVM_WORKSPACE/.repo" ] && [ "${LLVM_CLEAN_BUILD:-false}" != "true" ]; then
+    log_warn "LLVM workspace stale or incomplete; wiping .repo and partial project trees before init"
   fi
+  # Only removing .repo leaves broken project dirs (e.g. build/) from a failed sync; repo sync then hits
+  # fatal: bad revision 'HEAD'. Clear the workspace entirely before a fresh repo init.
+  find "$LLVM_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   REFERENCE_FLAG=""
   [ -d "$LOCAL_REFERENCE_DIR" ] && REFERENCE_FLAG="--reference=$LOCAL_REFERENCE_DIR"
   MANIFEST_PATH="$CI_PROJECT_DIR/manifest/$MANIFEST_FILE"
   log_info "repo init --standalone-manifest (manifest=$MANIFEST_FILE)"
   repo init --standalone-manifest -u "file://$MANIFEST_PATH" $REFERENCE_FLAG
-  echo "$MANIFEST_FILE" > "$LLVM_WORKSPACE/.repo/.manifest_file"
+  printf '%s\n' "$MANIFEST_FILE" >"$LLVM_WORKSPACE/.repo/.manifest_file"
 else
   log_info "repo init skipped (.repo valid for manifest=$MANIFEST_FILE)"
 fi

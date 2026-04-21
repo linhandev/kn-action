@@ -1,23 +1,23 @@
 # Kotlin OH build — port of .github/workflows/build-kotlin.yml (GitLab matrix).
-# Web or API (e.g. glab ci run): set TARGET=kotlin (same idea as LLVM's llvm profile).
+# Web/API: TARGET=kotlin → Kotlin only (no LLVM jobs). TARGET=llvm → LLVM stages then Kotlin build & HAP test.
+# MR: Kotlin path changes → Kotlin only. LLVM path changes → LLVM only (use manual TARGET=llvm for Kotlin after LLVM).
 # Runners: kotlin + OS + arch (AGENTS.md). Requires GITCODE_SSH_PRIVATE_KEY for kotlin clone.
-# Trigger: changes to this file will run Kotlin build matrix.
+#
+# When llvm:provide-artifacts is in the pipeline (TARGET=llvm), kotlin jobs wait on it via needs (optional).
 
 .kotlin-build-rules:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $TARGET == "llvm"'
       when: never
-    - if: '$CI_PIPELINE_SOURCE == "web" && $TARGET == "llvm"'
-      when: never
-    - if: '$CI_PIPELINE_SOURCE == "api" && $TARGET == "llvm"'
-      when: never
     - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "kotlin"'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "llvm"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .gitlab-ci.yml
         - .gitlab/ci/kotlin.yml
         - .github/workflows/build-kotlin.yml
         - scripts/ci/kotlin-build.sh
+        - scripts/ci/kotlin-hap-smoke-test.sh
         - scripts/proxy.init.gradle
         - scripts/rewrite-gradle-wrapper-reposlite.sh
         - patches/**/*
@@ -31,6 +31,10 @@
   timeout: 6h
   extends: .kotlin-build-rules
   needs:
+    # Present only when TARGET=llvm (or MR touches LLVM); then Kotlin waits for llvm-artifacts.env.
+    - job: llvm:provide-artifacts
+      optional: true
+      artifacts: true
     - job: ohos:execute:macos-arm64
       optional: true
       artifacts: false
@@ -49,16 +53,14 @@
         ssh-add ~/.ssh/id_ed25519
       fi
 
-# Temporarily disabled to focus on debugging macOS arm64 for PR 98
-# build:kotlin:linux:x64:
-#   extends: .kotlin-build-common
-#   needs: []
-#   tags:
-#     - kotlin
-#     - linux
-#     - x64
-#   script:
-#     - bash scripts/ci/kotlin-build.sh linux-x64
+build:kotlin:linux:x64:
+  extends: .kotlin-build-common
+  tags:
+    - kotlin
+    - linux
+    - x64
+  script:
+    - bash scripts/ci/kotlin-build.sh linux-x64
 
 build:kotlin:macos:arm64:
   extends: .kotlin-build-common
@@ -67,10 +69,8 @@ build:kotlin:macos:arm64:
     - macos
     - arm64
   artifacts:
-    when: always
-    paths:
-      - ci-workspace/kotlin-native/kotlin-native-macos-aarch64-*.tar.gz
-    expire_in: 2 days
+    reports:
+      dotenv: ci-workspace/kotlin-version.env
   script:
     - bash scripts/ci/kotlin-build.sh macos-arm64
 
@@ -90,6 +90,11 @@ test:kotlin:hap:macos-arm64:
     - arm64
   variables:
     PATH: "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  artifacts:
+    when: always
+    paths:
+      - kn-samples-work/kn_samples/harmonyApp/**/outputs/**/*.hap
+    expire_in: 7 days
   script:
     - bash scripts/ci/kotlin-hap-smoke-test.sh
 
