@@ -29,8 +29,8 @@ rm_one_win32_fallback() {
   [[ ! -e "$f" ]]
 }
 
-# Windows: prior Gradle runs leave .gradle (checksums.lock, etc.); daemons keep files open so
-# `git clean -ffdx` warns "failed to remove ... Invalid argument". Stop daemons and drop .gradle first.
+# Windows: prior Gradle runs leave .gradle (locks, daemons); `git clean` / `rm` then hit EBUSY.
+# Stop every Gradle wrapper we can find, then remove *all* `.gradle` dirs depth-first via `rd /s /q`.
 ci_windows_prepare_reused_repo() {
   local repo_dir="${1:?}"
   case "$(uname -s 2>/dev/null)" in
@@ -39,21 +39,34 @@ ci_windows_prepare_reused_repo() {
   esac
   [[ -d "$repo_dir/.git" ]] || return 0
 
-  if [[ -f "$repo_dir/gradlew" ]]; then
-    ( cd "$repo_dir" && ./gradlew --stop ) &>/dev/null || true
-  elif [[ -f "$repo_dir/gradlew.bat" ]]; then
-    ( cd "$repo_dir" && cmd.exe //c "gradlew.bat --stop" ) &>/dev/null || true
-  fi
+  local FIND_CMD=find
+  [[ -x /usr/bin/find ]] && FIND_CMD=/usr/bin/find
 
-  if [[ -d "$repo_dir/.gradle" ]]; then
-    echo "prepare-repo: Windows removing .gradle before git clean: $repo_dir/.gradle" >&2
-    rm -rf "$repo_dir/.gradle" 2>/dev/null || true
-    if [[ -d "$repo_dir/.gradle" ]] && command -v cygpath &>/dev/null; then
-      local wg
-      wg="$(cygpath -w "$repo_dir/.gradle" 2>/dev/null || true)"
-      [[ -n "$wg" ]] && cmd.exe //c "if exist \"$wg\" rd /s /q \"$wg\"" &>/dev/null || true
+  _ci_win_rd_tree() {
+    local p="${1:?}"
+    rm -rf "$p" 2>/dev/null || true
+    if [[ -e "$p" ]] && command -v cygpath &>/dev/null; then
+      local w
+      w="$(cygpath -w "$p" 2>/dev/null || true)"
+      [[ -n "$w" ]] && cmd.exe //c "if exist \"$w\" rd /s /q \"$w\"" &>/dev/null || true
     fi
-  fi
+  }
+
+  local gw d
+  while IFS= read -r -d '' gw; do
+    d="$(dirname "$gw")"
+    if [[ "$gw" == *.bat ]]; then
+      ( cd "$d" && cmd.exe //c "gradlew.bat --stop" ) &>/dev/null || true
+    else
+      ( cd "$d" && chmod +x "$gw" 2>/dev/null; ./gradlew --stop ) &>/dev/null || true
+    fi
+  done < <("$FIND_CMD" "$repo_dir" -maxdepth 14 \( -name gradlew -o -name gradlew.bat \) ! -path '*/.git/*' -print0 2>/dev/null)
+
+  local gd
+  while IFS= read -r -d '' gd; do
+    echo "prepare-repo: Windows removing nested .gradle before git clean: $gd" >&2
+    _ci_win_rd_tree "$gd"
+  done < <("$FIND_CMD" "$repo_dir" -depth -type d -name '.gradle' ! -path '*/.git/*' -print0 2>/dev/null)
 }
 
 # Remove stale lock files in an existing git worktree.
