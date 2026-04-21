@@ -40,7 +40,7 @@
 
 .kotlin-linux-builder-image:
   image:
-    name: ghcr.io/linhandev/kn-action-kotlin-linux-builder:d8708ed
+    name: ghcr.io/linhandev/kn-action-kotlin-linux-builder:3a0eb36
     pull_policy: if-not-present
 
 build:kotlin:linux:x64:
@@ -84,7 +84,9 @@ build:kotlin:macos:x64:
     - bash scripts/ci/kotlin-build.sh macos-x64
 
 build:kotlin:windows:x64:
-  extends: .kotlin-build-common
+  extends:
+    - .kotlin-build-common
+    - .windows-gitbash-pre-sources
   tags:
     - kotlin
     - windows
@@ -149,7 +151,9 @@ test:kotlin:hap:after-macos-x64-build:
       artifacts: true
 
 test:kotlin:hap:after-windows-build:
-  extends: .kotlin-hap-smoke-common
+  extends:
+    - .kotlin-hap-smoke-common
+    - .windows-gitbash-pre-sources
   tags:
     - chore
     - windows
