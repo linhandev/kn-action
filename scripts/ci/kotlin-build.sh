@@ -220,12 +220,12 @@ KOTLIN_SHA="$(git -C "$KOTLIN_ROOT" rev-parse HEAD)"
 # --- patch ---
 PATCH="$CI_PROJECT_DIR/patches/kotlin-js-tests-npmSetRegistry.patch"
 cd "$KOTLIN_ROOT"
-if patch -p1 <"$PATCH"; then
+if command -v patch >/dev/null 2>&1 && patch -p1 <"$PATCH"; then
   echo "Applied kotlin-js-tests-npmSetRegistry patch"
 elif grep -q 'if (cacheRedirectorEnabled)' js/js.tests/build.gradle.kts 2>/dev/null; then
   echo "kotlin-js-tests guard already present; skipping patch"
 else
-  echo "ERROR: patch failed and js/js.tests/build.gradle.kts lacks expected guard" >&2
+  echo "ERROR: patch unavailable or failed and js/js.tests/build.gradle.kts lacks expected guard" >&2
   exit 1
 fi
 
@@ -268,7 +268,8 @@ elif [ "$RUNNER_OS" = "Linux" ]; then
     shopt -u nullglob
   fi
   for d in /usr/lib/jvm/java-21-openjdk-amd64 /usr/lib/jvm/java-21-openjdk \
-           /usr/lib/jvm/temurin-21-amd64 /usr/lib/jvm/java-11-openjdk; do
+           /usr/lib/jvm/temurin-21-amd64 /usr/lib/jvm/temurin-21-jdk-amd64 /usr/lib/jvm/temurin-21-jdk-x64 \
+           /usr/lib/jvm/java-11-openjdk; do
     if [ -d "$d" ]; then
       export JAVA_HOME="${JAVA_HOME_21:-$d}"
       break
