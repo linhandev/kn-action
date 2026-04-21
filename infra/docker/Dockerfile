@@ -10,7 +10,7 @@ RUN apt-get update \
     binutils-dev gcc-multilib abigail-tools elfutils pkg-config \
     autoconf autoconf-archive libxml2 \
     curl python3 python3-pip python3-requests git-lfs wget rsync ccache pigz \
-    ninja-build \
+    ninja-build cmake \
  && ln -sf "$(command -v python3)" /usr/bin/python \
  && rm -rf /var/lib/apt/lists/*
 
