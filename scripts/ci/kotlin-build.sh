@@ -170,6 +170,11 @@ mkdir -p "$GRADLE_USER_HOME" "$KONAN_DATA_DIR" "$MAVEN_USER_HOME/.m2" "$ARTIFACT
 mkdir -p "${GRADLE_USER_HOME}/init.d"
 cp "$CI_PROJECT_DIR/scripts/proxy.init.gradle" "${GRADLE_USER_HOME}/init.d/"
 
+# prepare-repo runs Gradle --stop on reused Windows workspaces; must match this job's GRADLE_USER_HOME / opts.
+export GRADLE_USER_HOME
+# No persistent daemon; same flags as later build step so --stop targets the right JVMs.
+export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000 -Dorg.spdx.useJARLicenseInfoOnly=true"
+
 if [ "$CLEAN_BUILD" = "true" ]; then
   echo "Clean build: wiping Konan and Maven user home under cache root"
   rm -rf "$KONAN_DATA_DIR"
@@ -412,8 +417,7 @@ else
 fi
 export KONAN_DATA_DIR
 export MAVEN_OPTS="-Duser.home=${MAVEN_USER_HOME}"
-# No persistent daemon: JVM exits when the build finishes (avoids stray processes and file locks on reused workspaces).
-export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000 -Dorg.spdx.useJARLicenseInfoOnly=true"
+# GRADLE_OPTS / GRADLE_USER_HOME already set before prepare-repo (clone step).
 
 if [ "$RUNNER_OS" = "macOS" ]; then
   export DEVELOPER_DIR="${XCODE_DEVELOPER_DIR:-/Applications/Xcode-26.2.app/Contents/Developer/}"
@@ -606,10 +610,6 @@ if [ -f "$DEPS_GRADLE_KTS" ]; then
   echo "Rewrote file-storage URL in kotlin-native/dependencies/build.gradle.kts -> ${KONAN_PROXY_BASE}"
 fi
 
-echo "=== git diff --stat — before fresh LLVM (patch, wrapper, konan.properties) ==="
-# Use explicit pathspec (.) — bare trailing `--` alone can make git(1) treat stdin as the diff (Linux).
-git diff --no-ext-diff --stat -- .
-
 install_fresh_llvm_for_konan "$PLATFORM"
 
 echo "=== kotlin.native.llvm.default.* (kotlin-native/gradle.properties) — LLVM version switch uses sed here, not patches/ ==="
@@ -619,15 +619,12 @@ else
   echo "(kotlin-native/gradle.properties missing)"
 fi
 if [ "${KOTLIN_USE_FRESH_LLVM:-true}" = "false" ]; then
-  echo "KOTLIN_USE_FRESH_LLVM=false (pipeline input kotlin_use_fresh_llvm): kotlin-native/gradle.properties was not rewritten to remote:public/<stem>. There is no LLVM switch in git diff below." >&2
+  echo "KOTLIN_USE_FRESH_LLVM=false (pipeline input kotlin_use_fresh_llvm): kotlin-native/gradle.properties was not rewritten to remote:public/<stem>." >&2
 elif ! git diff --no-ext-diff --quiet -- kotlin-native/gradle.properties 2>/dev/null; then
-  echo "Fresh LLVM rewrote kotlin-native/gradle.properties — expect a hunk in the next diff." >&2
+  echo "Fresh LLVM rewrote kotlin-native/gradle.properties (see git diff for that file if needed)." >&2
 elif [ "${KOTLIN_USE_FRESH_LLVM:-true}" != "false" ]; then
   echo "No git diff for kotlin-native/gradle.properties (no archive resolved, download failed, or sed had no matching lines)." >&2
 fi
-
-echo "=== git diff — full tree after kn-action + fresh LLVM ==="
-git diff --no-ext-diff -- .
 
 BUILD_OHOS="$KOTLIN_ROOT/scripts/build-ohos.sh"
 if [ -f "$BUILD_OHOS" ]; then
