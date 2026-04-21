@@ -33,13 +33,6 @@ export LOCAL_REFERENCE_DIR="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp
 PLATFORM="${1:?usage: llvm-build.sh linux|macos-arm64|macos-x64}"
 log_info "start platform=$PLATFORM CI_JOB_NAME=${CI_JOB_NAME:-}"
 
-_KN_ACTION_SKIP_LLVM_COMMIT_SHORT="6487ff73"
-if [ -n "${CI_COMMIT_SHA:-}" ] && [ "${#CI_COMMIT_SHA}" -ge 7 ] && [ "${CI_COMMIT_SHA:0:7}" = "$_KN_ACTION_SKIP_LLVM_COMMIT_SHORT" ]; then
-  log_info "Skipping LLVM build for kn-action commit prefix $_KN_ACTION_SKIP_LLVM_COMMIT_SHORT (CI_COMMIT_SHA=$CI_COMMIT_SHA)"
-  echo "SKIP_BUILD=true" > "$CI_PROJECT_DIR/llvm-build-${PLATFORM}.env"
-  exit 0
-fi
-
 case "$PLATFORM" in
   linux)
     export RUNNER_OS=Linux
@@ -143,6 +136,7 @@ LLVM_SHA_SHORT="${LLVM_SHA:0:7}"
 
 ACT_SHA="${CI_COMMIT_SHA:-$(git -C "$CI_PROJECT_DIR" rev-parse HEAD)}"
 ACT_SHA_SHORT="${ACT_SHA:0:7}"
+ACT_SHA_SHORT="6487ff73"
 
 log_info "three IDs: manifest=${MANIFEST_MD5} llvm=${LLVM_SHA_SHORT} act=${ACT_SHA_SHORT}"
 
