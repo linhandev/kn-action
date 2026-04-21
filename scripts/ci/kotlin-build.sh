@@ -10,6 +10,12 @@ PLATFORM="${1:?usage: kotlin-build.sh linux-x64|macos-arm64|macos-x64|windows-x6
 
 cd "$CI_PROJECT_DIR"
 
+# LLVM profile: kotlin must consume llvm-artifacts.env from llvm:provide-artifacts (needs + artifacts).
+if [ "${TARGET:-}" = "llvm" ] && [ ! -f "$CI_PROJECT_DIR/llvm-artifacts.env" ]; then
+  echo "error: TARGET=llvm requires llvm-artifacts.env from job llvm:provide-artifacts (latest names for this pipeline)" >&2
+  exit 1
+fi
+
 case "$PLATFORM" in
   linux-x64) export RUNNER_OS=Linux; export RUNNER_ARCH=X64 ;;
   macos-arm64) export RUNNER_OS=macOS; export RUNNER_ARCH=ARM64 ;;
@@ -69,7 +75,7 @@ if [ "$RUNNER_OS" = "Windows" ]; then
   fi
 fi
 
-# --- macOS: Xcode tool presence (ARM build-ohos expectations) ---
+# --- macOS: Xcode tool presence ---
 if [ "$RUNNER_OS" = "macOS" ]; then
   /usr/bin/xcrun -f bitcode-build-tool >/dev/null 2>&1 || true
 fi
@@ -129,12 +135,6 @@ else
   echo "ERROR: patch failed and js/js.tests/build.gradle.kts lacks expected guard" >&2
   exit 1
 fi
-
-echo "=== git diff --stat after kn-action Kotlin patches ==="
-git diff --stat --no-ext-diff
-
-echo "=== git diff after kn-action Kotlin patches ==="
-git diff --no-ext-diff --
 
 cd "$CI_PROJECT_DIR"
 
@@ -429,6 +429,9 @@ for cand in \
 done
 
 install_fresh_llvm_for_konan "$PLATFORM"
+
+echo "=== git diff after kn-action Kotlin patches ==="
+git diff --no-ext-diff --
 
 BUILD_OHOS="$KOTLIN_ROOT/scripts/build-ohos.sh"
 if [ -f "$BUILD_OHOS" ]; then

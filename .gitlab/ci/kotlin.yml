@@ -1,29 +1,24 @@
 # Kotlin OH build — port of .github/workflows/build-kotlin.yml (GitLab matrix).
 # Web/API: TARGET=kotlin → Kotlin only (no LLVM jobs). TARGET=llvm → LLVM stages then Kotlin build & HAP test.
-# MR: Kotlin path changes → Kotlin only. LLVM path changes → LLVM only (use manual TARGET=llvm for Kotlin after LLVM).
+# MR: changes under CI roots (.gitlab, .github, scripts, manifest, patches) or root .gitlab-ci.yml → Kotlin (LLVM pipeline may run too).
 # Runners: kotlin + OS + arch (AGENTS.md). Requires GITCODE_SSH_PRIVATE_KEY for kotlin clone.
 #
-# When llvm:provide-artifacts is in the pipeline (TARGET=llvm), kotlin jobs wait on it via needs (optional).
+# When llvm:provide-artifacts is in the pipeline (TARGET=llvm or MR LLVM paths), kotlin jobs need it (optional: true
+# so TARGET=kotlin pipelines still work). TARGET=llvm requires llvm-artifacts.env — see kotlin-build.sh.
 
 .kotlin-build-rules:
   rules:
+    # Scheduled LLVM clean: run Kotlin after llvm:provide-artifacts (same pipeline artifact names).
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $TARGET == "llvm"'
-      when: never
     - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "kotlin"'
     - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "llvm"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .gitlab-ci.yml
-        - .gitlab/ci/kotlin.yml
-        - .github/workflows/build-kotlin.yml
-        - scripts/ci/kotlin-build.sh
-        - scripts/ci/kotlin-hap-smoke-test.sh
-        - scripts/proxy.init.gradle
-        - scripts/rewrite-gradle-wrapper-reposlite.sh
+        - .gitlab/**/*
+        - scripts/**/*
+        - manifest/**/*
         - patches/**/*
-        - .github/actions/prepare-repo/**/*
-        - .github/actions/upload-artifact-local/**/*
-        - .github/actions/download-artifact-local/**/*
 
 .kotlin-build-common:
   stage: kotlin_build
