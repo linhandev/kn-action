@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg wget \
-    git openssh-client patch \
+    git git-lfs openssh-client patch \
     build-essential unzip zip file \
  && curl -fsSL https://repos.azul.com/azul-repo.key \
     | gpg --dearmor -o /usr/share/keyrings/azul.gpg \
@@ -22,6 +22,7 @@ RUN apt-get update \
     > /etc/apt/sources.list.d/adoptium.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends zulu8-jdk temurin-17-jdk temurin-21-jdk \
+ && git lfs install \
  && rm -rf /var/lib/apt/lists/*
 
 # APT uses names like temurin-21-jdk-amd64; kotlin-build.sh looks for temurin-21-amd64 / zulu-8. Symlinks bridge that (same idea on arm64).
