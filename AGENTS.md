@@ -8,7 +8,7 @@ This file is for humans and coding agents working on **kn-action**: **GitLab CI*
 
 - **Orchestration**: Pipelines clone upstream repos (mostly **GitCode**), run long builds, and publish results; primary CI entry is **`.gitlab-ci.yml`** (expand with **`include:`** as Kotlin/LLVM jobs land).
 - **Kotlin / OH**: Building **Kotlin for OpenHarmony** via `scripts/build-ohos.sh` and repo prep through [`.github/actions/prepare-repo`](.github/actions/prepare-repo/README.md) (invoked from CI scripts; path is historical).
-- **LLVM / OH**: Google **repo** with `--standalone-manifest` using manifest files in `manifest/` directory (e.g. `llvm-1914.xml`, `llvm-1914-bare.xml`, `llvm-1917.xml`) to sync an OH LLVM workspace; Linux LLVM builds typically use a **Docker** image built from [`infra/docker/Dockerfile`](infra/docker/Dockerfile).
+- **LLVM / OH**: Google **repo** with `--standalone-manifest` using manifest files in `manifest/` directory (e.g. `llvm-1914.xml`, `llvm-1914-bare.xml`, `llvm-1917.xml`) to sync an OH LLVM workspace; Linux LLVM builds typically use a **Docker** image built from [`infra/docker/linux-llvm-builder/Dockerfile`](infra/docker/linux-llvm-builder/Dockerfile).
 - **Local artifacts**: Large outputs use **`~/runner/artifact`** and the LAN artifact server; **`upload-artifact-local` / `download-artifact-local`** composite actions implement the same contract for any CI that calls their shell scripts with the variables below.
 
 ---
@@ -86,7 +86,7 @@ Checklist so **`llvm`**-tagged runners can **`repo` sync**, build, and drop **`l
 
 | Item | Notes |
 |------|------|
-| **Image** | **`ghcr.io/<repo-owner>/kn-action-linux-llvm-builder:<tag>`** — pin must match [`infra/docker/Dockerfile`](infra/docker/Dockerfile). |
+| **Image** | **`ghcr.io/<repo-owner>/kn-action-linux-llvm-builder:<tag>`** — pin must match [`infra/docker/linux-llvm-builder/Dockerfile`](infra/docker/linux-llvm-builder/Dockerfile). |
 | **Container user** | **root** (default for the image). `$HOME=/root` inside the container; `builds_dir` and volume mount targets use `/root/…` paths. |
 | **Volumes** | Bind-mount host paths into container `/root/…`: **`~/gitlab-runner/llvm:/root/gitlab-runner/llvm`**, **`~/gitlab-runner/cache:/root/gitlab-runner/cache`**, **`~/runner/artifact:/root/runner/artifact`**. This keeps the `~/gitlab-runner/…` convention uniform — `~` is `/home/user` on the host and `/root` inside the container. |
 | **Base tooling** | Image provides **bash**, **git**, **git-lfs**, **curl**, **Python 3**, **pip**, **ccache**, **ninja-build**. |

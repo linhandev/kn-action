@@ -1,0 +1,101 @@
+# Run the same Linux LLVM path as GitLab (`scripts/ci/llvm-build.sh linux`) inside the published builder image.
+# Use after `Build Linux image` has pushed `ghcr.io/<owner>/kn-action-linux-llvm-builder` (or pass a custom image).
+# Expect long runtime and large disk use; default job timeout is 6h.
+
+name: LLVM Linux (Docker)
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_clean_build:
+        description: 'Wipe LLVM workspace before build (LLVM_CLEAN_BUILD)'
+        type: boolean
+        default: false
+      llvm_manifest:
+        description: 'Manifest file under manifest/ (e.g. llvm-1914.xml)'
+        type: string
+        default: 'llvm-1914.xml'
+      builder_image:
+        description: 'Container image (empty = ghcr.io/<owner>/kn-action-linux-llvm-builder:latest)'
+        type: string
+        default: ''
+      free_disk_space:
+        description: 'Remove preinstalled SDKs on GitHub-hosted runners to free disk'
+        type: boolean
+        default: true
+
+concurrency:
+  group: llvm-linux-docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  CI_PIPELINE_ID: ${{ github.run_id }}
+
+jobs:
+  llvm-linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout kn-action
+        uses: actions/checkout@v6
+
+      - name: Free disk space (optional)
+        if: ${{ inputs.free_disk_space == true }}
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell 2>/dev/null || true
+          df -h
+
+      - name: Resolve builder image
+        id: img
+        run: |
+          set -euo pipefail
+          B="${{ inputs.builder_image }}"
+          if [ -z "$B" ]; then
+            B="ghcr.io/${{ github.repository_owner }}/kn-action-linux-llvm-builder:latest"
+          fi
+          echo "image=$B" >> "$GITHUB_OUTPUT"
+          echo "Using image: $B" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull builder image
+        run: docker pull "${{ steps.img.outputs.image }}"
+
+      - name: Build LLVM (linux) in Docker
+        env:
+          MANIFEST_FILE: ${{ inputs.llvm_manifest }}
+          LLVM_CLEAN_BUILD: ${{ inputs.llvm_clean_build }}
+        run: |
+          set -euo pipefail
+          IMG="${{ steps.img.outputs.image }}"
+          WS="${{ github.workspace }}"
+          docker run --rm \
+            -e CI=true \
+            -e CI_PROJECT_DIR=/workspace \
+            -e CI_PIPELINE_ID="${{ github.run_id }}" \
+            -e CI_COMMIT_SHA="${{ github.sha }}" \
+            -e MANIFEST_FILE="${{ inputs.llvm_manifest }}" \
+            -e LLVM_CLEAN_BUILD="${{ inputs.llvm_clean_build }}" \
+            -e GIT_TERMINAL_PROMPT=0 \
+            -v "$WS:/workspace" \
+            -w /workspace \
+            "$IMG" \
+            bash scripts/ci/llvm-build.sh linux
+
+      - name: Summary — packages artifact path
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "### LLVM Linux (Docker) finished" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Outer tar (if produced): \`CI_PROJECT_DIR/.llvm-packages/\` on the mounted workspace" >> "$GITHUB_STEP_SUMMARY"
+          ls -la "${{ github.workspace }}/.llvm-packages" 2>/dev/null || echo "(no .llvm-packages yet or build failed early)" >> "$GITHUB_STEP_SUMMARY"

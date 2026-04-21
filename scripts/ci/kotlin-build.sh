@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GitLab CI port of .github/workflows/build-kotlin.yml (matrix: linux-x64, macos-arm64, macos-x64, windows-x64).
-# Requires: GitCode SSH for kotlin clone; JDK 8 + modern JDK per platform. Linux CI may bootstrap Temurin 8/21 via Adoptium if missing.
+# Requires: GitCode SSH for kotlin clone; JDK 8 + modern JDK per platform. Linux/Windows CI may bootstrap Temurin 8/21 via Adoptium if missing.
 set -euo pipefail
 
 : "${CI_PROJECT_DIR:?}"
@@ -68,11 +68,36 @@ kotlin_gitcode_materialize_key() {
 
 kotlin_gitcode_ssh_env() {
   : "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
-  case "${RUNNER_OS:-}" in
-    Windows) return 0 ;;
-  esac
   mkdir -p "$RUNNER_TEMP"
   local _gk="${RUNNER_TEMP}/gitcode_known_hosts"
+  case "${RUNNER_OS:-}" in
+    Windows)
+      local idf gkf _wk
+      ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >>"$_gk" 2>/dev/null || true
+      if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
+        _wk="${RUNNER_TEMP}/gitcode_id_ed25519"
+        kotlin_gitcode_materialize_key "$_wk"
+        idf="$(cygpath -m "$_wk" 2>/dev/null || echo "$_wk")"
+        gkf="$(cygpath -m "$_gk" 2>/dev/null || echo "$_gk")"
+        export GIT_SSH_COMMAND="ssh -i ${idf} -o IdentitiesOnly=yes -o UserKnownHostsFile=${gkf} -o StrictHostKeyChecking=yes"
+        echo "kotlin_gitcode_ssh_env: Windows using GITCODE_SSH_PRIVATE_KEY (File or inline)" >&2
+        return 0
+      fi
+      if [ -f "${HOME}/.ssh/id_ed25519" ]; then
+        idf="$(cygpath -m "$HOME/.ssh/id_ed25519" 2>/dev/null || echo "$HOME/.ssh/id_ed25519")"
+        if [ -f "${HOME}/.ssh/known_hosts" ]; then
+          gkf="$(cygpath -m "$HOME/.ssh/known_hosts" 2>/dev/null || echo "$HOME/.ssh/known_hosts")"
+        else
+          gkf="$(cygpath -m "$_gk" 2>/dev/null || echo "$_gk")"
+        fi
+        export GIT_SSH_COMMAND="ssh -i ${idf} -o IdentitiesOnly=yes -o UserKnownHostsFile=${gkf} -o StrictHostKeyChecking=yes"
+        echo "kotlin_gitcode_ssh_env: Windows using ${idf}" >&2
+        return 0
+      fi
+      echo "kotlin_gitcode_ssh_env: warning: Windows has no GITCODE_SSH_PRIVATE_KEY and no ~/.ssh/id_ed25519" >&2
+      return 0
+      ;;
+  esac
   ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >>"$_gk" 2>/dev/null || true
 
   if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
@@ -124,15 +149,6 @@ KONAN_DATA_DIR="${CI_CACHE_ROOT}/konan_data"
 MAVEN_USER_HOME="${CI_CACHE_ROOT}maven_user_home"
 MAVEN_LOCAL_REPO="${MAVEN_USER_HOME}/.m2/repository"
 ARTIFACT_LOCAL_PATH="${ARTIFACT_LOCAL_PATH/#\~/$HOME}"
-
-# --- Windows: Git for Windows OpenSSH (AGENTS.md) ---
-if [ "$RUNNER_OS" = "Windows" ]; then
-  if [ -f "$HOME/.ssh/id_ed25519" ] && [ -f "$HOME/.ssh/known_hosts" ]; then
-    idf="$(cygpath -m "$HOME/.ssh/id_ed25519" 2>/dev/null || echo "$HOME/.ssh/id_ed25519")"
-    khf="$(cygpath -m "$HOME/.ssh/known_hosts" 2>/dev/null || echo "$HOME/.ssh/known_hosts")"
-    export GIT_SSH_COMMAND="ssh -i ${idf} -o IdentitiesOnly=yes -o UserKnownHostsFile=${khf} -o StrictHostKeyChecking=yes"
-  fi
-fi
 
 # --- macOS: Xcode tool presence ---
 if [ "$RUNNER_OS" = "macOS" ]; then
@@ -276,6 +292,72 @@ kotlin_linux_adoptium_bootstrap_maybe() {
   return 0
 }
 
+kotlin_windows_install_adoptium_jdk() {
+  local major="${1:?}"
+  [ "$RUNNER_OS" = "Windows" ] || return 1
+  local arch=x64 url root dest z
+  case "$major" in
+    8) url="${KOTLIN_ADOPTIUM_JDK8_URL_WIN:-https://api.adoptium.net/v3/binary/latest/8/ga/windows/${arch}/jdk/hotspot/normal/eclipse}" ;;
+    21) url="${KOTLIN_ADOPTIUM_JDK21_URL_WIN:-https://api.adoptium.net/v3/binary/latest/21/ga/windows/${arch}/jdk/hotspot/normal/eclipse}" ;;
+    *) echo "kotlin_windows_install_adoptium_jdk: unsupported major: $major" >&2; return 1 ;;
+  esac
+  root="${PERSISTED_CACHE_ROOT}/adoptium/windows-${arch}/jdk${major}"
+  mkdir -p "$root"
+  dest="$(find "$root" -maxdepth 1 -type d -name 'jdk-*' 2>/dev/null | head -1)"
+  if [ -n "$dest" ] && { [ -f "$dest/bin/java.exe" ] || [ -f "$dest/bin/java" ]; }; then
+    echo "kotlin-build: reusing cached Adoptium ${major} (Windows) at $dest" >&2
+    echo "$dest"
+    return 0
+  fi
+  echo "kotlin-build: downloading Temurin ${major} for windows/${arch}..." >&2
+  z="${RUNNER_TEMP}/adoptium-jdk${major}.zip"
+  curl -fsSL -o "$z" "$url"
+  shopt -s nullglob
+  rm -rf "${root}"/jdk-* 2>/dev/null || true
+  shopt -u nullglob
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q -o "$z" -d "$root"
+  else
+    local zwin rwin
+    zwin=$(cygpath -w "$z" 2>/dev/null || echo "$z")
+    rwin=$(cygpath -w "$root" 2>/dev/null || echo "$root")
+    powershell.exe -NoProfile -Command "Expand-Archive -LiteralPath \"$zwin\" -DestinationPath \"$rwin\" -Force"
+  fi
+  rm -f "$z"
+  dest="$(find "$root" -maxdepth 1 -type d -name 'jdk-*' | head -1)"
+  if [ -z "$dest" ] || { [ ! -f "$dest/bin/java.exe" ] && [ ! -f "$dest/bin/java" ]; }; then
+    echo "kotlin-build: Adoptium ${major} unpack failed under $root" >&2
+    ls -la "$root" >&2 || true
+    return 1
+  fi
+  echo "$dest"
+  return 0
+}
+
+kotlin_windows_adoptium_bootstrap_maybe() {
+  [ "$RUNNER_OS" = "Windows" ] || return 0
+  [ -n "${CI:-}" ] || return 0
+  [ "${KOTLIN_ADOPTIUM_BOOTSTRAP:-true}" = "false" ] && return 0
+  _win_java_home_ok() {
+    [ -n "${1:-}" ] && { [ -f "${1}/bin/java.exe" ] || [ -f "${1}/bin/java" ]; }
+  }
+  if _win_java_home_ok "${JAVA_HOME:-}" && _win_java_home_ok "${JDK_18:-}"; then
+    return 0
+  fi
+  if ! _win_java_home_ok "${JAVA_HOME:-}"; then
+    local j
+    j="$(kotlin_windows_install_adoptium_jdk 21)" || return 1
+    export JAVA_HOME="$j"
+    export PATH="$JAVA_HOME/bin:$PATH"
+  fi
+  if ! _win_java_home_ok "${JDK_18:-}"; then
+    local j
+    j="$(kotlin_windows_install_adoptium_jdk 8)" || return 1
+    export JDK_18="$j"
+  fi
+  return 0
+}
+
 # --- Java toolchains (match GHA setup-java order: default `java` = last installed) ---
 # CI variables JAVA_HOME, JDK_18, JAVA_HOME_8, JAVA_HOME_11, JAVA_HOME_17, JAVA_HOME_21 override auto-detect.
 if [ -z "${JDK_18:-}" ] && [ -n "${JAVA_HOME_8:-}" ]; then
@@ -354,6 +436,10 @@ if [ "$RUNNER_OS" = "Linux" ] && [ -n "${CI:-}" ]; then
   if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME}/bin/java" ] || [ -z "${JDK_18:-}" ] || [ ! -x "${JDK_18}/bin/java" ]; then
     kotlin_linux_adoptium_bootstrap_maybe
   fi
+fi
+
+if [ "$RUNNER_OS" = "Windows" ] && [ -n "${CI:-}" ]; then
+  kotlin_windows_adoptium_bootstrap_maybe
 fi
 
 [ -n "${JAVA_HOME:-}" ] && export PATH="$JAVA_HOME/bin:$PATH"
