@@ -229,10 +229,28 @@ if [ "$RUNNER_OS" = "macOS" ] && [ -x /usr/libexec/java_home ]; then
     export JAVA_HOME="${JAVA_HOME_11:-$(/usr/libexec/java_home -v 11 2>/dev/null || /usr/libexec/java_home 2>/dev/null || true)}"
   fi
 elif [ "$RUNNER_OS" = "Linux" ]; then
+  # Prefer well-known paths, then any /usr/lib/jvm/* whose java reports 8 / 1.8 (Temurin, Corretto, etc.).
   for d in /usr/lib/jvm/java-8-openjdk-amd64 /usr/lib/jvm/java-1.8.0-openjdk-amd64 \
-           /usr/lib/jvm/java-8-openjdk /usr/lib/jvm/zulu-8; do
-    [ -d "$d" ] && export JDK_18="${JDK_18:-$d}" && break
+           /usr/lib/jvm/java-8-openjdk /usr/lib/jvm/zulu-8 \
+           /usr/lib/jvm/temurin-8-jdk-amd64 /usr/lib/jvm/temurin-8-jdk-x64 \
+           /usr/lib/jvm/java-1.8.0-amazon-corretto /usr/lib/jvm/amazon-corretto-8 \
+           /usr/lib/jvm/liberica-jdk-8 /usr/lib/jvm/java-8-oracle; do
+    [ -d "$d" ] && [ -x "$d/bin/java" ] && export JDK_18="${JDK_18:-$d}" && break
   done
+  if [ -z "${JDK_18:-}" ] && [ -d /usr/lib/jvm ]; then
+    shopt -s nullglob
+    for d in /usr/lib/jvm/*; do
+      [ -d "$d" ] || continue
+      [ -x "$d/bin/java" ] || continue
+      _jv="$("$d/bin/java" -version 2>&1 | head -1 || true)"
+      if echo "$_jv" | grep -qE 'version "(1\.8|8\.)'; then
+        export JDK_18="$d"
+        echo "kotlin-build: resolved JDK_18 on Linux via scan: $d ($_jv)" >&2
+        break
+      fi
+    done
+    shopt -u nullglob
+  fi
   for d in /usr/lib/jvm/java-21-openjdk-amd64 /usr/lib/jvm/java-21-openjdk \
            /usr/lib/jvm/temurin-21-amd64 /usr/lib/jvm/java-11-openjdk; do
     if [ -d "$d" ]; then
