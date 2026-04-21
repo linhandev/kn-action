@@ -13,6 +13,49 @@
 
 set -euo pipefail
 
+# MSYS rm/unlink can return EINVAL ("Invalid argument") on some Windows paths; use Win32 delete.
+rm_one_win32_fallback() {
+  local f="${1:?}"
+  [[ -e "$f" ]] || return 0
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) return 1 ;;
+  esac
+  command -v cygpath &>/dev/null || return 1
+  local wf
+  wf="$(cygpath -w "$f" 2>/dev/null || true)"
+  [[ -n "$wf" ]] || return 1
+  cmd.exe //c "if exist \"$wf\" del /f /q \"$wf\"" &>/dev/null || true
+  [[ ! -e "$f" ]]
+}
+
+# Windows: prior Gradle runs leave .gradle (checksums.lock, etc.); daemons keep files open so
+# `git clean -ffdx` warns "failed to remove ... Invalid argument". Stop daemons and drop .gradle first.
+ci_windows_prepare_reused_repo() {
+  local repo_dir="${1:?}"
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) return 0 ;;
+  esac
+  [[ -d "$repo_dir/.git" ]] || return 0
+
+  if [[ -f "$repo_dir/gradlew" ]]; then
+    ( cd "$repo_dir" && ./gradlew --stop ) &>/dev/null || true
+  elif [[ -f "$repo_dir/gradlew.bat" ]]; then
+    ( cd "$repo_dir" && cmd.exe //c "gradlew.bat --stop" ) &>/dev/null || true
+  fi
+
+  if [[ -d "$repo_dir/.gradle" ]]; then
+    echo "prepare-repo: Windows removing .gradle before git clean: $repo_dir/.gradle" >&2
+    rm -rf "$repo_dir/.gradle" 2>/dev/null || true
+    if [[ -d "$repo_dir/.gradle" ]] && command -v cygpath &>/dev/null; then
+      local wg
+      wg="$(cygpath -w "$repo_dir/.gradle" 2>/dev/null || true)"
+      [[ -n "$wg" ]] && cmd.exe //c "if exist \"$wg\" rd /s /q \"$wg\"" &>/dev/null || true
+    fi
+  fi
+}
+
 # Remove stale lock files in an existing git worktree.
 # Self-hosted runners reuse workspace directories; interrupted jobs can leave .lock files behind.
 clear_stale_git_locks() {
@@ -31,7 +74,10 @@ clear_stale_git_locks() {
     "$git_dir/refs/remotes/"*.lock; do
     [[ -e "$lock" ]] || continue
     echo "prepare-repo: removing stale lock: $lock" >&2
-    rm -f "$lock"
+    rm -f "$lock" 2>/dev/null || true
+    if [[ -e "$lock" ]]; then
+      rm_one_win32_fallback "$lock" || true
+    fi
   done
 }
 
@@ -131,6 +177,7 @@ REFERENCE_REPO="${LOCAL_REFERENCE_DIR}/${REPO_NAME}"
 if [[ -d "$WORKSPACE_DIR/.git" ]]; then
   case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*)
+      ci_windows_prepare_reused_repo "$WORKSPACE_DIR"
       if ! git_lock_retry "$WORKSPACE_DIR" clean -ffdx; then
         echo "prepare-repo: git clean failed in reused workspace; recloning: $WORKSPACE_DIR" >&2
         rm -rf "$WORKSPACE_DIR"
