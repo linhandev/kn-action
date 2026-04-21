@@ -70,7 +70,6 @@ git config --global --add safe.directory '*' 2>/dev/null || true
 git config --global user.email "ci@ci.ci" 2>/dev/null || true
 git config --global user.name "ci" 2>/dev/null || true
 
-export REPO_URL="${REPO_URL:-https://gitee.com/oschina/repo.git}"
 log_info "setup-repo-tool"
 bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
 export PATH="$REPO_DIR:$PATH"
@@ -97,9 +96,9 @@ if ! _repo_valid || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
   REFERENCE_FLAG=""
   ref_dir="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
   [ -d "$ref_dir" ] && REFERENCE_FLAG="--reference=$ref_dir"
-  MANIFEST_PATH="$CI_PROJECT_DIR/manifest/$MANIFEST_FILE"
-  log_info "repo init --standalone-manifest (manifest=$MANIFEST_FILE, repo-url=$REPO_URL)"
-  repo init --standalone-manifest -u "file://$MANIFEST_PATH" --repo-url="$REPO_URL" $REFERENCE_FLAG
+  MANIFEST_REPO_URL="${MANIFEST_REPO_URL:-http://192.168.3.6:8929/linhandev/kn-action.git}"
+  log_info "repo init -u $MANIFEST_REPO_URL -m $MANIFEST_FILE"
+  repo init -u "$MANIFEST_REPO_URL" -m "$MANIFEST_FILE" $REFERENCE_FLAG
   echo "$MANIFEST_FILE" > "$LLVM_WORKSPACE/.repo/.manifest_file"
 else
   log_info "repo init skipped (.repo valid for manifest=$MANIFEST_FILE)"
