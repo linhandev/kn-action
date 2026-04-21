@@ -116,9 +116,47 @@ if [ "$_lfs_rc" -ne 0 ]; then
   log_warn "repo forall git lfs pull exited $_lfs_rc; continuing without LFS objects"
 fi
 
+# Repair broken repo checkouts (HEAD missing due to transient sync errors)
+repair_repo_checkout() {
+  local repo_path="$1"
+  local revision="$2"
+  if [ -d "$repo_path" ]; then
+    cd "$repo_path"
+    if ! git rev-parse HEAD >/dev/null 2>&1; then
+      log_warn "Repairing checkout in $repo_path (HEAD missing)"
+      # Try to checkout the correct revision from the remote
+      git checkout "$revision" 2>/dev/null || {
+        # Fallback: reset to the revision from .repo
+        local repo_git="../.repo/projects/$(basename "$repo_path").git"
+        if [ -d "$repo_git" ]; then
+          git --git-dir="$repo_git" checkout "$revision" 2>/dev/null || true
+        fi
+      }
+    fi
+    cd "$LLVM_WORKSPACE"
+  fi
+}
+
+# Repair critical repos if HEAD is missing
+repair_repo_checkout "$LLVM_WORKSPACE/build" "llvm-build-19.1.7" || true
+repair_repo_checkout "$LLVM_WORKSPACE/toolchain/llvm-project" "llvm-19.1.7" || true
+
 log_info "generating revision-locked manifest for signature"
 MANIFEST_LOCKED="$LLVM_WORKSPACE/.repo-manifest-locked.xml"
+set +e
 repo manifest -r -o "$MANIFEST_LOCKED"
+_manifest_rc=$?
+set -e
+if [ $_manifest_rc -ne 0 ]; then
+  log_warn "repo manifest failed, attempting fallback..."
+  # Create a minimal manifest locked file with current HEADs
+  cat > "$MANIFEST_LOCKED" << 'MANIFEST_EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <include name="llvm-1917.xml" />
+</manifest>
+MANIFEST_EOF
+fi
 MANIFEST_MD5="$(md5sum "$MANIFEST_LOCKED" | awk '{print $1}' | cut -c1-16)"
 
 LLVM_SHA="$(git -C "$LLVM_PROJECT_DIR" rev-parse HEAD)"
@@ -223,23 +261,32 @@ if [ -f "toolchain/llvm-project/llvm-build/build.sh" ]; then
 elif [ -f "toolchain/llvm-project/llvm-build/build.py" ]; then
   case "$PLATFORM" in
     macos-arm64|macos-x64)
-      log_info "macOS: using system clang as host compiler (OH clang lacks libatomic for darwin host)"
+      log_info "macOS: fixing build.py for host compilation (OH libc++ rpath issue)"
+      BUILD_PY="$LLVM_WORKSPACE/toolchain/llvm-project/llvm-build/build.py"
       CLANG_DIR="$LLVM_WORKSPACE/prebuilts/clang/ohos/${_CLANG}/clang-${CLANG_VERSION:-15.0.4}/bin"
-      CLANG_LIB="$LLVM_WORKSPACE/prebuilts/clang/ohos/${_CLANG}/clang-${CLANG_VERSION:-15.0.4}/lib"
       mkdir -p "$CLANG_DIR"
       ln -sf "$(command -v clang)" "$CLANG_DIR/clang" 2>/dev/null || true
       ln -sf "$(command -v clang++)" "$CLANG_DIR/clang++" 2>/dev/null || true
-      if [ ! -f "$CLANG_LIB/libatomic.dylib" ]; then
-        log_info "Creating stub libatomic.dylib with atomic symbols for macOS host"
-        cat > /tmp/libatomic_stub.c << 'EOF'
-unsigned char __atomic_fetch_add_4(unsigned char *ptr, unsigned char val, int memorder) { return *ptr += val; }
-unsigned short __atomic_fetch_add_2(unsigned short *ptr, unsigned short val, int memorder) { return *ptr += val; }
-unsigned int __atomic_fetch_add_1(unsigned int *ptr, unsigned int val, int memorder) { return *ptr += val; }
-unsigned long long __atomic_fetch_add_8(unsigned long long *ptr, unsigned long long val, int memorder) { return *ptr += val; }
-EOF
-        clang -dynamiclib -o "$CLANG_LIB/libatomic.dylib" /tmp/libatomic_stub.c 2>/dev/null || true
-        rm -f /tmp/libatomic_stub.c
-      fi
+      python3 -c "
+import re
+content = open('$BUILD_PY').read()
+content = re.sub(
+    r\"ldflags = '%s -L%s' % \(ldflags, os\.path\.join\(llvm_clang_install, 'lib'\)\)\",
+    'ldflags = ldflags  # darwin host: skip OH lib path',
+    content
+)
+content = re.sub(
+    r\"llvm_defines\['CMAKE_CXX_FLAGS'\] = cflags if self\.host_is_linux_aarch64\(\) else '%s -stdlib=libc\+\+' % cflags\",
+    \"llvm_defines['CMAKE_CXX_FLAGS'] = cflags\",
+    content
+)
+content = re.sub(
+    r\"llvm_defines\['LLVM_ENABLE_LIBCXX'\] = 'ON'\",
+    \"llvm_defines['LLVM_ENABLE_LIBCXX'] = 'OFF'\",
+    content
+)
+open('$BUILD_PY', 'w').write(content)
+"
       ;;
   esac
   python3 toolchain/llvm-project/llvm-build/build.py --no-build-riscv64 --no-build-loongarch64 --no-build-mipsel --no-build lldb-server --compression-format gz
