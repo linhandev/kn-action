@@ -4,7 +4,7 @@
 # Use fresh OH LLVM for Konan: pipeline input kotlin_use_fresh_llvm → KOTLIN_USE_FRESH_LLVM (root .gitlab-ci.yml).
 # MR: changes under CI roots (.gitlab, .github, scripts, manifest, patches) or root .gitlab-ci.yml → Kotlin (LLVM pipeline may run too).
 # Runners: kotlin + OS + arch (AGENTS.md). GitCode SSH: scripts/ci/kotlin-build.sh (GITCODE_SSH_PRIVATE_KEY or ~/.ssh).
-# Linux Kotlin (build:kotlin:linux:x64): ghcr.io/<owner>/kn-action-kotlin-linux-builder:latest (GH workflow build-kotlin-linux-image.yml). pull_policy: always so runners pick up newly pushed images.
+# Linux Kotlin (build:kotlin:linux:x64): ghcr.io/<owner>/kn-action-kotlin-linux-builder:<short-sha> — pin matches GHA build-kotlin-linux-image.yml tags (short git SHA); bump when Dockerfile changes and image is rebuilt.
 #
 # llvm:provide-artifacts is optional on needs when LLVM stages are omitted.
 
@@ -40,8 +40,8 @@
 
 .kotlin-linux-builder-image:
   image:
-    name: ghcr.io/linhandev/kn-action-kotlin-linux-builder:latest
-    pull_policy: always
+    name: ghcr.io/linhandev/kn-action-kotlin-linux-builder:d8708ed
+    pull_policy: if-not-present
 
 build:kotlin:linux:x64:
   extends:

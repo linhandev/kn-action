@@ -110,7 +110,7 @@ On **Windows**, if the runner runs as a service account, place keys under **that
 
 #### Linux (`kotlin`, Docker executor)
 
-**`build:kotlin:linux:x64`** runs in **`ghcr.io/<repo-owner>/kn-action-kotlin-linux-builder:latest`** (see [**.github/workflows/build-kotlin-linux-image.yml**](.github/workflows/build-kotlin-linux-image.yml)). GitLab uses **`pull_policy: always`** in [**.gitlab/ci/kotlin.yml**](.gitlab/ci/kotlin.yml) so each job pulls the current **`latest`** from GHCR. The image supplies **Zulu 8** + **Temurin 17/21** (see the Dockerfile).
+**`build:kotlin:linux:x64`** runs in **`ghcr.io/<repo-owner>/kn-action-kotlin-linux-builder:<short-sha>`** — the **`<short-sha>`** is pinned in [**.gitlab/ci/kotlin.yml**](.gitlab/ci/kotlin.yml) to match the tag pushed by [**.github/workflows/build-kotlin-linux-image.yml**](.github/workflows/build-kotlin-linux-image.yml); bump it when [**`infra/docker/kotlin-linux-builder/Dockerfile`**](infra/docker/kotlin-linux-builder/Dockerfile) changes and a new image is on GHCR. The image supplies **Zulu 8** + **Temurin 17/21** (see the Dockerfile).
 
 GitCode SSH inside the job container: default user is often **root** (`$HOME=/root`). Provide **`/root/.ssh`** (or **`GITCODE_SSH_PRIVATE_KEY`**) so **`scripts/ci/kotlin-build.sh`** can clone — same trust model as other Kotlin runners; bind-mount host **`.ssh`** into the build container if your runner uses Docker with volumes.
 
@@ -191,7 +191,7 @@ SSH hosts: **`linux`**, **`win`**, **`mini`**, **studio**. **Twelve** registrati
 
 **Tags:** exactly **three**: role (**`kotlin`** / **`llvm`** / **`chore`**), OS (**`linux`**, **`windows`**, **`macos`**), arch (**`x64`** / **`arm64`**). No **`docker`** tag — executor type is set in **`config.toml`**, not tags.
 
-**`image:`** in **`.gitlab-ci.yml`** is honored only for **`docker`** or **`kubernetes`** executors. **Shell** executor **ignores** **`image:`** — the job runs on the host without the container JDKs. **`kotlin-linux-x64`** must use **`executor = "docker"`** (same pattern as **`llvm-linux-x64`**) so [**`.gitlab/ci/kotlin.yml`**](.gitlab/ci/kotlin.yml) **`build:kotlin:linux:x64`** pulls **`ghcr.io/.../kn-action-kotlin-linux-builder:latest`**.
+**`image:`** in **`.gitlab-ci.yml`** is honored only for **`docker`** or **`kubernetes`** executors. **Shell** executor **ignores** **`image:`** — the job runs on the host without the container JDKs. **`kotlin-linux-x64`** must use **`executor = "docker"`** (same pattern as **`llvm-linux-x64`**) so [**`.gitlab/ci/kotlin.yml`**](.gitlab/ci/kotlin.yml) **`build:kotlin:linux:x64`** pulls **`ghcr.io/.../kn-action-kotlin-linux-builder:<short-sha>`**.
 
 **Runner `builds_dir` (spec, all hosts):** **`~/gitlab-runner/{kotlin,llvm,chore}`**. On Windows: **`/c/Users/<user>/gitlab-runner/{kotlin,llvm,chore}`** (Git Bash paths).
 
