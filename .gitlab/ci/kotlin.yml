@@ -43,7 +43,7 @@
 
 .kotlin-linux-builder-image:
   image:
-    name: ghcr.io/linhandev/kn-action-kotlin-linux-builder:3a0eb36
+    name: ghcr.io/linhandev/kn-action-kotlin-linux-builder:0276604
     pull_policy: if-not-present
 
 build:kotlin:linux:x64:
