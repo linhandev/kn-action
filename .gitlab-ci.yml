@@ -12,10 +12,10 @@ spec:
       type: boolean
       default: false
       description: "When true, wipe the LLVM workspace before building (forces full rebuild, skips cache check)."
-    llvm_version:
+    oh_version:
       type: string
       default: "204"
-      description: "Dev / essentials id for final archive naming (platform_package.sh)."
+      description: "OpenHarmony / essentials id for final archive naming (platform_package.sh OH_VERSION)."
     llvm_manifest:
       type: string
       default: "llvm-1914.xml"
@@ -51,7 +51,7 @@ spec:
 variables:
   TARGET: "$[[ inputs.target ]]"
   LLVM_CLEAN_BUILD: "$[[ inputs.llvm_clean_build ]]"
-  LLVM_VERSION: "$[[ inputs.llvm_version ]]"
+  OH_VERSION: "$[[ inputs.oh_version ]]"
   LLVM_MANIFEST: "$[[ inputs.llvm_manifest ]]"
   LLVM_SKIP_PIPELINE: "$[[ inputs.llvm_skip_pipeline ]]"
   KOTLIN_USE_FRESH_LLVM: "$[[ inputs.kotlin_use_fresh_llvm ]]"

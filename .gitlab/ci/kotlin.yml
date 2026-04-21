@@ -3,7 +3,8 @@
 # LLVM jobs are excluded when LLVM_SKIP_PIPELINE=true (see .gitlab/ci/llvm.yml).
 # Use fresh OH LLVM for Konan: pipeline input kotlin_use_fresh_llvm → KOTLIN_USE_FRESH_LLVM (root .gitlab-ci.yml).
 # MR: changes under CI roots (.gitlab, .github, scripts, manifest, patches) or root .gitlab-ci.yml → Kotlin (LLVM pipeline may run too).
-# Runners: kotlin + OS + arch (AGENTS.md). Requires GITCODE_SSH_PRIVATE_KEY for kotlin clone.
+# Runners: kotlin + OS + arch (AGENTS.md). GitCode SSH: scripts/ci/kotlin-build.sh (GITCODE_SSH_PRIVATE_KEY or ~/.ssh).
+# Linux Kotlin (build:kotlin:linux:x64): shell executor on the host — not Docker (llvm-linux-x64 uses Docker + image:).
 #
 # llvm:provide-artifacts is optional on needs when LLVM stages are omitted.
 
@@ -36,16 +37,6 @@
     GIT_STRATEGY: fetch
     GIT_DEPTH: "0"
     GIT_CLEAN_FLAGS: "-ffd"
-  before_script:
-    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
-    - ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >> ~/.ssh/known_hosts 2>/dev/null || true
-    - |
-      if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
-        printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-        chmod 600 ~/.ssh/id_ed25519
-        eval "$(ssh-agent -s)"
-        ssh-add ~/.ssh/id_ed25519
-      fi
 
 build:kotlin:linux:x64:
   extends: .kotlin-build-common

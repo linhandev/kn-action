@@ -108,6 +108,10 @@ Clone uses **SSH** to GitCode. Install **`~/.ssh`** (for the **user that runs th
 
 On **Windows**, if the runner runs as a service account, place keys under **that account’s** home (e.g. **`…/ServiceProfiles/NetworkService/.ssh`** or the service user you configure) and lock down private key ACLs.
 
+#### Linux (`kotlin`, shell executor)
+
+**`kotlin-linux-x64`** uses **`executor = "shell"`** on the host (same model as **macOS** / **Windows** Kotlin runners), not Docker. **`$HOME`** is the runner service user’s home. Install GitCode SSH under **`~/.ssh`** for that user; **`scripts/ci/kotlin-build.sh`** also honors **`GITCODE_SSH_PRIVATE_KEY`** (writes a key under the job’s **`RUNNER_TEMP`** when set). Paths match the table in **Host layout**: **`~/gitlab-runner/kotlin`** (**`builds_dir`**), **`~/gitlab-runner/cache`**, **`~/runner/artifact`**.
+
 ---
 
 ## Product goals (scripts + pipelines)
@@ -174,7 +178,7 @@ SSH hosts: **`linux`**, **`win`**, **`mini`**, **studio**. **Twelve** registrati
 
 **Naming (`--description`):** **`{kotlin|llvm|chore}-{os}-{arch}`** only (e.g. **`kotlin-linux-x64`**, **`chore-macos-arm64`**). Do not embed SSH host names or executor type in the description.
 
-**Tags:** exactly **three**: role (**`kotlin`** / **`llvm`** / **`chore`**), OS (**`linux`**, **`windows`**, **`macos`**), arch (**`x64`** / **`arm64`**). No **`docker`** tag — LLVM on Linux uses **`executor = "docker"`** in **`config.toml`**; jobs with **`image:`** select that runner via tags + executor.
+**Tags:** exactly **three**: role (**`kotlin`** / **`llvm`** / **`chore`**), OS (**`linux`**, **`windows`**, **`macos`**), arch (**`x64`** / **`arm64`**). No **`docker`** tag — **`llvm-linux-x64`** uses **`executor = "docker"`** in **`config.toml`**; Kotlin on Linux uses **shell** like other Kotlin hosts. Jobs with **`image:`** in YAML match runners that provide that image (LLVM Linux).
 
 **Runner `builds_dir` (spec, all hosts):** **`~/gitlab-runner/{kotlin,llvm,chore}`**. On Windows: **`/c/Users/<user>/gitlab-runner/{kotlin,llvm,chore}`** (Git Bash paths).
 
@@ -308,7 +312,7 @@ Target: **>50% hit rate** after first build on unchanged source. Low hit rate (<
    glab api "projects/1/pipelines/<id>/jobs" | jq '.[] | select(.name | contains("llvm")) | {name, status, duration}'
    ```
 
-2. **Compare across platforms** — Linux Docker vs macOS shell. Large disparities often indicate cache issues.
+2. **Compare across platforms** — LLVM on Linux (Docker) vs LLVM on macOS (shell). Large disparities often indicate cache issues.
 
 3. **Verify volume mounts** on Linux runner:
    ```bash

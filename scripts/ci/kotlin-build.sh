@@ -40,6 +40,53 @@ RUNNER_TEMP="${RUNNER_TEMP:-${CI_PROJECT_DIR}/.ci-tmp/runner-temp}"
 mkdir -p "$RUNNER_TEMP"
 export RUNNER_TEMP
 
+# Job identity (which OS user / HOME the runner uses — compare with ~/.ssh on that account).
+echo "=== kotlin-build CI identity ===" >&2
+echo "whoami=$(whoami 2>/dev/null || true)" >&2
+echo "id=$(id 2>/dev/null || true)" >&2
+echo "HOME=${HOME:-}" >&2
+echo "GITCODE_SSH_PRIVATE_KEY=$([ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ] && echo set || echo unset)" >&2
+ls -la "${HOME}/.ssh" 2>/dev/null | head -15 >&2 || true
+echo "=== end kotlin-build CI identity ===" >&2
+
+# GitCode SSH: explicit GIT_SSH_COMMAND on Linux/macOS (no ssh-agent). Windows: block below.
+kotlin_gitcode_ssh_env() {
+  : "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
+  case "${RUNNER_OS:-}" in
+    Windows) return 0 ;;
+  esac
+  mkdir -p "$RUNNER_TEMP"
+  local _gk="${RUNNER_TEMP}/gitcode_known_hosts"
+  ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >>"$_gk" 2>/dev/null || true
+
+  if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
+    local _key="${RUNNER_TEMP}/gitcode_id_ed25519"
+    printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" >"$_key"
+    chmod 600 "$_key"
+    export GIT_SSH_COMMAND="ssh -i ${_key} -o IdentitiesOnly=yes -o UserKnownHostsFile=${_gk} -o StrictHostKeyChecking=yes"
+    echo "kotlin_gitcode_ssh_env: using CI variable GITCODE_SSH_PRIVATE_KEY (host ~/.ssh ignored for this clone)" >&2
+    return 0
+  fi
+
+  local _key=""
+  if [ -f "${HOME}/.ssh/id_ed25519" ]; then
+    _key="${HOME}/.ssh/id_ed25519"
+  elif [ -f "${HOME}/.ssh/id_rsa" ]; then
+    _key="${HOME}/.ssh/id_rsa"
+  fi
+  if [ -n "$_key" ]; then
+    if [ -f "${HOME}/.ssh/known_hosts" ]; then
+      export GIT_SSH_COMMAND="ssh -i ${_key} -o IdentitiesOnly=yes -o UserKnownHostsFile=${HOME}/.ssh/known_hosts -o StrictHostKeyChecking=yes"
+    else
+      export GIT_SSH_COMMAND="ssh -i ${_key} -o IdentitiesOnly=yes -o UserKnownHostsFile=${_gk} -o StrictHostKeyChecking=yes"
+    fi
+    echo "kotlin_gitcode_ssh_env: using ${_key} (user $(id -un), HOME=${HOME})" >&2
+    return 0
+  fi
+  echo "kotlin_gitcode_ssh_env: warning: no GITCODE_SSH_PRIVATE_KEY and no ~/.ssh/id_ed25519 or id_rsa" >&2
+}
+kotlin_gitcode_ssh_env
+
 PERSISTED_CACHE_ROOT="${PERSISTED_CACHE_ROOT/#\~/$HOME}"
 CLEAN_CACHE_ROOT="${RUNNER_TEMP}/clean-cache"
 CLEAN_BUILD="${KOTLIN_CLEAN_BUILD:-$DEFAULT_CLEAN_BUILD}"
