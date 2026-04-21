@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GitLab CI port of .github/workflows/build-kotlin.yml (matrix: linux-x64, macos-arm64, macos-x64, windows-x64).
-# Requires: runner has GitCode SSH for kotlin clone; JDK 8/11/17/21 per platform (see resolve_java_*).
+# Requires: GitCode SSH for kotlin clone; JDK 8 + modern JDK per platform. Linux CI may bootstrap Temurin 8/21 via Adoptium if missing.
 set -euo pipefail
 
 : "${CI_PROJECT_DIR:?}"
@@ -215,6 +215,67 @@ fi
 
 cd "$CI_PROJECT_DIR"
 
+# Linux shell executors may have no JDK installed. Download Temurin to persisted cache (Gradle needs 17/21; build-ohos needs 8).
+# Override: KOTLIN_ADOPTIUM_JDK8_URL / KOTLIN_ADOPTIUM_JDK21_URL (full tarball URL). Disable: KOTLIN_ADOPTIUM_BOOTSTRAP=false.
+kotlin_linux_install_adoptium_jdk() {
+  local major="${1:?}"
+  [ "$RUNNER_OS" = "Linux" ] || return 1
+  local arch url
+  case "${RUNNER_ARCH:-}" in
+    X64) arch=x64 ;;
+    ARM64) arch=aarch64 ;;
+    *) arch=x64 ;;
+  esac
+  case "$major" in
+    8) url="${KOTLIN_ADOPTIUM_JDK8_URL:-https://api.adoptium.net/v3/binary/latest/8/ga/linux/${arch}/jdk/hotspot/normal/eclipse}" ;;
+    21) url="${KOTLIN_ADOPTIUM_JDK21_URL:-https://api.adoptium.net/v3/binary/latest/21/ga/linux/${arch}/jdk/hotspot/normal/eclipse}" ;;
+    *) echo "kotlin_linux_install_adoptium_jdk: unsupported major: $major" >&2; return 1 ;;
+  esac
+  local root="${PERSISTED_CACHE_ROOT}/adoptium/linux-${arch}/jdk${major}"
+  mkdir -p "$root"
+  local dest
+  dest="$(find "$root" -maxdepth 1 -type d -name 'jdk-*' 2>/dev/null | head -1)"
+  if [ -n "$dest" ] && [ -x "$dest/bin/java" ]; then
+    echo "kotlin-build: reusing cached Adoptium ${major} at $dest" >&2
+    echo "$dest"
+    return 0
+  fi
+  echo "kotlin-build: downloading Temurin ${major} for linux/${arch}..." >&2
+  local t="${RUNNER_TEMP}/adoptium-jdk${major}.tgz"
+  curl -fsSL -o "$t" "$url"
+  shopt -s nullglob
+  rm -rf "${root}"/jdk-* 2>/dev/null || true
+  shopt -u nullglob
+  tar -xzf "$t" -C "$root"
+  rm -f "$t"
+  dest="$(find "$root" -maxdepth 1 -type d -name 'jdk-*' | head -1)"
+  if [ -z "$dest" ] || [ ! -x "$dest/bin/java" ]; then
+    echo "kotlin-build: Adoptium ${major} unpack failed under $root" >&2
+    ls -la "$root" >&2 || true
+    return 1
+  fi
+  echo "$dest"
+  return 0
+}
+
+kotlin_linux_adoptium_bootstrap_maybe() {
+  [ "$RUNNER_OS" = "Linux" ] || return 0
+  [ -n "${CI:-}" ] || return 0
+  [ "${KOTLIN_ADOPTIUM_BOOTSTRAP:-true}" = "false" ] && return 0
+  if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME}/bin/java" ]; then
+    local j
+    j="$(kotlin_linux_install_adoptium_jdk 21)" || return 1
+    export JAVA_HOME="$j"
+    export PATH="$JAVA_HOME/bin:$PATH"
+  fi
+  if [ -z "${JDK_18:-}" ] || [ ! -x "${JDK_18}/bin/java" ]; then
+    local j
+    j="$(kotlin_linux_install_adoptium_jdk 8)" || return 1
+    export JDK_18="$j"
+  fi
+  return 0
+}
+
 # --- Java toolchains (match GHA setup-java order: default `java` = last installed) ---
 # CI variables JAVA_HOME, JDK_18, JAVA_HOME_8, JAVA_HOME_11, JAVA_HOME_17, JAVA_HOME_21 override auto-detect.
 if [ -z "${JDK_18:-}" ] && [ -n "${JAVA_HOME_8:-}" ]; then
@@ -287,6 +348,12 @@ elif [ "$RUNNER_OS" = "Windows" ]; then
   done
   shopt -u nullglob
   [ -n "${JAVA_HOME_21:-}" ] && export JAVA_HOME="$JAVA_HOME_21"
+fi
+
+if [ "$RUNNER_OS" = "Linux" ] && [ -n "${CI:-}" ]; then
+  if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME}/bin/java" ] || [ -z "${JDK_18:-}" ] || [ ! -x "${JDK_18}/bin/java" ]; then
+    kotlin_linux_adoptium_bootstrap_maybe
+  fi
 fi
 
 [ -n "${JAVA_HOME:-}" ] && export PATH="$JAVA_HOME/bin:$PATH"
