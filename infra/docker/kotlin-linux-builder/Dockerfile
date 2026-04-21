@@ -1,5 +1,6 @@
 # Linux image for Kotlin OH builds (scripts/ci/kotlin-build.sh, Kotlin repo scripts/build-ohos.sh).
 # JDKs: Zulu 8, Temurin 17 + 21. Only JAVA_HOME + JDK_18 in ENV; kotlin-build.sh prepends JAVA_HOME/bin to PATH. Symlinks: stable paths for auto-detect.
+# Pin bump: rebuild when CI needs a new ghcr tag (see .gitlab/ci/kotlin.yml).
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
