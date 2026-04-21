@@ -230,10 +230,15 @@ elif [ -f "toolchain/llvm-project/llvm-build/build.py" ]; then
       ln -sf "$(command -v clang)" "$CLANG_DIR/clang" 2>/dev/null || true
       ln -sf "$(command -v clang++)" "$CLANG_DIR/clang++" 2>/dev/null || true
       if [ ! -f "$CLANG_LIB/libatomic.dylib" ]; then
-        log_info "Creating stub libatomic.dylib for macOS host"
-        echo "int main() { return 0; }" > /tmp/dummy_atomic.c
-        clang -dynamiclib -o "$CLANG_LIB/libatomic.dylib" /tmp/dummy_atomic.c 2>/dev/null || true
-        rm -f /tmp/dummy_atomic.c
+        log_info "Creating stub libatomic.dylib with atomic symbols for macOS host"
+        cat > /tmp/libatomic_stub.c << 'EOF'
+unsigned char __atomic_fetch_add_4(unsigned char *ptr, unsigned char val, int memorder) { return *ptr += val; }
+unsigned short __atomic_fetch_add_2(unsigned short *ptr, unsigned short val, int memorder) { return *ptr += val; }
+unsigned int __atomic_fetch_add_1(unsigned int *ptr, unsigned int val, int memorder) { return *ptr += val; }
+unsigned long long __atomic_fetch_add_8(unsigned long long *ptr, unsigned long long val, int memorder) { return *ptr += val; }
+EOF
+        clang -dynamiclib -o "$CLANG_LIB/libatomic.dylib" /tmp/libatomic_stub.c 2>/dev/null || true
+        rm -f /tmp/libatomic_stub.c
       fi
       ;;
   esac
