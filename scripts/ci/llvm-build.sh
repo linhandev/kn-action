@@ -136,7 +136,7 @@ LLVM_SHA_SHORT="${LLVM_SHA:0:7}"
 
 ACT_SHA="${CI_COMMIT_SHA:-$(git -C "$CI_PROJECT_DIR" rev-parse HEAD)}"
 ACT_SHA_SHORT="${ACT_SHA:0:7}"
-ACT_SHA_SHORT="6487ff73"
+ACT_SHA_SHORT="89dffca"
 
 log_info "three IDs: manifest=${MANIFEST_MD5} llvm=${LLVM_SHA_SHORT} act=${ACT_SHA_SHORT}"
 
