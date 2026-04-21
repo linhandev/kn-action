@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Install Google's repo launcher into $REPO_DIR (default: $CI_PROJECT_DIR/bin).
-# repo.py is cached at a fixed path so it survives Docker container recycling.
 #
 # Python strategy (per-host):
 #   macOS:  /usr/bin/python3 (system); `requests` via pip --user (pre-installed on runners)
@@ -13,21 +12,14 @@ REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 REPO_SCRIPT="$REPO_DIR/repo.py"
 REPO_WRAPPER="$REPO_DIR/repo"
 REPO_DOWNLOAD_URL="${REPO_DOWNLOAD_URL:-https://gitee.com/oschina/repo/raw/fork_flow/repo-py3}"
-REPO_CACHE="${HOME}/gitlab-runner/cache/repo.py"
 
-mkdir -p "$REPO_DIR" "$(dirname "$REPO_CACHE")"
+mkdir -p "$REPO_DIR"
 
 # Legacy: rename bare `repo` to `repo.py` if someone left a raw copy.
 [ -f "$REPO_WRAPPER" ] && [ ! -f "$REPO_SCRIPT" ] && mv "$REPO_WRAPPER" "$REPO_SCRIPT"
 
-# Restore from persistent cache, or download once.
 if [ ! -f "$REPO_SCRIPT" ]; then
-  if [ -f "$REPO_CACHE" ]; then
-    cp "$REPO_CACHE" "$REPO_SCRIPT"
-  else
-    curl -fSL -sS --connect-timeout 30 -o "$REPO_SCRIPT" "$REPO_DOWNLOAD_URL"
-    cp "$REPO_SCRIPT" "$REPO_CACHE" 2>/dev/null || true
-  fi
+  curl -fSL -sS --connect-timeout 30 -o "$REPO_SCRIPT" "$REPO_DOWNLOAD_URL"
   head -c 2 "$REPO_SCRIPT" | grep -q '#!' || { echo "Invalid repo script (no shebang)"; exit 1; }
 fi
 
@@ -41,20 +33,18 @@ elif command -v py >/dev/null 2>&1 && py -3 --version >/dev/null 2>&1; then PY="
 fi
 [ -n "$PY" ] || { echo "No usable Python 3 found"; exit 1; }
 
-# Ensure requests is available (repo.py imports it).
-has_requests() {
+# Run the chosen interpreter (Windows Git Bash may need `py -3` instead of `python3`).
+run_py() {
   case "$PY" in
-    "py -3") py -3 -c "import requests" >/dev/null 2>&1 ;;
-    *) $PY -c "import requests" >/dev/null 2>&1 ;;
+    "py -3") py -3 "$@" ;;
+    *) "$PY" "$@" ;;
   esac
 }
-if ! has_requests; then
-  case "$PY" in
-    "py -3") py -3 -m pip install --user -q requests 2>/dev/null \
-             || py -3 -m pip install --break-system-packages -q requests ;;
-    *)       $PY -m pip install --user -q requests 2>/dev/null \
-             || $PY -m pip install --break-system-packages -q requests ;;
-  esac
+
+# Ensure requests is available (repo.py imports it).
+if ! run_py -c "import requests" >/dev/null 2>&1; then
+  run_py -m pip install --user -q requests 2>/dev/null \
+    || run_py -m pip install --break-system-packages -q requests
 fi
 
 # Create a bash wrapper that invokes repo.py with the resolved Python.

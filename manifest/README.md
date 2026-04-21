@@ -7,6 +7,7 @@ This repository contains manifest files for LLVM builds for OpenHarmony (OH).
 | Manifest | LLVM Source | Branch | Description |
 |----------|-------------|--------|-------------|
 | `llvm-1914.xml` | `linhandev/mpcore-llvm-kmp` | `kmp-llvm-19.1.4` | KMP-customized LLVM 19.1.4 |
+| `llvm-1914-bare.xml` | `linhandev/mpcore-llvm-kmp` | `kmp-llvm-19.1.4` | Same LLVM as 1914; alternate remotes / minimal layout variant |
 | `llvm-1917.xml` | `openharmony/third_party_llvm-project` | `llvm-19.1.7` | Official OH LLVM 19.1.7 |
 
 ## Usage

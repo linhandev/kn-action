@@ -18,11 +18,12 @@ spec:
       description: "Dev / essentials id for final archive naming (platform_package.sh)."
     llvm_manifest:
       type: string
-      default: "llvm-1914.xml"
+      default: "llvm-1914-bare.xml"
       options:
         - "llvm-1914.xml"
+        - "llvm-1914-bare.xml"
         - "llvm-1917.xml"
-      description: "Manifest file for LLVM repo sync (llvm-1914.xml = KMP LLVM 19.1.4, llvm-1917.xml = OH LLVM 19.1.7)"
+      description: "Manifest file for LLVM repo sync (llvm-1914.xml / llvm-1914-bare.xml = KMP LLVM 19.1.4; llvm-1917.xml = OH LLVM 19.1.7)"
 ---
 # GitLab CI — kn-action (LAN). Runner fleet: AGENTS.md → "Four-host runner matrix".
 # prepare-repo tests: Kotlin runners only, three tags each (kotlin + OS + arch).
@@ -67,6 +68,7 @@ workflow:
         - .github/workflows/build-llvm.yml
         - .gitlab/ci/llvm.yml
         - .gitlab/ci/prepare-repo.yml
+        - manifest/**/*
         - scripts/ci/llvm-build.sh
         - scripts/ci/llvm-cross-copy.sh
         - scripts/ci/llvm-provide-artifacts.sh
