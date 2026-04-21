@@ -10,11 +10,8 @@ PLATFORM="${1:?usage: kotlin-build.sh linux-x64|macos-arm64|macos-x64|windows-x6
 
 cd "$CI_PROJECT_DIR"
 
-# LLVM profile: kotlin must consume llvm-artifacts.env from llvm:provide-artifacts (needs + artifacts).
-if [ "${TARGET:-}" = "llvm" ] && [ ! -f "$CI_PROJECT_DIR/llvm-artifacts.env" ]; then
-  echo "error: TARGET=llvm requires llvm-artifacts.env from job llvm:provide-artifacts (latest names for this pipeline)" >&2
-  exit 1
-fi
+# shellcheck source=scripts/ci/artifact-server-latest.sh
+source "$CI_PROJECT_DIR/scripts/ci/artifact-server-latest.sh"
 
 case "$PLATFORM" in
   linux-x64) export RUNNER_OS=Linux; export RUNNER_ARCH=X64 ;;
@@ -307,7 +304,19 @@ gradle_llvm_default_suffix_for_platform() {
   esac
 }
 
-# Resolve final host LLVM archive filename: KOTLIN_FRESH_LLVM_ARCHIVE, or llvm-artifacts.env (e.g. from llvm:provide-artifacts).
+# Regex for merged OH LLVM final archives on the LAN server (see platform_package.sh / llvm-provide-artifacts).
+# artifact-server /artifacts/latest picks newest mtime match (infra/artifact-server/main.py).
+_kotlin_llvm_latest_regex_for_platform() {
+  case "${1:?}" in
+    linux-x64) echo '^llvm-[0-9]+-x86_64-linux-dev-oh-[0-9]+_.*\.tar\.gz$' ;;
+    macos-arm64) echo '^llvm-[0-9]+-aarch64-macos-dev-oh-[0-9]+_.*\.tar\.gz$' ;;
+    macos-x64) echo '^llvm-[0-9]+-x86_64-macos-dev-oh-[0-9]+_.*\.tar\.gz$' ;;
+    windows-x64) echo '^llvm-[0-9]+-x86_64-windows-dev-oh-[0-9]+_.*\.zip$' ;;
+    *) echo "" ;;
+  esac
+}
+
+# Resolve final host LLVM archive: KOTLIN_FRESH_LLVM_ARCHIVE, else llvm-artifacts.env from llvm:provide-artifacts, else latest on ARTIFACT_SERVER_URL by regex.
 resolve_fresh_llvm_archive_filename() {
   local platform="${1:?}"
   if [ -n "${KOTLIN_FRESH_LLVM_ARCHIVE:-}" ]; then
@@ -315,33 +324,64 @@ resolve_fresh_llvm_archive_filename() {
     return 0
   fi
   local envfile="${CI_PROJECT_DIR:-}/llvm-artifacts.env"
-  if [ ! -f "$envfile" ]; then
+  if [ -f "$envfile" ]; then
+    # shellcheck disable=SC1090
+    set -a && source "$envfile" && set +a
+    case "$platform" in
+      linux-x64)
+        [ -n "${archive_linux:-}" ] && {
+          echo "${archive_linux}"
+          return 0
+        }
+        ;;
+      macos-arm64)
+        [ -n "${archive_mac_arm64:-}" ] && {
+          echo "${archive_mac_arm64}"
+          return 0
+        }
+        ;;
+      macos-x64)
+        [ -n "${archive_mac_x64:-}" ] && {
+          echo "${archive_mac_x64}"
+          return 0
+        }
+        ;;
+      windows-x64)
+        [ -n "${archive_windows:-}" ] && {
+          echo "${archive_windows}"
+          return 0
+        }
+        ;;
+    esac
+  fi
+  local server pattern name
+  server="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
+  pattern="$(_kotlin_llvm_latest_regex_for_platform "$platform")"
+  [ -n "$pattern" ] || {
     echo ""
     return 0
+  }
+  if name="$(artifact_server_latest_basename "$server" "$pattern")"; then
+    echo "$name"
+    return 0
   fi
-  # shellcheck disable=SC1090
-  set -a && source "$envfile" && set +a
-  case "$platform" in
-    linux-x64) echo "${archive_linux:-}" ;;
-    macos-arm64) echo "${archive_mac_arm64:-}" ;;
-    macos-x64) echo "${archive_mac_x64:-}" ;;
-    windows-x64) echo "${archive_windows:-}" ;;
-    *) echo "" ;;
-  esac
+  echo ""
+  return 0
 }
 
 # Download OH merged LLVM, install under $KONAN_DATA_DIR/dependencies/<stem>, update .extracted,
 # and point kotlin.native.llvm.default.<host>.{dev,essentials} at remote:public/<stem> for this runner only.
 install_fresh_llvm_for_konan() {
   local platform="${1:?}"
-  case "${KOTLIN_USE_FRESH_LLVM:-true}" in
-    false|0|no) echo "Fresh LLVM for Konan disabled (KOTLIN_USE_FRESH_LLVM=$KOTLIN_USE_FRESH_LLVM)"; return 0 ;;
-  esac
+  if [ "${KOTLIN_USE_FRESH_LLVM:-true}" = "false" ]; then
+    echo "Fresh LLVM for Konan disabled (KOTLIN_USE_FRESH_LLVM=false)"
+    return 0
+  fi
 
   local archive_name
   archive_name="$(resolve_fresh_llvm_archive_filename "$platform")"
   if [ -z "$archive_name" ]; then
-    echo "No fresh LLVM archive name (set KOTLIN_FRESH_LLVM_ARCHIVE or add llvm-artifacts.env from llvm:provide-artifacts); using kotlin-native/gradle.properties defaults"
+    echo "No fresh LLVM archive name (set KOTLIN_FRESH_LLVM_ARCHIVE, or llvm-artifacts.env from llvm:provide-artifacts, or ensure ARTIFACT_SERVER_URL has a latest merged OH LLVM match); using kotlin-native/gradle.properties defaults"
     return 0
   fi
 
@@ -357,7 +397,7 @@ install_fresh_llvm_for_konan() {
   mkdir -p "$(dirname "$dl")"
   echo "Downloading fresh LLVM for Konan: $server/artifacts/$archive_name"
   if ! curl -fsSL -o "$dl" "$server/artifacts/$archive_name"; then
-    echo "Failed to download $archive_name; check artifact server or KOTLIN_USE_FRESH_LLVM=false to skip" >&2
+    echo "Failed to download $archive_name; check artifact server or set KOTLIN_USE_FRESH_LLVM=false to skip" >&2
     return 1
   fi
 

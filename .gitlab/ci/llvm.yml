@@ -23,6 +23,8 @@
 
 .llvm-build-rules:
   rules:
+    - if: '$LLVM_SKIP_PIPELINE == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $LLVM_DAILY_CLEAN_SCHEDULE == "true" && $TARGET == "llvm"'
     - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "llvm"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -136,10 +138,6 @@ llvm:cross-copy:
     - job: build:llvm:macos:x64
       optional: true
       artifacts: true
-  rules:
-    - if: '$SKIP_BUILD_ALL == "true"'
-      when: never
-    - when: on_success
   timeout: 2h
   script:
     - bash scripts/ci/llvm-cross-copy.sh

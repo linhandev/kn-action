@@ -34,9 +34,11 @@ KN_ACTION_BUILD_REPO_ABS="$(cd "$DL/extract-repo/build/repo" && pwd -P)"
 log_info "KN_ACTION_BUILD_REPO_ABS=$KN_ACTION_BUILD_REPO_ABS"
 
 # kotlin.native.home: use prebuilt K/N tarball published under build/repo (Maven layout), not a separate host upload.
-KN_TARBALL_IN_REPO="$(find "$KN_ACTION_BUILD_REPO_ABS" -type f -name 'kotlin-native-macos-aarch64-*.tar.gz' 2>/dev/null | head -1 || true)"
+# Default matches Gradle/HAP on Apple Silicon; override if the build/repo layout uses a different name (e.g. testing a Linux-produced repo that still publishes macOS KN).
+KN_NATIVE_GLOB="${KN_HAP_NATIVE_TARBALL_GLOB:-kotlin-native-macos-aarch64-*.tar.gz}"
+KN_TARBALL_IN_REPO="$(find "$KN_ACTION_BUILD_REPO_ABS" -type f -name "$KN_NATIVE_GLOB" 2>/dev/null | head -1 || true)"
 if [[ -z "$KN_TARBALL_IN_REPO" || ! -f "$KN_TARBALL_IN_REPO" ]]; then
-  log_error "No kotlin-native-macos-aarch64 *.tar.gz under build/repo (expected kotlin-native-prebuilt in Maven repo)"
+  log_error "No tarball matching '$KN_NATIVE_GLOB' under build/repo (expected kotlin-native-prebuilt in Maven repo)"
   find "$KN_ACTION_BUILD_REPO_ABS" -maxdepth 5 -type f -name '*.tar.gz' 2>/dev/null | head -20 || true
   exit 1
 fi

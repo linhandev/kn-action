@@ -1,17 +1,40 @@
 # Kotlin OH build — port of .github/workflows/build-kotlin.yml (GitLab matrix).
 # Web/API: TARGET=kotlin → Kotlin only (no LLVM jobs). TARGET=llvm → LLVM stages then Kotlin build & HAP test.
+# LLVM jobs are excluded from the pipeline when LLVM_SKIP_PIPELINE=true (see .gitlab/ci/llvm.yml). Kotlin jobs then
+# set KOTLIN_USE_FRESH_LLVM=false via rules:variables below. With fresh LLVM on, kotlin-build.sh resolves archive names
+# from llvm-artifacts.env when present, else latest match on ARTIFACT_SERVER_URL (regex; see kotlin-build.sh).
 # MR: changes under CI roots (.gitlab, .github, scripts, manifest, patches) or root .gitlab-ci.yml → Kotlin (LLVM pipeline may run too).
 # Runners: kotlin + OS + arch (AGENTS.md). Requires GITCODE_SSH_PRIVATE_KEY for kotlin clone.
 #
-# When llvm:provide-artifacts is in the pipeline (TARGET=llvm or MR LLVM paths), kotlin jobs need it (optional: true
-# so TARGET=kotlin pipelines still work). TARGET=llvm requires llvm-artifacts.env — see kotlin-build.sh.
+# llvm:provide-artifacts is optional on needs; when LLVM stages are omitted, KOTLIN_USE_FRESH_LLVM=false and no llvm-artifacts.env.
 
 .kotlin-build-rules:
   rules:
-    # Scheduled LLVM clean: run Kotlin after llvm:provide-artifacts (same pipeline artifact names).
+    # TARGET=llvm: more specific rules first (LLVM stages omitted from pipeline).
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $TARGET == "llvm" && $LLVM_SKIP_PIPELINE == "true"'
+      variables:
+        KOTLIN_USE_FRESH_LLVM: "false"
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $TARGET == "llvm"'
+      variables:
+        KOTLIN_USE_FRESH_LLVM: "true"
     - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "kotlin"'
+      variables:
+        KOTLIN_USE_FRESH_LLVM: "true"
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "llvm" && $LLVM_SKIP_PIPELINE == "true"'
+      variables:
+        KOTLIN_USE_FRESH_LLVM: "false"
     - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "llvm"'
+      variables:
+        KOTLIN_USE_FRESH_LLVM: "true"
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $LLVM_SKIP_PIPELINE == "true"'
+      changes:
+        - .gitlab-ci.yml
+        - .gitlab/**/*
+        - scripts/**/*
+        - manifest/**/*
+        - patches/**/*
+      variables:
+        KOTLIN_USE_FRESH_LLVM: "false"
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .gitlab-ci.yml
@@ -19,6 +42,8 @@
         - scripts/**/*
         - manifest/**/*
         - patches/**/*
+      variables:
+        KOTLIN_USE_FRESH_LLVM: "true"
 
 .kotlin-build-common:
   stage: kotlin_build
@@ -37,6 +62,7 @@
     GIT_STRATEGY: fetch
     GIT_DEPTH: "0"
     GIT_CLEAN_FLAGS: "-ffd"
+    KOTLIN_USE_FRESH_LLVM: "true"
   before_script:
     - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     - ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >> ~/.ssh/known_hosts 2>/dev/null || true
@@ -54,6 +80,9 @@ build:kotlin:linux:x64:
     - kotlin
     - linux
     - x64
+  artifacts:
+    reports:
+      dotenv: ci-workspace/kotlin-version.env
   script:
     - bash scripts/ci/kotlin-build.sh linux-x64
 
@@ -69,16 +98,13 @@ build:kotlin:macos:arm64:
   script:
     - bash scripts/ci/kotlin-build.sh macos-arm64
 
-# Smoke-test the freshly-built Kotlin/Native compiler by compiling kn_samples bare branch
-# into a HarmonyOS HAP and running it on a connected device.
-test:kotlin:hap:macos-arm64:
+# Smoke-test: build kn_samples HAP with Kotlin from published build/repo and run on device (hdc).
+# Both legs use the Mac chore runner (DevEco + hdc); artifacts may come from the Linux or macOS Kotlin build job.
+.kotlin-hap-smoke-common:
   stage: kotlin_verify
   interruptible: true
   timeout: 30m
   extends: .kotlin-build-rules
-  needs:
-    - job: build:kotlin:macos:arm64
-      artifacts: true
   tags:
     - chore
     - macos
@@ -92,6 +118,18 @@ test:kotlin:hap:macos-arm64:
     expire_in: 7 days
   script:
     - bash scripts/ci/kotlin-hap-smoke-test.sh
+
+test:kotlin:hap:macos-arm64:
+  extends: .kotlin-hap-smoke-common
+  needs:
+    - job: build:kotlin:macos:arm64
+      artifacts: true
+
+test:kotlin:hap:after-linux-build:
+  extends: .kotlin-hap-smoke-common
+  needs:
+    - job: build:kotlin:linux:x64
+      artifacts: true
 
 # Temporarily disabled to focus on debugging macOS arm64 for PR 98
 # build:kotlin:macos:x64:

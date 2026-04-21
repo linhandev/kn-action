@@ -24,6 +24,10 @@ spec:
         - "llvm-1914-bare.xml"
         - "llvm-1917.xml"
       description: "Manifest file for LLVM repo sync (llvm-1914.xml / llvm-1914-bare.xml = KMP LLVM 19.1.4; llvm-1917.xml = OH LLVM 19.1.7)"
+    llvm_skip_pipeline:
+      type: boolean
+      default: false
+      description: "When true: LLVM/OHOS jobs are omitted from the pipeline (see .gitlab/ci/llvm.yml). Kotlin jobs still run; .gitlab/ci/kotlin.yml sets KOTLIN_USE_FRESH_LLVM=false so no llvm-artifacts.env is required."
 ---
 # GitLab CI — kn-action (LAN). Runner fleet: AGENTS.md → "Four-host runner matrix".
 # prepare-repo tests: Kotlin runners only, three tags each (kotlin + OS + arch).
@@ -45,6 +49,7 @@ variables:
   LLVM_CLEAN_BUILD: "$[[ inputs.llvm_clean_build ]]"
   LLVM_VERSION: "$[[ inputs.llvm_version ]]"
   LLVM_MANIFEST: "$[[ inputs.llvm_manifest ]]"
+  LLVM_SKIP_PIPELINE: "$[[ inputs.llvm_skip_pipeline ]]"
 
 workflow:
   # Cancel jobs from the previous pipeline on the same branch when a new commit lands (e.g. MR updates).
