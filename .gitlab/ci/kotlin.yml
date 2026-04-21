@@ -7,6 +7,9 @@
 # Linux Kotlin (build:kotlin:linux:x64): ghcr.io/<owner>/kn-action-kotlin-linux-builder:<short-sha> — pin matches GHA build-kotlin-linux-image.yml tags (short git SHA); bump when Dockerfile changes and image is rebuilt.
 #
 # llvm:provide-artifacts is optional on needs when LLVM stages are omitted.
+#
+# Windows Bash jobs: same PATH fix as root `.windows-gitbash-pre-sources` — inlined here so
+# `extends` does not reference a hidden job that only defines `hooks` (GitLab rejects that merge).
 
 .kotlin-build-rules:
   rules:
@@ -84,9 +87,15 @@ build:kotlin:macos:x64:
     - bash scripts/ci/kotlin-build.sh macos-x64
 
 build:kotlin:windows:x64:
-  extends:
-    - .kotlin-build-common
-    - .windows-gitbash-pre-sources
+  extends: .kotlin-build-common
+  hooks:
+    pre_get_sources_script:
+      - |
+        if command -v mkdir >/dev/null 2>&1; then
+          :
+        elif [ -d /c/PROGRA~1/Git/usr/bin ]; then
+          export PATH="/c/PROGRA~1/Git/usr/bin:/c/PROGRA~1/Git/bin:/c/PROGRA~1/Git/mingw64/bin:${PATH:-}"
+        fi
   tags:
     - kotlin
     - windows
@@ -151,9 +160,15 @@ test:kotlin:hap:after-macos-x64-build:
       artifacts: true
 
 test:kotlin:hap:after-windows-build:
-  extends:
-    - .kotlin-hap-smoke-common
-    - .windows-gitbash-pre-sources
+  extends: .kotlin-hap-smoke-common
+  hooks:
+    pre_get_sources_script:
+      - |
+        if command -v mkdir >/dev/null 2>&1; then
+          :
+        elif [ -d /c/PROGRA~1/Git/usr/bin ]; then
+          export PATH="/c/PROGRA~1/Git/usr/bin:/c/PROGRA~1/Git/bin:/c/PROGRA~1/Git/mingw64/bin:${PATH:-}"
+        fi
   tags:
     - chore
     - windows
