@@ -225,9 +225,16 @@ elif [ -f "toolchain/llvm-project/llvm-build/build.py" ]; then
     macos-arm64|macos-x64)
       log_info "macOS: using system clang as host compiler (OH clang lacks libatomic for darwin host)"
       CLANG_DIR="$LLVM_WORKSPACE/prebuilts/clang/ohos/${_CLANG}/clang-${CLANG_VERSION:-15.0.4}/bin"
+      CLANG_LIB="$LLVM_WORKSPACE/prebuilts/clang/ohos/${_CLANG}/clang-${CLANG_VERSION:-15.0.4}/lib"
       mkdir -p "$CLANG_DIR"
       ln -sf "$(command -v clang)" "$CLANG_DIR/clang" 2>/dev/null || true
       ln -sf "$(command -v clang++)" "$CLANG_DIR/clang++" 2>/dev/null || true
+      if [ ! -f "$CLANG_LIB/libatomic.dylib" ]; then
+        log_info "Creating stub libatomic.dylib for macOS host"
+        echo "int main() { return 0; }" > /tmp/dummy_atomic.c
+        clang -dynamiclib -o "$CLANG_LIB/libatomic.dylib" /tmp/dummy_atomic.c 2>/dev/null || true
+        rm -f /tmp/dummy_atomic.c
+      fi
       ;;
   esac
   python3 toolchain/llvm-project/llvm-build/build.py --no-build-riscv64 --no-build-loongarch64 --no-build-mipsel --no-build lldb-server --compression-format gz
