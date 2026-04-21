@@ -172,8 +172,8 @@ cp "$CI_PROJECT_DIR/scripts/proxy.init.gradle" "${GRADLE_USER_HOME}/init.d/"
 
 # prepare-repo runs Gradle --stop on reused Windows workspaces; must match this job's GRADLE_USER_HOME / opts.
 export GRADLE_USER_HOME
-# No persistent daemon; same flags as later build step so --stop targets the right JVMs.
-export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000 -Dorg.spdx.useJARLicenseInfoOnly=true"
+# GitLab pre_get_sources_script may set GRADLE_OPTS; keep same defaults for local/GHA runs.
+export GRADLE_OPTS="${GRADLE_OPTS:--Dorg.gradle.daemon=false -Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000 -Dorg.spdx.useJARLicenseInfoOnly=true}"
 
 if [ "$CLEAN_BUILD" = "true" ]; then
   echo "Clean build: wiping Konan and Maven user home under cache root"
@@ -620,10 +620,11 @@ else
 fi
 if [ "${KOTLIN_USE_FRESH_LLVM:-true}" = "false" ]; then
   echo "KOTLIN_USE_FRESH_LLVM=false (pipeline input kotlin_use_fresh_llvm): kotlin-native/gradle.properties was not rewritten to remote:public/<stem>." >&2
-elif ! git diff --no-ext-diff --quiet -- kotlin-native/gradle.properties 2>/dev/null; then
-  echo "Fresh LLVM rewrote kotlin-native/gradle.properties (see git diff for that file if needed)." >&2
+elif [ -f "$KOTLIN_ROOT/kotlin-native/gradle.properties" ] && git -C "$KOTLIN_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  && ! git -C "$KOTLIN_ROOT" diff --no-ext-diff --quiet -- kotlin-native/gradle.properties 2>/dev/null; then
+  echo "Fresh LLVM rewrote kotlin-native/gradle.properties." >&2
 elif [ "${KOTLIN_USE_FRESH_LLVM:-true}" != "false" ]; then
-  echo "No git diff for kotlin-native/gradle.properties (no archive resolved, download failed, or sed had no matching lines)." >&2
+  echo "No change to kotlin-native/gradle.properties from fresh-LLVM defaults (or archive missing / download failed)." >&2
 fi
 
 BUILD_OHOS="$KOTLIN_ROOT/scripts/build-ohos.sh"
