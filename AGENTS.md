@@ -122,6 +122,7 @@ Paths: align **`~/gitlab-runner/cache`** and **`~/runner/artifact`** with your r
 |------|--------|
 | **JDK 8** + **JDK 21** (or 17) | Required on the host — **`scripts/ci/kotlin-build.sh`** does not download JDKs. Typical install: **`winget install -e --id EclipseAdoptium.Temurin.8.JDK`** and **`EclipseAdoptium.Temurin.21.JDK`**. Layout under **`C:\Program Files\Eclipse Adoptium\`** (`jdk-8*`, `jdk-21*`) matches auto-detect; override with **`JAVA_HOME` / `JAVA_HOME_21`** and **`JDK_18` / `JAVA_HOME_8`** if you use non-default paths. |
 | **Git Bash** | Same as other Windows Kotlin jobs — **`pipefail`**, paths as in the matrix table. |
+| **GitCode SSH** | Runner as **LocalSystem** uses **`HOME`** = **`%SystemRoot%\System32\config\systemprofile`** — put **`id_ed25519`** (and **`known_hosts`**) in **`…\systemprofile\.ssh`**, or set CI **`GITCODE_SSH_PRIVATE_KEY`**. One-time: run [**`scripts/ci/windows-runner-systemprofile-gitcode-ssh.ps1`**](scripts/ci/windows-runner-systemprofile-gitcode-ssh.ps1) elevated (copies from your user **`.ssh`**). |
 
 ---
 
@@ -210,7 +211,7 @@ SSH hosts: **`linux`**, **`win`**, **`mini`**, **studio**. **Twelve** registrati
 | **`mini`** | `llvm-macos-x64` | `llvm`, `macos`, `x64` | **shell** | 1 | **`~/gitlab-runner/llvm`** |
 | **`mini`** | `chore-macos-x64` | `chore`, `macos`, `x64` | **shell** | 2 | **`~/gitlab-runner/chore`** |
 
-**Windows:** Runner install under **`%USERPROFILE%\gitlab-runner\`**, config **`config.toml`**, service user matches **`%USERPROFILE%`**.
+**Windows:** Runner install under **`%USERPROFILE%\gitlab-runner\`**, config **`config.toml`**. The **gitlab-runner** service usually runs as **LocalSystem**, so the **checkout** step can run Bash with a **`PATH`** that does not include **Git `usr\bin`** → **`mkdir: command not found`** or GNU **`find`** vs **`find.exe`**. The repo fixes this for Bash-on-Windows jobs via **`.windows-gitbash-pre-sources`** in [**.gitlab-ci.yml**](.gitlab-ci.yml) (**`hooks.pre_get_sources_script`**, runs before **`get_sources`**). Optionally also keep **HKLM** machine **`PATH`** (or **`[[runners]].environment`**) with **`Git\usr\bin`** before **`System32`** if you add tools outside Git.
 
 **Linux:** **`~/gitlab-runner/config.toml`**. System packages may use **`/etc/gitlab-runner/config.toml`** instead.
 

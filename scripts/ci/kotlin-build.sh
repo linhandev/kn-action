@@ -45,13 +45,11 @@ if command -v git >/dev/null 2>&1; then
   git config --global --add safe.directory '*' 2>/dev/null || git config --global --add safe.directory "$CI_PROJECT_DIR" 2>/dev/null || true
 fi
 
-# Job identity (which OS user / HOME the runner uses — compare with ~/.ssh on that account).
+# Job identity (shell executor: match keys to this HOME — Windows LocalSystem → .../systemprofile/.ssh).
 echo "=== kotlin-build CI identity ===" >&2
-echo "whoami=$(whoami 2>/dev/null || true)" >&2
-echo "id=$(id 2>/dev/null || true)" >&2
-echo "HOME=${HOME:-}" >&2
+echo "whoami=$(whoami 2>/dev/null || true) HOME=${HOME:-}" >&2
 echo "GITCODE_SSH_PRIVATE_KEY=$([ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ] && echo set || echo unset)" >&2
-ls -la "${HOME}/.ssh" 2>/dev/null | head -15 >&2 || true
+ls -la "${HOME}/.ssh" 2>/dev/null | head -12 >&2 || true
 echo "=== end kotlin-build CI identity ===" >&2
 
 # GitCode SSH: explicit GIT_SSH_COMMAND on Linux/macOS (no ssh-agent). Windows: block below.
@@ -75,41 +73,20 @@ kotlin_gitcode_ssh_env() {
   : "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
   mkdir -p "$RUNNER_TEMP"
   local _gk="${RUNNER_TEMP}/gitcode_known_hosts"
-  case "${RUNNER_OS:-}" in
-    Windows)
-      local idf gkf _wk
-      ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >>"$_gk" 2>/dev/null || true
-      if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
-        _wk="${RUNNER_TEMP}/gitcode_id_ed25519"
-        kotlin_gitcode_materialize_key "$_wk"
-        idf="$(cygpath -m "$_wk" 2>/dev/null || echo "$_wk")"
-        gkf="$(cygpath -m "$_gk" 2>/dev/null || echo "$_gk")"
-        export GIT_SSH_COMMAND="ssh -i ${idf} -o IdentitiesOnly=yes -o UserKnownHostsFile=${gkf} -o StrictHostKeyChecking=yes"
-        echo "kotlin_gitcode_ssh_env: Windows using GITCODE_SSH_PRIVATE_KEY (File or inline)" >&2
-        return 0
-      fi
-      if [ -f "${HOME}/.ssh/id_ed25519" ]; then
-        idf="$(cygpath -m "$HOME/.ssh/id_ed25519" 2>/dev/null || echo "$HOME/.ssh/id_ed25519")"
-        if [ -f "${HOME}/.ssh/known_hosts" ]; then
-          gkf="$(cygpath -m "$HOME/.ssh/known_hosts" 2>/dev/null || echo "$HOME/.ssh/known_hosts")"
-        else
-          gkf="$(cygpath -m "$_gk" 2>/dev/null || echo "$_gk")"
-        fi
-        export GIT_SSH_COMMAND="ssh -i ${idf} -o IdentitiesOnly=yes -o UserKnownHostsFile=${gkf} -o StrictHostKeyChecking=yes"
-        echo "kotlin_gitcode_ssh_env: Windows using ${idf}" >&2
-        return 0
-      fi
-      echo "kotlin_gitcode_ssh_env: warning: Windows has no GITCODE_SSH_PRIVATE_KEY and no ~/.ssh/id_ed25519" >&2
-      return 0
-      ;;
-  esac
   ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >>"$_gk" 2>/dev/null || true
 
   if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
-    local _key="${RUNNER_TEMP}/gitcode_id_ed25519"
-    kotlin_gitcode_materialize_key "$_key"
-    export GIT_SSH_COMMAND="ssh -i ${_key} -o IdentitiesOnly=yes -o UserKnownHostsFile=${_gk} -o StrictHostKeyChecking=yes"
-    echo "kotlin_gitcode_ssh_env: host ~/.ssh ignored for this clone" >&2
+    local _wk="${RUNNER_TEMP}/gitcode_id_ed25519"
+    kotlin_gitcode_materialize_key "$_wk"
+    if [ "${RUNNER_OS:-}" = "Windows" ]; then
+      local idf gkf
+      idf="$(cygpath -m "$_wk" 2>/dev/null || echo "$_wk")"
+      gkf="$(cygpath -m "$_gk" 2>/dev/null || echo "$_gk")"
+      export GIT_SSH_COMMAND="ssh -i ${idf} -o IdentitiesOnly=yes -o UserKnownHostsFile=${gkf} -o StrictHostKeyChecking=yes"
+    else
+      export GIT_SSH_COMMAND="ssh -i ${_wk} -o IdentitiesOnly=yes -o UserKnownHostsFile=${_gk} -o StrictHostKeyChecking=yes"
+    fi
+    echo "kotlin_gitcode_ssh_env: GITCODE_SSH_PRIVATE_KEY (CI variable)" >&2
     return 0
   fi
 
@@ -119,16 +96,27 @@ kotlin_gitcode_ssh_env() {
   elif [ -f "${HOME}/.ssh/id_rsa" ]; then
     _key="${HOME}/.ssh/id_rsa"
   fi
-  if [ -n "$_key" ]; then
-    if [ -f "${HOME}/.ssh/known_hosts" ]; then
-      export GIT_SSH_COMMAND="ssh -i ${_key} -o IdentitiesOnly=yes -o UserKnownHostsFile=${HOME}/.ssh/known_hosts -o StrictHostKeyChecking=yes"
-    else
-      export GIT_SSH_COMMAND="ssh -i ${_key} -o IdentitiesOnly=yes -o UserKnownHostsFile=${_gk} -o StrictHostKeyChecking=yes"
-    fi
-    echo "kotlin_gitcode_ssh_env: using ${_key} (user $(id -un), HOME=${HOME})" >&2
+  if [ -z "$_key" ]; then
+    echo "kotlin_gitcode_ssh_env: warning: no GITCODE_SSH_PRIVATE_KEY and no ~/.ssh/id_ed25519 or id_rsa (HOME=${HOME:-})" >&2
     return 0
   fi
-  echo "kotlin_gitcode_ssh_env: warning: no GITCODE_SSH_PRIVATE_KEY and no ~/.ssh/id_ed25519 or id_rsa" >&2
+
+  if [ "${RUNNER_OS:-}" = "Windows" ]; then
+    local idf gkf
+    idf="$(cygpath -m "$_key" 2>/dev/null || echo "$_key")"
+    if [ -f "${HOME}/.ssh/known_hosts" ]; then
+      gkf="$(cygpath -m "${HOME}/.ssh/known_hosts" 2>/dev/null || echo "${HOME}/.ssh/known_hosts")"
+    else
+      gkf="$(cygpath -m "$_gk" 2>/dev/null || echo "$_gk")"
+    fi
+    export GIT_SSH_COMMAND="ssh -i ${idf} -o IdentitiesOnly=yes -o UserKnownHostsFile=${gkf} -o StrictHostKeyChecking=yes"
+  elif [ -f "${HOME}/.ssh/known_hosts" ]; then
+    export GIT_SSH_COMMAND="ssh -i ${_key} -o IdentitiesOnly=yes -o UserKnownHostsFile=${HOME}/.ssh/known_hosts -o StrictHostKeyChecking=yes"
+  else
+    export GIT_SSH_COMMAND="ssh -i ${_key} -o IdentitiesOnly=yes -o UserKnownHostsFile=${_gk} -o StrictHostKeyChecking=yes"
+  fi
+  echo "kotlin_gitcode_ssh_env: ${_key}" >&2
+  return 0
 }
 kotlin_gitcode_ssh_env
 
@@ -195,13 +183,11 @@ case "${REPO_URL:-}" in
   git@*)
     if [ -z "${GIT_SSH_COMMAND:-}" ]; then
       cat >&2 <<'EOF'
-kotlin-build: cannot clone Kotlin over SSH — no private key for this job user.
+kotlin-build: cannot clone Kotlin over SSH — no private key.
 
-The shell executor runs as the GitLab Runner account (often "gitlab-runner", HOME=/home/gitlab-runner).
-SSH keys must live under THAT user's ~/.ssh (id_ed25519 or id_rsa), with the pubkey added on GitCode for CPF-KMP-CMP/kotlin.
-Keys installed only under another account (e.g. /home/user/.ssh) are not used.
+Set CI/CD variable GITCODE_SSH_PRIVATE_KEY (File or multiline), or install id_ed25519 (or id_rsa) under the job user's HOME/.ssh.
 
-Alternatively set CI/CD variable GITCODE_SSH_PRIVATE_KEY to the private key (GitLab type **File** or multiline variable; not masked in a way that strips newlines).
+Windows (runner as LocalSystem): HOME is %SystemRoot%\System32\config\systemprofile — copy the same key there or run scripts/ci/windows-runner-systemprofile-gitcode-ssh.ps1 once as Administrator.
 EOF
       exit 2
     fi
@@ -426,7 +412,8 @@ else
 fi
 export KONAN_DATA_DIR
 export MAVEN_OPTS="-Duser.home=${MAVEN_USER_HOME}"
-export GRADLE_OPTS="-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000 -Dorg.spdx.useJARLicenseInfoOnly=true"
+# No persistent daemon: JVM exits when the build finishes (avoids stray processes and file locks on reused workspaces).
+export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000 -Dorg.spdx.useJARLicenseInfoOnly=true"
 
 if [ "$RUNNER_OS" = "macOS" ]; then
   export DEVELOPER_DIR="${XCODE_DEVELOPER_DIR:-/Applications/Xcode-26.2.app/Contents/Developer/}"

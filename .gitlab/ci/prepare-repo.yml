@@ -36,7 +36,9 @@ test:prepare-repo:kotlin:linux:
     - x64
 
 test:prepare-repo:kotlin:windows:
-  extends: .prepare-repo-test
+  extends:
+    - .prepare-repo-test
+    - .windows-gitbash-pre-sources
   tags:
     - kotlin
     - windows

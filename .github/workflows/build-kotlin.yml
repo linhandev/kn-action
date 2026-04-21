@@ -338,7 +338,7 @@ jobs:
           DEVELOPER_DIR: ${{ runner.os == 'macOS' && '/Applications/Xcode-26.2.app/Contents/Developer/' || '' }}
           JDK_18: ${{ steps.java8.outputs.path }}
           MAVEN_OPTS: -Duser.home=${{ steps.vars.outputs.maven_user_home }}
-          GRADLE_OPTS: "-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000"
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000"
         run: |
           cd "${{ env.WORKSPACE_DIR }}"
           "$BASH" scripts/build-ohos.sh

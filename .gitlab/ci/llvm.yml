@@ -206,7 +206,9 @@ ohos:build-test:linux-x64:
     - bash scripts/ci/ohos-test-build.sh linux-x64
 
 ohos:build-test:windows-x64:
-  extends: .ohos-build-test-common
+  extends:
+    - .ohos-build-test-common
+    - .windows-gitbash-pre-sources
   tags:
     - chore
     - windows

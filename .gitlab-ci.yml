@@ -56,6 +56,19 @@ variables:
   LLVM_SKIP_PIPELINE: "$[[ inputs.llvm_skip_pipeline ]]"
   KOTLIN_USE_FRESH_LLVM: "$[[ inputs.kotlin_use_fresh_llvm ]]"
 
+# Windows shell (bash): GitLab Runner often runs as LocalSystem; the internal clone step may not
+# inherit the same PATH as an interactive session, so `mkdir`/`find` from Git usr\bin are missing.
+# This hook runs before get_sources (GitLab 16.1+). Non-Windows jobs: `command -v mkdir` succeeds → no-op.
+.windows-gitbash-pre-sources:
+  hooks:
+    pre_get_sources_script:
+      - |
+        if command -v mkdir >/dev/null 2>&1; then
+          :
+        elif [ -d /c/PROGRA~1/Git/usr/bin ]; then
+          export PATH="/c/PROGRA~1/Git/usr/bin:/c/PROGRA~1/Git/bin:/c/PROGRA~1/Git/mingw64/bin:${PATH:-}"
+        fi
+
 workflow:
   # Cancel jobs from the previous pipeline on the same branch when a new commit lands (e.g. MR updates).
   # Requires project setting CI/CD → General pipelines → "Auto-cancel redundant pipelines" (usually on).

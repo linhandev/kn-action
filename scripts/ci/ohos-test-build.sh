@@ -31,9 +31,6 @@ rm -rf "$W"
 mkdir -p "$W/dl"
 cd "$W"
 
-# Git for Windows: PATH can expose Windows find.exe before /usr/bin/find; the latter is required.
-if [ -x /usr/bin/find ]; then FIND=/usr/bin/find; else FIND=find; fi
-
 _SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
 log_info "downloading final package: $_SERVER/artifacts/$n"
 curl -fsSL -o "$W/dl/$n" "$_SERVER/artifacts/$n"
@@ -60,7 +57,7 @@ else
   tar -xzf "$LLVM_TAR" -C "$W_U"
 fi
 
-ROOT="$("$FIND" "$W_U" -maxdepth 1 -type d -name 'llvm-*-dev-*' | head -1)"
+ROOT="$(find "$W_U" -maxdepth 1 -type d -name 'llvm-*-dev-*' | head -1)"
 if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
   echo "Expected llvm-*-dev-* directory after extract"
   ls -la "$W_U" || true
