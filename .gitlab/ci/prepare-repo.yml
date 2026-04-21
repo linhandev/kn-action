@@ -11,7 +11,11 @@
     - ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >> ~/.ssh/known_hosts 2>/dev/null || true
     - |
       if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
-        printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+        if [ -f "$GITCODE_SSH_PRIVATE_KEY" ] && [ -r "$GITCODE_SSH_PRIVATE_KEY" ]; then
+          cp "$GITCODE_SSH_PRIVATE_KEY" ~/.ssh/id_ed25519
+        else
+          printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+        fi
         chmod 600 ~/.ssh/id_ed25519
         eval "$(ssh-agent -s)"
         ssh-add ~/.ssh/id_ed25519

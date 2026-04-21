@@ -50,6 +50,22 @@ ls -la "${HOME}/.ssh" 2>/dev/null | head -15 >&2 || true
 echo "=== end kotlin-build CI identity ===" >&2
 
 # GitCode SSH: explicit GIT_SSH_COMMAND on Linux/macOS (no ssh-agent). Windows: block below.
+# GitLab CI "File" variables expand to a path — copy the file; do not printf the path as key material.
+kotlin_gitcode_materialize_key() {
+  local dest="${1:?}"
+  if [ -z "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
+    return 1
+  fi
+  if [ -f "$GITCODE_SSH_PRIVATE_KEY" ] && [ -r "$GITCODE_SSH_PRIVATE_KEY" ]; then
+    cp "$GITCODE_SSH_PRIVATE_KEY" "$dest"
+    echo "kotlin_gitcode_ssh_env: using GITCODE_SSH_PRIVATE_KEY as file (GitLab File-type / path)" >&2
+  else
+    printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" >"$dest"
+    echo "kotlin_gitcode_ssh_env: using GITCODE_SSH_PRIVATE_KEY as inline key material" >&2
+  fi
+  chmod 600 "$dest"
+}
+
 kotlin_gitcode_ssh_env() {
   : "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
   case "${RUNNER_OS:-}" in
@@ -61,10 +77,9 @@ kotlin_gitcode_ssh_env() {
 
   if [ -n "${GITCODE_SSH_PRIVATE_KEY:-}" ]; then
     local _key="${RUNNER_TEMP}/gitcode_id_ed25519"
-    printf '%s\n' "$GITCODE_SSH_PRIVATE_KEY" >"$_key"
-    chmod 600 "$_key"
+    kotlin_gitcode_materialize_key "$_key"
     export GIT_SSH_COMMAND="ssh -i ${_key} -o IdentitiesOnly=yes -o UserKnownHostsFile=${_gk} -o StrictHostKeyChecking=yes"
-    echo "kotlin_gitcode_ssh_env: using CI variable GITCODE_SSH_PRIVATE_KEY (host ~/.ssh ignored for this clone)" >&2
+    echo "kotlin_gitcode_ssh_env: host ~/.ssh ignored for this clone" >&2
     return 0
   fi
 
@@ -165,7 +180,7 @@ The shell executor runs as the GitLab Runner account (often "gitlab-runner", HOM
 SSH keys must live under THAT user's ~/.ssh (id_ed25519 or id_rsa), with the pubkey added on GitCode for CPF-KMP-CMP/kotlin.
 Keys installed only under another account (e.g. /home/user/.ssh) are not used.
 
-Alternatively set CI/CD variable GITCODE_SSH_PRIVATE_KEY to the private key (file-type / multiline; not masked in a way that strips newlines).
+Alternatively set CI/CD variable GITCODE_SSH_PRIVATE_KEY to the private key (GitLab type **File** or multiline variable; not masked in a way that strips newlines).
 EOF
       exit 2
     fi
