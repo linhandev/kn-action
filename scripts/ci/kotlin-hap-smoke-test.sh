@@ -15,13 +15,14 @@ source "$_SCRIPT_DIR/artifact-server-latest.sh"
 ARTIFACT_SERVER_URL="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
 SERVER="${ARTIFACT_SERVER_URL%/}"
 
-# Optional: exact archive name from build:kotlin:* dotenv (kotlin-version.env). If unset, resolve latest macOS ARM64 Kotlin build/repo tarball on the server.
+# Optional: exact name from build:kotlin:* dotenv. If unset, resolve latest match for KOTLIN_HAP_ARTIFACT_GLOB (see .gitlab/ci/kotlin.yml per platform).
+KOTLIN_HAP_ARTIFACT_GLOB="${KOTLIN_HAP_ARTIFACT_GLOB:-kotlin-*_macOS_ARM64.tar.gz}"
 if [[ -z "${KOTLIN_ARTIFACT_BASENAME:-}" ]]; then
-  KOTLIN_ARTIFACT_BASENAME="$(artifact_server_latest_basename "$SERVER" 'kotlin-*_macOS_ARM64.tar.gz')" || {
-    log_error "Set KOTLIN_ARTIFACT_BASENAME or ensure the server has a kotlin-*_macOS_ARM64.tar.gz upload"
+  KOTLIN_ARTIFACT_BASENAME="$(artifact_server_latest_basename "$SERVER" "$KOTLIN_HAP_ARTIFACT_GLOB")" || {
+    log_error "Set KOTLIN_ARTIFACT_BASENAME or ensure the server has an upload matching: $KOTLIN_HAP_ARTIFACT_GLOB"
     exit 1
   }
-  log_info "Resolved KOTLIN_ARTIFACT_BASENAME=$KOTLIN_ARTIFACT_BASENAME (artifact server latest; override via dotenv or env)"
+  log_info "Resolved KOTLIN_ARTIFACT_BASENAME=$KOTLIN_ARTIFACT_BASENAME (artifact server latest; glob=$KOTLIN_HAP_ARTIFACT_GLOB)"
 fi
 
 WORK_DIR="$CI_PROJECT_DIR/kn-samples-work"
@@ -41,8 +42,7 @@ export KN_ACTION_BUILD_REPO_ABS
 KN_ACTION_BUILD_REPO_ABS="$(cd "$DL/extract-repo/build/repo" && pwd -P)"
 log_info "KN_ACTION_BUILD_REPO_ABS=$KN_ACTION_BUILD_REPO_ABS"
 
-# kotlin.native.home: use prebuilt K/N tarball published under build/repo (Maven layout), not a separate host upload.
-# Default matches Gradle/HAP on Apple Silicon; override if the build/repo layout uses a different name (e.g. testing a Linux-produced repo that still publishes macOS KN).
+# kotlin.native.home: K/N host prebuilt inside build/repo (matches the Kotlin build host: macOS aarch64 / macOS x64 / mingw, etc.).
 KN_NATIVE_GLOB="${KN_HAP_NATIVE_TARBALL_GLOB:-kotlin-native-macos-aarch64-*.tar.gz}"
 KN_TARBALL_IN_REPO="$(find "$KN_ACTION_BUILD_REPO_ABS" -type f -name "$KN_NATIVE_GLOB" 2>/dev/null | head -1 || true)"
 if [[ -z "$KN_TARBALL_IN_REPO" || ! -f "$KN_TARBALL_IN_REPO" ]]; then
@@ -108,14 +108,26 @@ BEFORE=""
 BEFORE="$("$HDC_BIN" -t "$HDC_TARGET" shell "ls -t /data/log/faultlog/faultlogger/" 2>/dev/null | tr -d '\r' | grep -F "$BUNDLE_NAME" | head -1 || true)"
 [[ -n "$BEFORE" ]] && log_info "Pre-run faultlog: $BEFORE"
 
-DEVECO_STUDIO_DIR="${DEVECO_STUDIO_DIR:-/Applications/DevEco-Studio.app}"
-DEVECO_SDK_HOME="$DEVECO_STUDIO_DIR/Contents/sdk"
-NODE_HOME="$DEVECO_STUDIO_DIR/Contents/tools/node"
-export DEVECO_SDK_HOME NODE_HOME
+# macOS: default DevEco under .app. Windows/Linux: set DEVECO_SDK_HOME (+ NODE_HOME for hvigor) on the runner / in CI.
+if [[ -z "${DEVECO_SDK_HOME:-}" ]]; then
+  DEVECO_STUDIO_DIR="${DEVECO_STUDIO_DIR:-/Applications/DevEco-Studio.app}"
+  if [[ -d "$DEVECO_STUDIO_DIR" ]]; then
+    DEVECO_SDK_HOME="$DEVECO_STUDIO_DIR/Contents/sdk"
+    NODE_HOME="${NODE_HOME:-$DEVECO_STUDIO_DIR/Contents/tools/node}"
+  fi
+fi
+[[ -n "${DEVECO_SDK_HOME:-}" ]] || {
+  log_error "DEVECO_SDK_HOME is not set and no /Applications/DevEco-Studio.app found — set DEVECO_SDK_HOME (and usually NODE_HOME) for this host"
+  exit 1
+}
+export DEVECO_SDK_HOME
+export NODE_HOME="${NODE_HOME:-}"
 log_info "DevEco SDK: $DEVECO_SDK_HOME"
 
-pkill -f 'hvigor' 2>/dev/null || true
-rm -rf ~/.hvigor/daemon/cache/*.json ~/.hvigor/project_caches/* 2>/dev/null || true
+if command -v pkill >/dev/null 2>&1; then
+  pkill -f 'hvigor' 2>/dev/null || true
+fi
+[[ -n "${HOME:-}" ]] && rm -rf "$HOME/.hvigor/daemon/cache/"*.json "$HOME/.hvigor/project_caches/"* 2>/dev/null || true
 log_info "Cleaned hvigor daemon cache"
 
 log_info "Building and launching HAP (kotlinVersion=$KOTLIN_VERSION)..."
@@ -144,7 +156,11 @@ fi
 log_info "App running with PID: $APP_PID"
 
 LOGCAT_FILE="$WORK_DIR/logcat-after-launch.txt"
-timeout 10 "$HDC_BIN" -t "$HDC_TARGET" shell "logcat -d" > "$LOGCAT_FILE" 2>/dev/null || true
+if command -v timeout >/dev/null 2>&1; then
+  timeout 10 "$HDC_BIN" -t "$HDC_TARGET" shell "logcat -d" > "$LOGCAT_FILE" 2>/dev/null || true
+else
+  "$HDC_BIN" -t "$HDC_TARGET" shell "logcat -d" > "$LOGCAT_FILE" 2>/dev/null || true
+fi
 if grep -qE "FATAL|crash|signal 11|SIGSEGV|Abort message" "$LOGCAT_FILE"; then
   log_error "Crash patterns found in logcat"
   grep -E "FATAL|crash|signal|Abort" "$LOGCAT_FILE" | head -20 >&2

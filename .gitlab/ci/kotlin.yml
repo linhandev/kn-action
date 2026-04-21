@@ -62,19 +62,37 @@ build:kotlin:macos:arm64:
   script:
     - bash scripts/ci/kotlin-build.sh macos-arm64
 
+build:kotlin:macos:x64:
+  extends: .kotlin-build-common
+  tags:
+    - kotlin
+    - macos
+    - x64
+  artifacts:
+    reports:
+      dotenv: ci-workspace/kotlin-version.env
+  script:
+    - bash scripts/ci/kotlin-build.sh macos-x64
+
+build:kotlin:windows:x64:
+  extends: .kotlin-build-common
+  tags:
+    - kotlin
+    - windows
+    - x64
+  artifacts:
+    reports:
+      dotenv: ci-workspace/kotlin-version.env
+  script:
+    - bash scripts/ci/kotlin-build.sh windows-x64
+
 # Smoke-test: build kn_samples HAP with Kotlin from published build/repo and run on device (hdc).
-# Both legs use the Mac chore runner (DevEco + hdc); artifacts may come from the Linux or macOS Kotlin build job.
+# Chore runners: macOS (arm64 or x64) with DevEco under /Applications; Windows x64 — set DEVECO_SDK_HOME, NODE_HOME, PATH (hdc) on runner or CI.
 .kotlin-hap-smoke-common:
   stage: kotlin_verify
   interruptible: true
   timeout: 30m
   extends: .kotlin-build-rules
-  tags:
-    - chore
-    - macos
-    - arm64
-  variables:
-    PATH: "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   artifacts:
     when: always
     paths:
@@ -85,33 +103,51 @@ build:kotlin:macos:arm64:
 
 test:kotlin:hap:macos-arm64:
   extends: .kotlin-hap-smoke-common
+  tags:
+    - chore
+    - macos
+    - arm64
+  variables:
+    PATH: "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   needs:
     - job: build:kotlin:macos:arm64
       artifacts: true
 
 test:kotlin:hap:after-linux-build:
   extends: .kotlin-hap-smoke-common
+  tags:
+    - chore
+    - macos
+    - arm64
+  variables:
+    PATH: "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   needs:
     - job: build:kotlin:linux:x64
       artifacts: true
 
-# Temporarily disabled to focus on debugging macOS arm64 for PR 98
-# build:kotlin:macos:x64:
-#   extends: .kotlin-build-common
-#   needs: []
-#   tags:
-#     - kotlin
-#     - macos
-#     - x64
-#   script:
-#     - bash scripts/ci/kotlin-build.sh macos-x64
+test:kotlin:hap:after-macos-x64-build:
+  extends: .kotlin-hap-smoke-common
+  tags:
+    - chore
+    - macos
+    - x64
+  variables:
+    PATH: "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    KOTLIN_HAP_ARTIFACT_GLOB: "kotlin-*_macOS_X64.tar.gz"
+    KN_HAP_NATIVE_TARBALL_GLOB: "kotlin-native-macos_x64-*.tar.gz"
+  needs:
+    - job: build:kotlin:macos:x64
+      artifacts: true
 
-# build:kotlin:windows:x64:
-#   extends: .kotlin-build-common
-#   needs: []
-#   tags:
-#     - kotlin
-#     - windows
-#     - x64
-#   script:
-#     - bash scripts/ci/kotlin-build.sh windows-x64
+test:kotlin:hap:after-windows-build:
+  extends: .kotlin-hap-smoke-common
+  tags:
+    - chore
+    - windows
+    - x64
+  variables:
+    KOTLIN_HAP_ARTIFACT_GLOB: "kotlin-*_Windows_X64.tar.gz"
+    KN_HAP_NATIVE_TARBALL_GLOB: "kotlin-native-mingw_x64-*.tar.gz"
+  needs:
+    - job: build:kotlin:windows:x64
+      artifacts: true

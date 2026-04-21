@@ -50,7 +50,9 @@ git_with_retry() {
   clear_stale_git_locks "$repo_dir"
 
   while true; do
-    if "$@" 2>"$errf"; then
+    : >"$errf"
+    # Stream stderr to the CI log while still saving it for lock/retry diagnostics on failure.
+    if "$@" 2> >(tee "$errf" >&2); then
       rm -f "$errf"
       return 0
     fi
@@ -139,11 +141,13 @@ fi
 
 if [[ -d "$WORKSPACE_DIR/.git" ]]; then
   # Reuse existing clone: fetch and force to desired ref
+  echo "prepare-repo: updating existing clone in ${WORKSPACE_DIR}" >&2
   cd "$WORKSPACE_DIR"
   git_lock_retry . remote set-url origin "$REPO_URL"
-  git_with_retry git fetch origin
+  git_with_retry git fetch --progress origin
 else
   # Fresh clone (optionally with --reference-if-able / --reference)
+  echo "prepare-repo: cloning into ${WORKSPACE_DIR} from ${REPO_URL} (large repo; progress follows)" >&2
   attempt=1
   max_attempts=4
   clone_delay=45
@@ -152,16 +156,16 @@ else
     clone_ok=0
     if [[ -d "$REFERENCE_REPO/.git" ]]; then
       if GIT_PAGER=cat git clone -h 2>&1 | grep -qF -- '--reference-if-able'; then
-        if git clone --reference-if-able "$REFERENCE_REPO" "$REPO_URL" "$WORKSPACE_DIR"; then
+        if git clone --progress --reference-if-able "$REFERENCE_REPO" "$REPO_URL" "$WORKSPACE_DIR"; then
           clone_ok=1
         fi
       else
-        if git clone --reference "$REFERENCE_REPO" "$REPO_URL" "$WORKSPACE_DIR"; then
+        if git clone --progress --reference "$REFERENCE_REPO" "$REPO_URL" "$WORKSPACE_DIR"; then
           clone_ok=1
         fi
       fi
     else
-      if git clone "$REPO_URL" "$WORKSPACE_DIR"; then
+      if git clone --progress "$REPO_URL" "$WORKSPACE_DIR"; then
         clone_ok=1
       fi
     fi
@@ -188,24 +192,24 @@ git cherry-pick --abort 2>/dev/null || true
 git_lock_retry . clean -ffdx
 
 if [[ -n "$COMMIT" ]]; then
-  git_with_retry git fetch origin "$COMMIT"
+  git_with_retry git fetch --progress origin "$COMMIT"
   git_lock_retry . checkout "$COMMIT"
   git_lock_retry . reset --hard "$COMMIT"
   git_lock_retry . clean -ffdx
 elif [[ -n "$PR_NUMBER" && -n "$BRANCH" ]]; then
   MR_REF=$(printf "$MR_REF_TEMPLATE" "$PR_NUMBER")
-  git_with_retry git fetch origin "$BRANCH"
+  git_with_retry git fetch --progress origin "$BRANCH"
   git_lock_retry . checkout -B _ci_branch "origin/$BRANCH"
   # checkout -B can leave local edits when HEAD already matches the remote; merge then conflicts.
   git_lock_retry . reset --hard "origin/$BRANCH"
   git_lock_retry . clean -ffdx
-  git_with_retry git fetch origin "+${MR_REF}:pr_${PR_NUMBER}"
+  git_with_retry git fetch --progress origin "+${MR_REF}:pr_${PR_NUMBER}"
   git config user.email "ci@localhost"
   git config user.name "CI"
   git_lock_retry . merge "pr_${PR_NUMBER}" --no-edit
 else
   [[ -z "$BRANCH" ]] && { echo "BRANCH required for branch build" >&2; exit 1; }
-  git_with_retry git fetch origin "$BRANCH"
+  git_with_retry git fetch --progress origin "$BRANCH"
   git_lock_retry . checkout -B _ci_branch "origin/$BRANCH"
   git_lock_retry . reset --hard "origin/$BRANCH"
   git_lock_retry . clean -ffdx
