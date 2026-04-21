@@ -8,13 +8,21 @@ set -euo pipefail
 
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_SCRIPT_DIR/logging.sh"
+# shellcheck source=artifact-server-latest.sh
+source "$_SCRIPT_DIR/artifact-server-latest.sh"
 
-# Injected by GitLab dotenv from build:kotlin:macos:arm64 (kotlin-version.env)
-: "${KOTLIN_VERSION:?KOTLIN_VERSION missing (dotenv from kotlin build)}"
-: "${ARTIFACT_SERVER_URL:?ARTIFACT_SERVER_URL missing}"
-: "${KOTLIN_ARTIFACT_BASENAME:?KOTLIN_ARTIFACT_BASENAME missing}"
-
+# LAN artifact server (same default as kotlin-build.sh upload).
+ARTIFACT_SERVER_URL="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
 SERVER="${ARTIFACT_SERVER_URL%/}"
+
+# Optional: exact archive name from build:kotlin:* dotenv (kotlin-version.env). If unset, resolve latest macOS ARM64 Kotlin build/repo tarball on the server.
+if [[ -z "${KOTLIN_ARTIFACT_BASENAME:-}" ]]; then
+  KOTLIN_ARTIFACT_BASENAME="$(artifact_server_latest_basename "$SERVER" 'kotlin-*_macOS_ARM64.tar.gz')" || {
+    log_error "Set KOTLIN_ARTIFACT_BASENAME or ensure the server has a kotlin-*_macOS_ARM64.tar.gz upload"
+    exit 1
+  }
+  log_info "Resolved KOTLIN_ARTIFACT_BASENAME=$KOTLIN_ARTIFACT_BASENAME (artifact server latest; override via dotenv or env)"
+fi
 
 WORK_DIR="$CI_PROJECT_DIR/kn-samples-work"
 rm -rf "$WORK_DIR"
@@ -43,6 +51,13 @@ if [[ -z "$KN_TARBALL_IN_REPO" || ! -f "$KN_TARBALL_IN_REPO" ]]; then
   exit 1
 fi
 log_info "Using Kotlin/Native prebuilt from build/repo: $KN_TARBALL_IN_REPO"
+
+# -PkotlinVersion = Maven dir name under kotlin-gradle-plugin, e.g. .../kotlin-gradle-plugin/2.2.21-OH-001
+KGP="$KN_ACTION_BUILD_REPO_ABS/org/jetbrains/kotlin/kotlin-gradle-plugin"
+_ver_dir="$(find "$KGP" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
+[[ -n "$_ver_dir" ]] || { log_error "No version folder under $KGP"; exit 1; }
+KOTLIN_VERSION="$(basename "$_ver_dir")"
+log_info "KOTLIN_VERSION=$KOTLIN_VERSION"
 
 mkdir -p kn-dist
 tar -xzf "$KN_TARBALL_IN_REPO" -C kn-dist
