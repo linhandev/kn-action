@@ -8,7 +8,7 @@ This file is for humans and coding agents working on **kn-action**: **GitLab CI*
 
 - **Orchestration**: Pipelines clone upstream repos (mostly **GitCode**), run long builds, and publish results; primary CI entry is **`.gitlab-ci.yml`** (expand with **`include:`** as Kotlin/LLVM jobs land).
 - **Kotlin / OH**: Building **Kotlin for OpenHarmony** via `scripts/build-ohos.sh` and repo prep through [`.github/actions/prepare-repo`](.github/actions/prepare-repo/README.md) (invoked from CI scripts; path is historical).
-- **LLVM / OH**: Google **repo** with `--standalone-manifest` using manifest files in `manifest/` directory (llvm-1914.xml, llvm-1917.xml) to sync an OH LLVM workspace; Linux LLVM builds typically use a **Docker** image built from [`infra/docker/Dockerfile`](infra/docker/Dockerfile).
+- **LLVM / OH**: Google **repo** with `--standalone-manifest` using manifest files in `manifest/` directory (e.g. `llvm-1914.xml`, `llvm-1914-bare.xml`, `llvm-1917.xml`) to sync an OH LLVM workspace; Linux LLVM builds typically use a **Docker** image built from [`infra/docker/Dockerfile`](infra/docker/Dockerfile).
 - **Local artifacts**: Large outputs use **`~/runner/artifact`** and the LAN artifact server; **`upload-artifact-local` / `download-artifact-local`** composite actions implement the same contract for any CI that calls their shell scripts with the variables below.
 
 ---
@@ -126,7 +126,7 @@ Keep these in mind when changing **`scripts/`** or CI:
 **LLVM**
 
 - Produce OH-oriented **`llvm/packages`** on **macOS**, **Linux** (Docker), and validate **Windows** packages as needed.
-- **Manifest selection**: CI input `llvm_manifest` selects manifest file from `manifest/` directory. Options: `llvm-1914.xml` (KMP LLVM 19.1.4 from `linhandev/mpcore-llvm-kmp`), `llvm-1917.xml` (OH LLVM 19.1.7 from `openharmony/third_party_llvm-project`). Uses `repo init --standalone-manifest` with `file://` path; no separate manifest git repo needed.
+- **Manifest selection**: CI input `llvm_manifest` selects manifest file from `manifest/` directory. Options: `llvm-1914.xml` and `llvm-1914-bare.xml` (KMP LLVM 19.1.4 from `linhandev/mpcore-llvm-kmp`), `llvm-1917.xml` (OH LLVM 19.1.7 from `openharmony/third_party_llvm-project`). Uses `repo init --standalone-manifest` with `file://` path; no separate manifest git repo needed.
 - **Persistent LLVM workspace** under the job checkout when not cleaning; **`~/gitlab-runner/cache`** for sysroot/ccache, not the main monorepo tree.
 - **ccache** is configured inline in [**`scripts/ci/llvm-build.sh`**](scripts/ci/llvm-build.sh): exports `CMAKE_{C,CXX}_COMPILER_LAUNCHER=ccache` (CMake 3.21+ reads these from env; OH `build.py` never sets them via `-D`). Default `CCACHE_DIR=${CCACHE_DIR:-~/gitlab-runner/cache/llvm-ccache}`, `max_size=10G`. CI jobs or `config.toml` can pre-set `CCACHE_DIR` when `$HOME` inside the container differs from the host (Docker root → `/root/…`). Docker runners must bind-mount **`~/gitlab-runner/cache`** into the container at the path matching the container's `$HOME`.
 - **Conditional `env_prepare`** when the tree lacks bootstrap markers.
