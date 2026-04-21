@@ -92,6 +92,8 @@ workflow:
         - .gitlab-ci.yml
         - .gitlab/ci/kotlin.yml
         - .github/workflows/build-kotlin.yml
+        - .github/workflows/build-kotlin-linux-image.yml
+        - infra/docker/kotlin-linux-builder/**/*
         - scripts/ci/kotlin-build.sh
         - scripts/ci/kotlin-hap-smoke-test.sh
         - scripts/proxy.init.gradle

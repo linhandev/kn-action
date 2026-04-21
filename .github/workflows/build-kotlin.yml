@@ -33,6 +33,7 @@ on:
       - 'scripts/proxy.init.gradle'
       - 'scripts/rewrite-gradle-wrapper-reposlite.sh'
       - 'patches/kotlin-js-tests-npmSetRegistry.patch'
+      - 'infra/docker/kotlin-linux-builder/**'
 
 # default or global config
 env:
@@ -59,14 +60,22 @@ jobs:
         include:
           - runner: [self-hosted, macOS, ARM64, kotlin]
             shell: bash
+            container_image: ''
           - runner: [self-hosted, macOS, X64, kotlin]
             shell: bash
+            container_image: ''
           - runner: [self-hosted, linux, X64, kotlin]
             shell: bash
+            container_image: ghcr.io/${{ github.repository_owner }}/kn-action-kotlin-linux-builder:latest
           # Self-hosted Windows: `shell: bash` is not on PATH; use Git for Windows bash (see build-llvm.yml).
           - runner: [self-hosted, Windows, X64, kotlin]
             shell: 'C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
+            container_image: ''
     runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.container_image }}
+      volumes:
+        - ${{ github.workspace }}/../../../artifact:/home/runner/runner/artifact
     defaults:
       run:
         shell: ${{ matrix.shell }}
@@ -78,20 +87,21 @@ jobs:
 
       - name: Set up Java 8
         id: java8
+        if: matrix.container_image == ''
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '8'
 
       - name: Set up Java 11
-        if: (runner.os == 'macOS' && runner.arch == 'X64') || runner.os == 'Windows'
+        if: matrix.container_image == '' && ((runner.os == 'macOS' && runner.arch == 'X64') || runner.os == 'Windows')
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '11'
 
       - name: Set up Java 17
-        if: runner.os == 'Linux' || (runner.os == 'macOS' && runner.arch == 'ARM64')
+        if: matrix.container_image == '' && (runner.os == 'Linux' || (runner.os == 'macOS' && runner.arch == 'ARM64'))
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -99,11 +109,20 @@ jobs:
 
       - name: Set up Java 21
         # Kotlin build-ohos Gradle step uses a Java 21 toolchain; Linux and Windows need it on PATH (Windows cannot auto-provision from Gradle).
-        if: runner.os == 'Linux' || runner.os == 'Windows'
+        if: matrix.container_image == '' && (runner.os == 'Linux' || runner.os == 'Windows')
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
+
+      - name: Resolve JDK_18 path for Kotlin build
+        id: jdk_kotlin
+        run: |
+          if [ -n "${{ matrix.container_image }}" ]; then
+            echo "path=/usr/lib/jvm/zulu-8" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=${{ steps.java8.outputs.path }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup environment
         id: vars
@@ -336,7 +355,7 @@ jobs:
           KONAN_DATA_DIR: ${{ steps.vars.outputs.konan_data_dir }}
           # Xcode toolchain for macOS only; do not set globally (Windows would inherit a bogus macOS path).
           DEVELOPER_DIR: ${{ runner.os == 'macOS' && '/Applications/Xcode-26.2.app/Contents/Developer/' || '' }}
-          JDK_18: ${{ steps.java8.outputs.path }}
+          JDK_18: ${{ steps.jdk_kotlin.outputs.path }}
           MAVEN_OPTS: -Duser.home=${{ steps.vars.outputs.maven_user_home }}
           GRADLE_OPTS: "-Dorg.gradle.internal.repository.max.tentatives=16 -Dorg.gradle.internal.repository.initial.backoff=5000"
         run: |

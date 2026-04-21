@@ -4,7 +4,7 @@
 # Use fresh OH LLVM for Konan: pipeline input kotlin_use_fresh_llvm → KOTLIN_USE_FRESH_LLVM (root .gitlab-ci.yml).
 # MR: changes under CI roots (.gitlab, .github, scripts, manifest, patches) or root .gitlab-ci.yml → Kotlin (LLVM pipeline may run too).
 # Runners: kotlin + OS + arch (AGENTS.md). GitCode SSH: scripts/ci/kotlin-build.sh (GITCODE_SSH_PRIVATE_KEY or ~/.ssh).
-# Linux Kotlin (build:kotlin:linux:x64): shell executor on the host — not Docker (llvm-linux-x64 uses Docker + image:).
+# Linux Kotlin (build:kotlin:linux:x64): Docker image ghcr.io/<owner>/kn-action-kotlin-linux-builder (same JDKs as GHA setup-java; see infra/docker/kotlin-linux-builder).
 #
 # llvm:provide-artifacts is optional on needs when LLVM stages are omitted.
 
@@ -38,12 +38,21 @@
     GIT_DEPTH: "0"
     GIT_CLEAN_FLAGS: "-ffd"
 
+.kotlin-linux-builder-image:
+  image:
+    name: ghcr.io/linhandev/kn-action-kotlin-linux-builder:latest
+    pull_policy: if-not-present
+
 build:kotlin:linux:x64:
-  extends: .kotlin-build-common
+  extends:
+    - .kotlin-build-common
+    - .kotlin-linux-builder-image
   tags:
     - kotlin
     - linux
     - x64
+  variables:
+    FF_NETWORK_PER_BUILD: "false"
   artifacts:
     reports:
       dotenv: ci-workspace/kotlin-version.env
