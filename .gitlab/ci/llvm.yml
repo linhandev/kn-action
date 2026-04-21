@@ -18,7 +18,7 @@
   variables:
     GIT_STRATEGY: fetch
     GIT_DEPTH: "0"
-    GIT_CLEAN_FLAGS: "-ffd -e llvm/ -e bin/"
+    GIT_CLEAN_FLAGS: "-ffd -e llvm-* -e llvm/ -e bin/"
     MANIFEST_FILE: "$LLVM_MANIFEST"
 
 .llvm-build-rules:

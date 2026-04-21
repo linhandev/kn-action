@@ -55,10 +55,11 @@ case "$PLATFORM" in
     ;;
 esac
 
-export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/llvm}"
-LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
 export REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
 export MANIFEST_FILE="${MANIFEST_FILE:-llvm-1914.xml}"
+export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/${MANIFEST_FILE%.xml}}"
+LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
+log_info "LLVM_WORKSPACE=$LLVM_WORKSPACE (manifest=$MANIFEST_FILE)"
 
 if [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
   rm -rf "$LLVM_WORKSPACE"
@@ -69,26 +70,44 @@ git config --global --add safe.directory '*' 2>/dev/null || true
 git config --global user.email "ci@ci.ci" 2>/dev/null || true
 git config --global user.name "ci" 2>/dev/null || true
 
+export REPO_URL="${REPO_URL:-https://gitee.com/oschina/repo.git}"
 log_info "setup-repo-tool"
 bash "$CI_PROJECT_DIR/scripts/setup-repo-tool.sh"
 export PATH="$REPO_DIR:$PATH"
 
-if [ ! -d "$LLVM_WORKSPACE/.repo" ] || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
+# Check if .repo exists, manifest matches, and critical projects are checked out.
+_repo_valid() {
+  local repo_dir="$LLVM_WORKSPACE/.repo"
+  local manifest_marker="$repo_dir/.manifest_file"
+  [ -d "$repo_dir" ] && [ -f "$repo_dir/manifest.xml" ] && \
+  [ -f "$manifest_marker" ] && \
+  [ "$(cat "$manifest_marker")" = "$MANIFEST_FILE" ] && \
+  [ -d "$LLVM_WORKSPACE/toolchain/llvm-project" ] && \
+  [ -d "$LLVM_WORKSPACE/build" ]
+}
+
+if ! _repo_valid || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
   cd "$LLVM_WORKSPACE"
+  if [ -d "$LLVM_WORKSPACE/.repo" ]; then
+    if ! _repo_valid; then
+      log_warn "Removing stale .repo directory (manifest mismatch or incomplete)"
+    fi
+    rm -rf "$LLVM_WORKSPACE/.repo"
+  fi
   REFERENCE_FLAG=""
   ref_dir="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
   [ -d "$ref_dir" ] && REFERENCE_FLAG="--reference=$ref_dir"
   MANIFEST_PATH="$CI_PROJECT_DIR/manifest/$MANIFEST_FILE"
-  log_info "repo init --standalone-manifest (manifest=$MANIFEST_FILE)"
-  repo init --standalone-manifest -u "file://$MANIFEST_PATH" $REFERENCE_FLAG
+  log_info "repo init --standalone-manifest (manifest=$MANIFEST_FILE, repo-url=$REPO_URL)"
+  repo init --standalone-manifest -u "file://$MANIFEST_PATH" --repo-url="$REPO_URL" $REFERENCE_FLAG
+  echo "$MANIFEST_FILE" > "$LLVM_WORKSPACE/.repo/.manifest_file"
 else
-  log_warn "repo init skipped (.repo present, LLVM_CLEAN_BUILD not set)"
+  log_info "repo init skipped (.repo valid for manifest=$MANIFEST_FILE)"
 fi
 
 export GIT_TERMINAL_PROMPT=0
 cd "$LLVM_WORKSPACE"
 log_info "repo sync"
-# --force-sync: overwrite work trees when .repo/project-objects vs checkout disagree; required on reused runners.
 repo sync -c --force-sync -j 16
 log_info "toolchain/llvm-project last 5 commits (full id, title)"
 git -C "$LLVM_PROJECT_DIR" log -n 5 --format='%H %s' >&2 || log_warn "could not read git log for toolchain/llvm-project"
@@ -169,6 +188,7 @@ esac
 prebuilts_complete() {
   local ws="$LLVM_WORKSPACE"
   [ -x "$ws/prebuilts/cmake/${_CMAKE}/bin/cmake" ] &&
+  [ -d "$ws/prebuilts/cmake/${_CMAKE}/share" ] &&
   [ -x "$ws/prebuilts/build-tools/${_NINJA}/bin/ninja" ] &&
   [ -d "$ws/prebuilts/clang/ohos/${_CLANG}" ] &&
   [ -d "$ws/prebuilts/python3/${_PY3}" ]
