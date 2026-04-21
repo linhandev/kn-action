@@ -217,9 +217,19 @@ fi
 
 log_info "running build"
 cd "$LLVM_WORKSPACE"
+
 if [ -f "toolchain/llvm-project/llvm-build/build.sh" ]; then
   bash toolchain/llvm-project/llvm-build/build.sh
 elif [ -f "toolchain/llvm-project/llvm-build/build.py" ]; then
+  case "$PLATFORM" in
+    macos-arm64|macos-x64)
+      log_info "macOS: using system clang as host compiler (OH clang lacks libatomic for darwin host)"
+      CLANG_DIR="$LLVM_WORKSPACE/prebuilts/clang/ohos/${_CLANG}/clang-${CLANG_VERSION:-15.0.4}/bin"
+      mkdir -p "$CLANG_DIR"
+      ln -sf "$(command -v clang)" "$CLANG_DIR/clang" 2>/dev/null || true
+      ln -sf "$(command -v clang++)" "$CLANG_DIR/clang++" 2>/dev/null || true
+      ;;
+  esac
   python3 toolchain/llvm-project/llvm-build/build.py --no-build-riscv64 --no-build-loongarch64 --no-build-mipsel --no-build lldb-server --compression-format gz
 else
   log_error "No build script found in toolchain/llvm-project/llvm-build/"
