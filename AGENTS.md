@@ -108,11 +108,13 @@ Clone uses **SSH** to GitCode. Install **`~/.ssh`** (for the **user that runs th
 
 On **Windows**, if the runner runs as a service account, place keys under **that account’s** home (e.g. **`…/ServiceProfiles/NetworkService/.ssh`** or the service user you configure) and lock down private key ACLs.
 
-#### Linux (`kotlin`, shell executor)
+#### Linux (`kotlin`, Docker executor)
 
-**`kotlin-linux-x64`** uses **`executor = "shell"`** on the host (same model as **macOS** / **Windows** Kotlin runners), not Docker. The job runs as **whichever OS user runs `gitlab-runner`** (often **`gitlab-runner`**, **`HOME=/home/gitlab-runner`**), not necessarily your login user. Install **`id_ed25519`** (or **`id_rsa`**) and **`known_hosts`** under **`/home/gitlab-runner/.ssh`** (or that runner user’s home) and register the **public** key on GitCode — not only under **`/home/user/.ssh`**. If the Runner **daemon** is itself started from Docker, keys must appear **inside** the container (bind-mount host **`.ssh`** to **`/home/gitlab-runner/.ssh`** — see [**`infra/gitlab-runner/docker-compose.example.yml`**](infra/gitlab-runner/docker-compose.example.yml) and [**`infra/gitlab-runner/README.md`**](infra/gitlab-runner/README.md)). Alternatively set project CI/CD variable **`GITCODE_SSH_PRIVATE_KEY`** (full private key; prefer **file** / multiline). **`scripts/ci/kotlin-build.sh`** logs **`whoami`**, **`HOME`**, and **`~/.ssh`** at job start for verification.
+**`build:kotlin:linux:x64`** runs in **`ghcr.io/<repo-owner>/kn-action-kotlin-linux-builder:<tag>`** — the **`<tag>`** is a **short git SHA** pinned in [**.gitlab/ci/kotlin.yml**](.gitlab/ci/kotlin.yml); bump it when [**`infra/docker/kotlin-linux-builder/Dockerfile`**](infra/docker/kotlin-linux-builder/Dockerfile) changes and a new image is pushed (same idea as the LLVM Linux builder pin). The image supplies **Zulu 8** + **Temurin 17/21** (see the Dockerfile).
 
-Paths match **Host layout**: **`~/gitlab-runner/kotlin`** (**`builds_dir`**), **`~/gitlab-runner/cache`**, **`~/runner/artifact`** (with **`~`** expanded for the runner user).
+GitCode SSH inside the job container: default user is often **root** (`$HOME=/root`). Provide **`/root/.ssh`** (or **`GITCODE_SSH_PRIVATE_KEY`**) so **`scripts/ci/kotlin-build.sh`** can clone — same trust model as other Kotlin runners; bind-mount host **`.ssh`** into the build container if your runner uses Docker with volumes.
+
+Paths: align **`~/gitlab-runner/cache`** and **`~/runner/artifact`** with your runner’s volume mounts (see **Linux (`llvm`, Docker executor)** above for the bind-mount pattern).
 
 #### Windows (`kotlin`, Git Bash)
 

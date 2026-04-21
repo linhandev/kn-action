@@ -1,10 +1,10 @@
-# Kotlin OH build — port of .github/workflows/build-kotlin.yml (GitLab matrix).
+# Kotlin OH build — GitLab matrix (Linux uses Docker image below; macOS/Windows use runner JDKs).
 # Web/API: TARGET=kotlin → Kotlin only (no LLVM jobs). TARGET=llvm → LLVM stages then Kotlin build & HAP test.
 # LLVM jobs are excluded when LLVM_SKIP_PIPELINE=true (see .gitlab/ci/llvm.yml).
 # Use fresh OH LLVM for Konan: pipeline input kotlin_use_fresh_llvm → KOTLIN_USE_FRESH_LLVM (root .gitlab-ci.yml).
 # MR: changes under CI roots (.gitlab, .github, scripts, manifest, patches) or root .gitlab-ci.yml → Kotlin (LLVM pipeline may run too).
 # Runners: kotlin + OS + arch (AGENTS.md). GitCode SSH: scripts/ci/kotlin-build.sh (GITCODE_SSH_PRIVATE_KEY or ~/.ssh).
-# Linux Kotlin (build:kotlin:linux:x64): Docker image ghcr.io/<owner>/kn-action-kotlin-linux-builder (same JDKs as GHA setup-java; see infra/docker/kotlin-linux-builder).
+# Linux Kotlin (build:kotlin:linux:x64): ghcr.io/<owner>/kn-action-kotlin-linux-builder:<pin> — bump <pin> when Dockerfile changes and the image is rebuilt (short git SHA tag on ghcr).
 #
 # llvm:provide-artifacts is optional on needs when LLVM stages are omitted.
 
@@ -40,7 +40,7 @@
 
 .kotlin-linux-builder-image:
   image:
-    name: ghcr.io/linhandev/kn-action-kotlin-linux-builder:latest
+    name: ghcr.io/linhandev/kn-action-kotlin-linux-builder:8da0352
     pull_policy: if-not-present
 
 build:kotlin:linux:x64:
