@@ -154,6 +154,24 @@ if [ "$CLEAN_BUILD" = "true" ]; then
   mkdir -p "$MAVEN_USER_HOME/.m2"
 fi
 
+# Fail fast when using git@ (GitCode SSH) but no key was configured (see "kotlin-build CI identity" above).
+case "${REPO_URL:-}" in
+  git@*)
+    if [ -z "${GIT_SSH_COMMAND:-}" ]; then
+      cat >&2 <<'EOF'
+kotlin-build: cannot clone Kotlin over SSH — no private key for this job user.
+
+The shell executor runs as the GitLab Runner account (often "gitlab-runner", HOME=/home/gitlab-runner).
+SSH keys must live under THAT user's ~/.ssh (id_ed25519 or id_rsa), with the pubkey added on GitCode for CPF-KMP-CMP/kotlin.
+Keys installed only under another account (e.g. /home/user/.ssh) are not used.
+
+Alternatively set CI/CD variable GITCODE_SSH_PRIVATE_KEY to the private key (file-type / multiline; not masked in a way that strips newlines).
+EOF
+      exit 2
+    fi
+    ;;
+esac
+
 # --- prepare-repo (clone kotlin) ---
 export REPO_URL
 export BRANCH
@@ -514,6 +532,16 @@ for cand in \
   "$KOTLIN_ROOT/kotlin-native/konan/konan.properties"; do
   [ -f "$cand" ] && rewrite_konan_properties "$cand"
 done
+
+# kotlin-native/dependencies/build.gradle.kts — e.g. repositoryURL.set("https://maven.eazytec-cloud.com/nexus/repository/file-storage") → LAN raw mirror.
+DEPS_GRADLE_KTS="$KOTLIN_ROOT/kotlin-native/dependencies/build.gradle.kts"
+if [ -f "$DEPS_GRADLE_KTS" ]; then
+  cp "$DEPS_GRADLE_KTS" "${DEPS_GRADLE_KTS}.pre-mirror.bak"
+  sed -i.bak \
+    -e "s|https://maven\\.eazytec-cloud\\.com/nexus/repository/file-storage|${KONAN_PROXY_BASE}|g" \
+    "$DEPS_GRADLE_KTS"
+  echo "Rewrote file-storage URL in kotlin-native/dependencies/build.gradle.kts -> ${KONAN_PROXY_BASE}"
+fi
 
 echo "=== git diff --stat — before fresh LLVM (patch, wrapper, konan.properties) ==="
 git diff --no-ext-diff --stat --

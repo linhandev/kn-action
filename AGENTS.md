@@ -110,7 +110,9 @@ On **Windows**, if the runner runs as a service account, place keys under **that
 
 #### Linux (`kotlin`, shell executor)
 
-**`kotlin-linux-x64`** uses **`executor = "shell"`** on the host (same model as **macOS** / **Windows** Kotlin runners), not Docker. **`$HOME`** is the runner service user’s home. Install GitCode SSH under **`~/.ssh`** for that user; **`scripts/ci/kotlin-build.sh`** also honors **`GITCODE_SSH_PRIVATE_KEY`** (writes a key under the job’s **`RUNNER_TEMP`** when set). Paths match the table in **Host layout**: **`~/gitlab-runner/kotlin`** (**`builds_dir`**), **`~/gitlab-runner/cache`**, **`~/runner/artifact`**.
+**`kotlin-linux-x64`** uses **`executor = "shell"`** on the host (same model as **macOS** / **Windows** Kotlin runners), not Docker. The job runs as **whichever OS user runs `gitlab-runner`** (often **`gitlab-runner`**, **`HOME=/home/gitlab-runner`**), not necessarily your login user. Install **`id_ed25519`** (or **`id_rsa`**) and **`known_hosts`** under **`/home/gitlab-runner/.ssh`** (or that runner user’s home) and register the **public** key on GitCode — not only under **`/home/user/.ssh`**. If the Runner **daemon** is itself started from Docker, keys must appear **inside** the container (bind-mount host **`.ssh`** to **`/home/gitlab-runner/.ssh`** — see [**`infra/gitlab-runner/docker-compose.example.yml`**](infra/gitlab-runner/docker-compose.example.yml) and [**`infra/gitlab-runner/README.md`**](infra/gitlab-runner/README.md)). Alternatively set project CI/CD variable **`GITCODE_SSH_PRIVATE_KEY`** (full private key; prefer **file** / multiline). **`scripts/ci/kotlin-build.sh`** logs **`whoami`**, **`HOME`**, and **`~/.ssh`** at job start for verification.
+
+Paths match **Host layout**: **`~/gitlab-runner/kotlin`** (**`builds_dir`**), **`~/gitlab-runner/cache`**, **`~/runner/artifact`** (with **`~`** expanded for the runner user).
 
 ---
 
