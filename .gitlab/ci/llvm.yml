@@ -18,7 +18,7 @@
   variables:
     GIT_STRATEGY: fetch
     GIT_DEPTH: "0"
-    GIT_CLEAN_FLAGS: "-ffd -e llvm/ -e bin/"
+    GIT_CLEAN_FLAGS: "-ffd -e llvm-* -e llvm/ -e bin/"
     MANIFEST_FILE: "$LLVM_MANIFEST"
 
 .llvm-build-rules:
@@ -31,6 +31,7 @@
         - .gitlab-ci.yml
         - .gitlab/ci/llvm.yml
         - .gitlab/ci/prepare-repo.yml
+        - manifest/**/*
         - scripts/ci/llvm-build.sh
         - scripts/ci/llvm-cross-copy.sh
         - scripts/ci/llvm-provide-artifacts.sh
