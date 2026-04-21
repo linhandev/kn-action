@@ -140,46 +140,29 @@ ACT_SHA_SHORT="89dffca"
 
 log_info "three IDs: manifest=${MANIFEST_MD5} llvm=${LLVM_SHA_SHORT} act=${ACT_SHA_SHORT}"
 
-SKIP_BUILD="false"
+# Omitting LLVM/OHOS stages is only via GitLab LLVM_SKIP_PIPELINE (see .gitlab-ci.yml), not by probing the artifact server.
 FINAL_ARTIFACT=""
 
 if [ "${LLVM_CLEAN_BUILD:-false}" != "true" ]; then
   LLVM_MAJOR="${LLVM_MAJOR_FOR_PACKAGE:-19}"
   OH_VER="${OH_VERSION:-1}"
-  
+
   case "$PLATFORM" in
     linux)       FINAL_ARCH="x86_64"; FINAL_OS="linux" ;;
     macos-arm64) FINAL_ARCH="aarch64"; FINAL_OS="macos" ;;
     macos-x64)   FINAL_ARCH="x86_64"; FINAL_OS="macos" ;;
   esac
-  
+
   FINAL_ARTIFACT="llvm-${LLVM_MAJOR}-${FINAL_ARCH}-${FINAL_OS}-dev-oh-${OH_VER}_llvm-${LLVM_SHA_SHORT}_act-${ACT_SHA_SHORT}_manifest-${MANIFEST_MD5}.tar.gz"
-  
-  SERVER="${ARTIFACT_SERVER_URL:-http://192.168.3.5:8765}"
-  HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' "$SERVER/artifacts/$FINAL_ARTIFACT" 2>/dev/null || echo "000")"
-  
-  if [ "$HTTP_CODE" = "200" ]; then
-    log_info "Final artifact cached: $FINAL_ARTIFACT"
-    SKIP_BUILD="true"
-  else
-    log_info "Final artifact not cached (HTTP $HTTP_CODE); will build"
-  fi
 fi
 
 DOTENV="$CI_PROJECT_DIR/llvm-build-${PLATFORM}.env"
 {
-  echo "SKIP_BUILD=$SKIP_BUILD"
   echo "MANIFEST_MD5=$MANIFEST_MD5"
   echo "LLVM_SHA_SHORT=$LLVM_SHA_SHORT"
   echo "ACT_SHA_SHORT=$ACT_SHA_SHORT"
   echo "FINAL_ARTIFACT=$FINAL_ARTIFACT"
 } > "$DOTENV"
-
-if [ "$SKIP_BUILD" = "true" ]; then
-  log_info "Skipping build (cached artifact found)"
-  echo "Build skipped. Final artifact: $SERVER/artifacts/$FINAL_ARTIFACT"
-  exit 0
-fi
 
 log_info "Proceeding with build..."
 

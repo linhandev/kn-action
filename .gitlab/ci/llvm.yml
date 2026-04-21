@@ -1,8 +1,7 @@
-# LLVM pipeline: build → cross-copy (if builds ran) → provide-artifacts → test
+# LLVM pipeline: build → cross-copy → provide-artifacts → test
 #
 # Web + MR + scheduled clean for LLVM (no branch push pipeline; see root .gitlab-ci.yml workflow).
-# Build jobs check artifact server for cached final artifacts; skip compile if found.
-# Cross-copy runs only when at least one build job compiled (not skipped).
+# To omit LLVM/OHOS jobs entirely, set LLVM_SKIP_PIPELINE=true (pipeline input llvm_skip_pipeline); build jobs do not skip based on LAN artifact presence.
 # provide-artifacts aggregates final artifact names for downstream test jobs.
 
 .llvm-build-matrix-common:

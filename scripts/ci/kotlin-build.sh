@@ -468,9 +468,26 @@ for cand in \
   [ -f "$cand" ] && rewrite_konan_properties "$cand"
 done
 
+echo "=== git diff --stat — before fresh LLVM (patch, wrapper, konan.properties) ==="
+git diff --no-ext-diff --stat --
+
 install_fresh_llvm_for_konan "$PLATFORM"
 
-echo "=== git diff after kn-action Kotlin patches ==="
+echo "=== kotlin.native.llvm.default.* (kotlin-native/gradle.properties) — LLVM version switch uses sed here, not patches/ ==="
+if [ -f "$KOTLIN_ROOT/kotlin-native/gradle.properties" ]; then
+  grep '^kotlin\.native\.llvm\.default\.' "$KOTLIN_ROOT/kotlin-native/gradle.properties" 2>/dev/null | head -40 || echo "(no kotlin.native.llvm.default.* lines)"
+else
+  echo "(kotlin-native/gradle.properties missing)"
+fi
+if [ "${KOTLIN_USE_FRESH_LLVM:-true}" = "false" ]; then
+  echo "KOTLIN_USE_FRESH_LLVM=false (pipeline input kotlin_use_fresh_llvm): kotlin-native/gradle.properties was not rewritten to remote:public/<stem>. There is no LLVM switch in git diff below." >&2
+elif ! git diff --no-ext-diff --quiet -- kotlin-native/gradle.properties 2>/dev/null; then
+  echo "Fresh LLVM rewrote kotlin-native/gradle.properties — expect a hunk in the next diff." >&2
+elif [ "${KOTLIN_USE_FRESH_LLVM:-true}" != "false" ]; then
+  echo "No git diff for kotlin-native/gradle.properties (no archive resolved, download failed, or sed had no matching lines)." >&2
+fi
+
+echo "=== git diff — full tree after kn-action + fresh LLVM ==="
 git diff --no-ext-diff --
 
 BUILD_OHOS="$KOTLIN_ROOT/scripts/build-ohos.sh"

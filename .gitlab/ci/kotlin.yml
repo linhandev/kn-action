@@ -1,40 +1,17 @@
 # Kotlin OH build — port of .github/workflows/build-kotlin.yml (GitLab matrix).
 # Web/API: TARGET=kotlin → Kotlin only (no LLVM jobs). TARGET=llvm → LLVM stages then Kotlin build & HAP test.
-# LLVM jobs are excluded from the pipeline when LLVM_SKIP_PIPELINE=true (see .gitlab/ci/llvm.yml). Kotlin jobs then
-# set KOTLIN_USE_FRESH_LLVM=false via rules:variables below. With fresh LLVM on, kotlin-build.sh resolves archive names
-# from llvm-artifacts.env when present, else latest match on ARTIFACT_SERVER_URL (regex; see kotlin-build.sh).
+# LLVM jobs are excluded when LLVM_SKIP_PIPELINE=true (see .gitlab/ci/llvm.yml).
+# Use fresh OH LLVM for Konan: pipeline input kotlin_use_fresh_llvm → KOTLIN_USE_FRESH_LLVM (root .gitlab-ci.yml).
 # MR: changes under CI roots (.gitlab, .github, scripts, manifest, patches) or root .gitlab-ci.yml → Kotlin (LLVM pipeline may run too).
 # Runners: kotlin + OS + arch (AGENTS.md). Requires GITCODE_SSH_PRIVATE_KEY for kotlin clone.
 #
-# llvm:provide-artifacts is optional on needs; when LLVM stages are omitted, KOTLIN_USE_FRESH_LLVM=false and no llvm-artifacts.env.
+# llvm:provide-artifacts is optional on needs when LLVM stages are omitted.
 
 .kotlin-build-rules:
   rules:
-    # TARGET=llvm: more specific rules first (LLVM stages omitted from pipeline).
-    - if: '$CI_PIPELINE_SOURCE == "schedule" && $TARGET == "llvm" && $LLVM_SKIP_PIPELINE == "true"'
-      variables:
-        KOTLIN_USE_FRESH_LLVM: "false"
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $TARGET == "llvm"'
-      variables:
-        KOTLIN_USE_FRESH_LLVM: "true"
     - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "kotlin"'
-      variables:
-        KOTLIN_USE_FRESH_LLVM: "true"
-    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "llvm" && $LLVM_SKIP_PIPELINE == "true"'
-      variables:
-        KOTLIN_USE_FRESH_LLVM: "false"
     - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $TARGET == "llvm"'
-      variables:
-        KOTLIN_USE_FRESH_LLVM: "true"
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $LLVM_SKIP_PIPELINE == "true"'
-      changes:
-        - .gitlab-ci.yml
-        - .gitlab/**/*
-        - scripts/**/*
-        - manifest/**/*
-        - patches/**/*
-      variables:
-        KOTLIN_USE_FRESH_LLVM: "false"
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - .gitlab-ci.yml
@@ -42,8 +19,6 @@
         - scripts/**/*
         - manifest/**/*
         - patches/**/*
-      variables:
-        KOTLIN_USE_FRESH_LLVM: "true"
 
 .kotlin-build-common:
   stage: kotlin_build
@@ -51,7 +26,6 @@
   timeout: 6h
   extends: .kotlin-build-rules
   needs:
-    # Present only when TARGET=llvm (or MR touches LLVM); then Kotlin waits for llvm-artifacts.env.
     - job: llvm:provide-artifacts
       optional: true
       artifacts: true
@@ -62,7 +36,6 @@
     GIT_STRATEGY: fetch
     GIT_DEPTH: "0"
     GIT_CLEAN_FLAGS: "-ffd"
-    KOTLIN_USE_FRESH_LLVM: "true"
   before_script:
     - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     - ssh-keyscan -t ed25519,ecdsa,rsa gitcode.com >> ~/.ssh/known_hosts 2>/dev/null || true
