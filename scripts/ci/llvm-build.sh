@@ -7,6 +7,12 @@ set -euo pipefail
 : "${CI_PIPELINE_ID:?}"
 source "$CI_PROJECT_DIR/scripts/ci/logging.sh"
 
+export REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
+export REPO_URL="${REPO_URL:-https://mirrors.tuna.tsinghua.edu.cn/git/git-repo}"
+export MANIFEST_FILE="${MANIFEST_FILE:-llvm-1914.xml}"
+export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/${MANIFEST_FILE%.xml}}"
+export LOCAL_REFERENCE_DIR="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
+
 PLATFORM="${1:?usage: llvm-build.sh linux|macos-arm64|macos-x64}"
 log_info "start platform=$PLATFORM CI_JOB_NAME=${CI_JOB_NAME:-}"
 
@@ -55,9 +61,6 @@ case "$PLATFORM" in
     ;;
 esac
 
-export REPO_DIR="${REPO_DIR:-${CI_PROJECT_DIR}/bin}"
-export MANIFEST_FILE="${MANIFEST_FILE:-llvm-1914.xml}"
-export LLVM_WORKSPACE="${LLVM_WORKSPACE:-${CI_PROJECT_DIR}/${MANIFEST_FILE%.xml}}"
 LLVM_PROJECT_DIR="$LLVM_WORKSPACE/toolchain/llvm-project"
 log_info "LLVM_WORKSPACE=$LLVM_WORKSPACE (manifest=$MANIFEST_FILE)"
 
@@ -94,11 +97,10 @@ if ! _repo_valid || [ "${LLVM_CLEAN_BUILD:-false}" = "true" ]; then
     rm -rf "$LLVM_WORKSPACE/.repo"
   fi
   REFERENCE_FLAG=""
-  ref_dir="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/llvm-project-kmp}"
-  [ -d "$ref_dir" ] && REFERENCE_FLAG="--reference=$ref_dir"
-  MANIFEST_REPO_URL="${MANIFEST_REPO_URL:-http://192.168.3.6:8929/linhandev/kn-action.git}"
-  log_info "repo init -u $MANIFEST_REPO_URL -m $MANIFEST_FILE"
-  repo init -u "$MANIFEST_REPO_URL" -m "$MANIFEST_FILE" $REFERENCE_FLAG
+  [ -d "$LOCAL_REFERENCE_DIR" ] && REFERENCE_FLAG="--reference=$LOCAL_REFERENCE_DIR"
+  MANIFEST_PATH="$CI_PROJECT_DIR/manifest/$MANIFEST_FILE"
+  log_info "repo init --standalone-manifest (manifest=$MANIFEST_FILE)"
+  repo init --standalone-manifest -u "file://$MANIFEST_PATH" $REFERENCE_FLAG
   echo "$MANIFEST_FILE" > "$LLVM_WORKSPACE/.repo/.manifest_file"
 else
   log_info "repo init skipped (.repo valid for manifest=$MANIFEST_FILE)"
