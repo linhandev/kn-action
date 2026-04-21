@@ -40,6 +40,11 @@ RUNNER_TEMP="${RUNNER_TEMP:-${CI_PROJECT_DIR}/.ci-tmp/runner-temp}"
 mkdir -p "$RUNNER_TEMP"
 export RUNNER_TEMP
 
+# Volume-mounted checkouts may be owned by another uid (e.g. prior shell-executor jobs vs Docker root).
+if command -v git >/dev/null 2>&1; then
+  git config --global --add safe.directory '*' 2>/dev/null || git config --global --add safe.directory "$CI_PROJECT_DIR" 2>/dev/null || true
+fi
+
 # Job identity (which OS user / HOME the runner uses — compare with ~/.ssh on that account).
 echo "=== kotlin-build CI identity ===" >&2
 echo "whoami=$(whoami 2>/dev/null || true)" >&2
