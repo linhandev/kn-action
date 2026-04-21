@@ -114,6 +114,13 @@ On **Windows**, if the runner runs as a service account, place keys under **that
 
 Paths match **Host layout**: **`~/gitlab-runner/kotlin`** (**`builds_dir`**), **`~/gitlab-runner/cache`**, **`~/runner/artifact`** (with **`~`** expanded for the runner user).
 
+#### Windows (`kotlin`, Git Bash)
+
+| Item | Notes |
+|------|--------|
+| **JDK 8** + **JDK 21** (or 17) | Required on the host — **`scripts/ci/kotlin-build.sh`** does not download JDKs. Typical install: **`winget install -e --id EclipseAdoptium.Temurin.8.JDK`** and **`EclipseAdoptium.Temurin.21.JDK`**. Layout under **`C:\Program Files\Eclipse Adoptium\`** (`jdk-8*`, `jdk-21*`) matches auto-detect; override with **`JAVA_HOME` / `JAVA_HOME_21`** and **`JDK_18` / `JAVA_HOME_8`** if you use non-default paths. |
+| **Git Bash** | Same as other Windows Kotlin jobs — **`pipefail`**, paths as in the matrix table. |
+
 ---
 
 ## Product goals (scripts + pipelines)
@@ -169,7 +176,7 @@ GitLab and runners are **LAN-only**. URLs use the GitLab host’s **static LAN I
 |------|--------|
 | **Web UI (LAN)** | `http://192.168.3.6:8929` |
 | **Web UI (public)** | `http://139.159.236.211:11000` — same instance, different route |
-| **`glab` CLI** | **Do NOT configure `GITLAB_HOST` or use `--hostname` flag** — the self-hosted GitLab serves HTTP, not HTTPS. Let `glab` use its default remote detection from the repo's `gl` remote URL (SSH `git@192.168.3.6:2222`). Commands like `glab ci status -R linhandev/kn-action` work without host overrides. |
+| **`glab` CLI** | **One-time default instance** (then omit `--hostname` on every command): from the repo, run **`glab auth login`** and paste a token when prompted, **or** set **`glab config set host http://192.168.3.6:8929`** (and optionally **`glab config set api_protocol http`**) to match this LAN GitLab. You can also set **`GITLAB_TOKEN`**. Prefer the **`gl`** remote’s project path for **`-R`** (e.g. `glab ci status -R group/kn-action`). Avoid conflicting **`GITLAB_HOST`**/`HTTPS` assumptions — this server is **HTTP** on port **8929**. |
 | **Git over SSH** | `git@192.168.3.6`, port **2222** (GitLab shell in Docker; host SSH stays **22**) |
 | **Deployment** | Docker **`gitlab/gitlab-ce`**, data under **`~/gitlab/`** on **`linux`** |
 | **Operator notes** | **`~/gitlab/SETUP.txt`** on **`linux`** — e.g. **`docker restart gitlab`**; initial root password via **`docker exec gitlab grep '^Password:' /etc/gitlab/initial_root_password`** |

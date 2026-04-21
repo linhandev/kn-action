@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GitLab CI port of .github/workflows/build-kotlin.yml (matrix: linux-x64, macos-arm64, macos-x64, windows-x64).
-# Requires: GitCode SSH for kotlin clone; JDK 8 + modern JDK per platform. Linux/Windows CI may bootstrap Temurin 8/21 via Adoptium if missing.
+# Requires: GitCode SSH for kotlin clone; JDK 8 (JDK_18) and a modern JDK (JAVA_HOME) installed on the runner — no CI download/bootstrap.
 set -euo pipefail
 
 : "${CI_PROJECT_DIR:?}"
@@ -231,133 +231,6 @@ fi
 
 cd "$CI_PROJECT_DIR"
 
-# Linux shell executors may have no JDK installed. Download Temurin to persisted cache (Gradle needs 17/21; build-ohos needs 8).
-# Override: KOTLIN_ADOPTIUM_JDK8_URL / KOTLIN_ADOPTIUM_JDK21_URL (full tarball URL). Disable: KOTLIN_ADOPTIUM_BOOTSTRAP=false.
-kotlin_linux_install_adoptium_jdk() {
-  local major="${1:?}"
-  [ "$RUNNER_OS" = "Linux" ] || return 1
-  local arch url
-  case "${RUNNER_ARCH:-}" in
-    X64) arch=x64 ;;
-    ARM64) arch=aarch64 ;;
-    *) arch=x64 ;;
-  esac
-  case "$major" in
-    8) url="${KOTLIN_ADOPTIUM_JDK8_URL:-https://api.adoptium.net/v3/binary/latest/8/ga/linux/${arch}/jdk/hotspot/normal/eclipse}" ;;
-    21) url="${KOTLIN_ADOPTIUM_JDK21_URL:-https://api.adoptium.net/v3/binary/latest/21/ga/linux/${arch}/jdk/hotspot/normal/eclipse}" ;;
-    *) echo "kotlin_linux_install_adoptium_jdk: unsupported major: $major" >&2; return 1 ;;
-  esac
-  local root="${PERSISTED_CACHE_ROOT}/adoptium/linux-${arch}/jdk${major}"
-  mkdir -p "$root"
-  local dest
-  dest="$(find "$root" -maxdepth 1 -type d -name 'jdk-*' 2>/dev/null | head -1)"
-  if [ -n "$dest" ] && [ -x "$dest/bin/java" ]; then
-    echo "kotlin-build: reusing cached Adoptium ${major} at $dest" >&2
-    echo "$dest"
-    return 0
-  fi
-  echo "kotlin-build: downloading Temurin ${major} for linux/${arch}..." >&2
-  local t="${RUNNER_TEMP}/adoptium-jdk${major}.tgz"
-  curl -fsSL -o "$t" "$url"
-  shopt -s nullglob
-  rm -rf "${root}"/jdk-* 2>/dev/null || true
-  shopt -u nullglob
-  tar -xzf "$t" -C "$root"
-  rm -f "$t"
-  dest="$(find "$root" -maxdepth 1 -type d -name 'jdk-*' | head -1)"
-  if [ -z "$dest" ] || [ ! -x "$dest/bin/java" ]; then
-    echo "kotlin-build: Adoptium ${major} unpack failed under $root" >&2
-    ls -la "$root" >&2 || true
-    return 1
-  fi
-  echo "$dest"
-  return 0
-}
-
-kotlin_linux_adoptium_bootstrap_maybe() {
-  [ "$RUNNER_OS" = "Linux" ] || return 0
-  [ -n "${CI:-}" ] || return 0
-  [ "${KOTLIN_ADOPTIUM_BOOTSTRAP:-true}" = "false" ] && return 0
-  if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME}/bin/java" ]; then
-    local j
-    j="$(kotlin_linux_install_adoptium_jdk 21)" || return 1
-    export JAVA_HOME="$j"
-    export PATH="$JAVA_HOME/bin:$PATH"
-  fi
-  if [ -z "${JDK_18:-}" ] || [ ! -x "${JDK_18}/bin/java" ]; then
-    local j
-    j="$(kotlin_linux_install_adoptium_jdk 8)" || return 1
-    export JDK_18="$j"
-  fi
-  return 0
-}
-
-kotlin_windows_install_adoptium_jdk() {
-  local major="${1:?}"
-  [ "$RUNNER_OS" = "Windows" ] || return 1
-  local arch=x64 url root dest z
-  case "$major" in
-    8) url="${KOTLIN_ADOPTIUM_JDK8_URL_WIN:-https://api.adoptium.net/v3/binary/latest/8/ga/windows/${arch}/jdk/hotspot/normal/eclipse}" ;;
-    21) url="${KOTLIN_ADOPTIUM_JDK21_URL_WIN:-https://api.adoptium.net/v3/binary/latest/21/ga/windows/${arch}/jdk/hotspot/normal/eclipse}" ;;
-    *) echo "kotlin_windows_install_adoptium_jdk: unsupported major: $major" >&2; return 1 ;;
-  esac
-  root="${PERSISTED_CACHE_ROOT}/adoptium/windows-${arch}/jdk${major}"
-  mkdir -p "$root"
-  dest="$(find "$root" -maxdepth 1 -type d -name 'jdk-*' 2>/dev/null | head -1)"
-  if [ -n "$dest" ] && { [ -f "$dest/bin/java.exe" ] || [ -f "$dest/bin/java" ]; }; then
-    echo "kotlin-build: reusing cached Adoptium ${major} (Windows) at $dest" >&2
-    echo "$dest"
-    return 0
-  fi
-  echo "kotlin-build: downloading Temurin ${major} for windows/${arch}..." >&2
-  z="${RUNNER_TEMP}/adoptium-jdk${major}.zip"
-  curl -fsSL -o "$z" "$url"
-  shopt -s nullglob
-  rm -rf "${root}"/jdk-* 2>/dev/null || true
-  shopt -u nullglob
-  if command -v unzip >/dev/null 2>&1; then
-    unzip -q -o "$z" -d "$root"
-  else
-    local zwin rwin
-    zwin=$(cygpath -w "$z" 2>/dev/null || echo "$z")
-    rwin=$(cygpath -w "$root" 2>/dev/null || echo "$root")
-    powershell.exe -NoProfile -Command "Expand-Archive -LiteralPath \"$zwin\" -DestinationPath \"$rwin\" -Force"
-  fi
-  rm -f "$z"
-  dest="$(find "$root" -maxdepth 1 -type d -name 'jdk-*' | head -1)"
-  if [ -z "$dest" ] || { [ ! -f "$dest/bin/java.exe" ] && [ ! -f "$dest/bin/java" ]; }; then
-    echo "kotlin-build: Adoptium ${major} unpack failed under $root" >&2
-    ls -la "$root" >&2 || true
-    return 1
-  fi
-  echo "$dest"
-  return 0
-}
-
-kotlin_windows_adoptium_bootstrap_maybe() {
-  [ "$RUNNER_OS" = "Windows" ] || return 0
-  [ -n "${CI:-}" ] || return 0
-  [ "${KOTLIN_ADOPTIUM_BOOTSTRAP:-true}" = "false" ] && return 0
-  _win_java_home_ok() {
-    [ -n "${1:-}" ] && { [ -f "${1}/bin/java.exe" ] || [ -f "${1}/bin/java" ]; }
-  }
-  if _win_java_home_ok "${JAVA_HOME:-}" && _win_java_home_ok "${JDK_18:-}"; then
-    return 0
-  fi
-  if ! _win_java_home_ok "${JAVA_HOME:-}"; then
-    local j
-    j="$(kotlin_windows_install_adoptium_jdk 21)" || return 1
-    export JAVA_HOME="$j"
-    export PATH="$JAVA_HOME/bin:$PATH"
-  fi
-  if ! _win_java_home_ok "${JDK_18:-}"; then
-    local j
-    j="$(kotlin_windows_install_adoptium_jdk 8)" || return 1
-    export JDK_18="$j"
-  fi
-  return 0
-}
-
 # --- Java toolchains (match GHA setup-java order: default `java` = last installed) ---
 # CI variables JAVA_HOME, JDK_18, JAVA_HOME_8, JAVA_HOME_11, JAVA_HOME_17, JAVA_HOME_21 override auto-detect.
 if [ -z "${JDK_18:-}" ] && [ -n "${JAVA_HOME_8:-}" ]; then
@@ -432,14 +305,25 @@ elif [ "$RUNNER_OS" = "Windows" ]; then
   [ -n "${JAVA_HOME_21:-}" ] && export JAVA_HOME="$JAVA_HOME_21"
 fi
 
-if [ "$RUNNER_OS" = "Linux" ] && [ -n "${CI:-}" ]; then
-  if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME}/bin/java" ] || [ -z "${JDK_18:-}" ] || [ ! -x "${JDK_18}/bin/java" ]; then
-    kotlin_linux_adoptium_bootstrap_maybe
-  fi
-fi
+# Linux/Windows shell CI: require preinstalled JDKs (no download in this script).
+_kotlin_java_bin_ok() {
+  local home="${1:?}"
+  [ -x "${home}/bin/java" ] || [ -x "${home}/bin/java.exe" ] || [ -f "${home}/bin/java.exe" ]
+}
 
-if [ "$RUNNER_OS" = "Windows" ] && [ -n "${CI:-}" ]; then
-  kotlin_windows_adoptium_bootstrap_maybe
+if [ -n "${CI:-}" ] && { [ "$RUNNER_OS" = "Linux" ] || [ "$RUNNER_OS" = "Windows" ]; }; then
+  if [ -z "${JAVA_HOME:-}" ] || ! _kotlin_java_bin_ok "$JAVA_HOME"; then
+    cat >&2 <<'EOF'
+kotlin-build: JAVA_HOME is unset or has no bin/java. Install a modern JDK (e.g. 17 or 21) on the runner, or set JAVA_HOME / JAVA_HOME_21.
+EOF
+    exit 2
+  fi
+  if [ -z "${JDK_18:-}" ] || ! _kotlin_java_bin_ok "$JDK_18"; then
+    cat >&2 <<'EOF'
+kotlin-build: JDK_18 is unset or has no bin/java. Install JDK 8 on the runner, or set JDK_18 / JAVA_HOME_8.
+EOF
+    exit 2
+  fi
 fi
 
 [ -n "${JAVA_HOME:-}" ] && export PATH="$JAVA_HOME/bin:$PATH"
