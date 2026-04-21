@@ -607,7 +607,8 @@ if [ -f "$DEPS_GRADLE_KTS" ]; then
 fi
 
 echo "=== git diff --stat — before fresh LLVM (patch, wrapper, konan.properties) ==="
-git diff --no-ext-diff --stat --
+# Use explicit pathspec (.) — bare trailing `--` alone can make git(1) treat stdin as the diff (Linux).
+git diff --no-ext-diff --stat -- .
 
 install_fresh_llvm_for_konan "$PLATFORM"
 
@@ -626,7 +627,7 @@ elif [ "${KOTLIN_USE_FRESH_LLVM:-true}" != "false" ]; then
 fi
 
 echo "=== git diff — full tree after kn-action + fresh LLVM ==="
-git diff --no-ext-diff --
+git diff --no-ext-diff -- .
 
 BUILD_OHOS="$KOTLIN_ROOT/scripts/build-ohos.sh"
 if [ -f "$BUILD_OHOS" ]; then
