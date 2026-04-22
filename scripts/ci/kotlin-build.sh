@@ -22,11 +22,11 @@ case "$PLATFORM" in
 esac
 
 # --- defaults (match build-kotlin.yml env) ---
-export DEFAULT_KOTLIN_BRANCH="${DEFAULT_KOTLIN_BRANCH:-develop-2.2.21-OH}"
+export DEFAULT_KOTLIN_BRANCH="${DEFAULT_KOTLIN_BRANCH:-switch-llvm}"
 export DEFAULT_CLEAN_BUILD="${DEFAULT_CLEAN_BUILD:-false}"
 export DEFAULT_MAVEN_PROXY_URL="${DEFAULT_MAVEN_PROXY_URL:-http://192.168.3.5:8080/releases}"
 export DEFAULT_GRADLE_DISTRIBUTIONS_URL="${DEFAULT_GRADLE_DISTRIBUTIONS_URL:-http://192.168.3.5:8080/distributions}"
-export REPO_URL="${REPO_URL:-git@gitcode.com:CPF-KMP-CMP/kotlin.git}"
+export REPO_URL="${REPO_URL:-git@gitcode.com:linhandev/kotlin.git}"
 export WORKSPACE_DIR="${WORKSPACE_DIR:-ci-workspace}"
 export LOCAL_REFERENCE_DIR="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/}"
 export PERSISTED_CACHE_ROOT="${PERSISTED_CACHE_ROOT:-$HOME/gitlab-runner/cache}"
@@ -212,6 +212,13 @@ cd "$CI_PROJECT_DIR"
 
 KOTLIN_ROOT="${CI_PROJECT_DIR}/${WORKSPACE_DIR}"
 KOTLIN_SHA="$(git -C "$KOTLIN_ROOT" rev-parse HEAD)"
+echo "=== Kotlin sync completed ==="
+echo "Repository: $REPO_URL"
+echo "Branch: ${BRANCH:-<detached/commit>}"
+echo "HEAD: $KOTLIN_SHA"
+echo "Last 5 commits after Kotlin sync:"
+GIT_PAGER=cat git -C "$KOTLIN_ROOT" log -n 5 --date=iso --pretty=format:'%h %ad %an %s' || true
+echo "=== End Kotlin sync summary ==="
 
 # --- patch ---
 PATCH="$CI_PROJECT_DIR/patches/kotlin-js-tests-npmSetRegistry.patch"
