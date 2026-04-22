@@ -21,20 +21,21 @@ case "$PLATFORM" in
   *) echo "Unknown platform: $PLATFORM" >&2; exit 1 ;;
 esac
 
-# --- defaults (match build-kotlin.yml env) ---
-export DEFAULT_KOTLIN_BRANCH="${DEFAULT_KOTLIN_BRANCH:-switch-llvm}"
+# --- defaults ---
 export DEFAULT_CLEAN_BUILD="${DEFAULT_CLEAN_BUILD:-false}"
 export DEFAULT_MAVEN_PROXY_URL="${DEFAULT_MAVEN_PROXY_URL:-http://192.168.3.5:8080/releases}"
 export DEFAULT_GRADLE_DISTRIBUTIONS_URL="${DEFAULT_GRADLE_DISTRIBUTIONS_URL:-http://192.168.3.5:8080/distributions}"
-export REPO_URL="${REPO_URL:-git@gitcode.com:linhandev/kotlin.git}"
 export WORKSPACE_DIR="${WORKSPACE_DIR:-ci-workspace}"
 export LOCAL_REFERENCE_DIR="${LOCAL_REFERENCE_DIR:-$HOME/git/ci/}"
 export PERSISTED_CACHE_ROOT="${PERSISTED_CACHE_ROOT:-$HOME/gitlab-runner/cache}"
 export ARTIFACT_LOCAL_PATH="${ARTIFACT_LOCAL_PATH:-$HOME/runner/artifact}"
 
-export BRANCH="${KOTLIN_BRANCH:-$DEFAULT_KOTLIN_BRANCH}"
-export COMMIT="${KOTLIN_COMMIT:-}"
-export PR_NUMBER="${KOTLIN_PR_NUMBER:-}"
+# Kotlin sync inputs from pipeline/manual run.
+KOTLIN_SYNC_ORIGIN="${KOTLIN_ORIGIN:-}"
+KOTLIN_SYNC_BRANCH="${KOTLIN_BRANCH:-}"
+KOTLIN_SYNC_COMMIT="${KOTLIN_COMMIT:-}"
+KOTLIN_SYNC_PR_NUMBER="${KOTLIN_PR_NUMBER:-}"
+: "${KOTLIN_SYNC_ORIGIN:?KOTLIN_ORIGIN must be set (pipeline input kotlin_origin)}"
 
 RUNNER_TEMP="${RUNNER_TEMP:-${CI_PROJECT_DIR}/.ci-tmp/runner-temp}"
 mkdir -p "$RUNNER_TEMP"
@@ -184,7 +185,7 @@ if [ "$CLEAN_BUILD" = "true" ]; then
 fi
 
 # Fail fast when using git@ (GitCode SSH) but no key was configured (see "kotlin-build CI identity" above).
-case "${REPO_URL:-}" in
+case "${KOTLIN_SYNC_ORIGIN:-}" in
   git@*)
     if [ -z "${GIT_SSH_COMMAND:-}" ]; then
       cat >&2 <<'EOF'
@@ -199,11 +200,22 @@ EOF
     ;;
 esac
 
+# Force-discard local changes in reused workspace before prepare-repo.
+# This avoids "local changes would be overwritten by checkout" on self-hosted runners.
+if [ -d "${CI_PROJECT_DIR}/${WORKSPACE_DIR}/.git" ]; then
+  echo "kotlin-build: forcing clean workspace before sync: ${CI_PROJECT_DIR}/${WORKSPACE_DIR}" >&2
+  if ! git -C "${CI_PROJECT_DIR}/${WORKSPACE_DIR}" reset --hard HEAD 2>/dev/null \
+    || ! git -C "${CI_PROJECT_DIR}/${WORKSPACE_DIR}" clean -ffdx 2>/dev/null; then
+    echo "kotlin-build: pre-sync clean failed; removing workspace for fresh clone" >&2
+    rm -rf "${CI_PROJECT_DIR}/${WORKSPACE_DIR}"
+  fi
+fi
+
 # --- prepare-repo (clone kotlin) ---
-export REPO_URL
-export BRANCH
-export COMMIT
-export PR_NUMBER
+export REPO_URL="${KOTLIN_SYNC_ORIGIN}"
+export BRANCH="${KOTLIN_SYNC_BRANCH}"
+export COMMIT="${KOTLIN_SYNC_COMMIT}"
+export PR_NUMBER="${KOTLIN_SYNC_PR_NUMBER}"
 export WORKSPACE_DIR
 export LOCAL_REFERENCE_DIR
 # shellcheck source=/dev/null
@@ -213,8 +225,10 @@ cd "$CI_PROJECT_DIR"
 KOTLIN_ROOT="${CI_PROJECT_DIR}/${WORKSPACE_DIR}"
 KOTLIN_SHA="$(git -C "$KOTLIN_ROOT" rev-parse HEAD)"
 echo "=== Kotlin sync completed ==="
-echo "Repository: $REPO_URL"
-echo "Branch: ${BRANCH:-<detached/commit>}"
+echo "Repository: ${KOTLIN_SYNC_ORIGIN}"
+echo "Branch: ${KOTLIN_SYNC_BRANCH:-<detached/commit>}"
+echo "Input commit: ${KOTLIN_SYNC_COMMIT:-<empty>}"
+echo "Input PR: ${KOTLIN_SYNC_PR_NUMBER:-<empty>}"
 echo "HEAD: $KOTLIN_SHA"
 echo "Last 5 commits after Kotlin sync:"
 GIT_PAGER=cat git -C "$KOTLIN_ROOT" log -n 5 --date=iso --pretty=format:'%h %ad %an %s' || true

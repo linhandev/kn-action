@@ -32,6 +32,22 @@ spec:
       type: boolean
       default: true
       description: "When true, kotlin-build.sh resolves OH LLVM (llvm-artifacts.env, then LAN artifact server) and rewrites kotlin-native/gradle.properties. When false, Konan uses checkout defaults."
+    kotlin_origin:
+      type: string
+      default: "git@gitcode.com:linhandev/kotlin.git"
+      description: "Kotlin source remote URL for prepare-repo sync."
+    kotlin_branch:
+      type: string
+      default: "switch-llvm"
+      description: "Kotlin source branch for prepare-repo sync (used when commit is empty)."
+    kotlin_commit:
+      type: string
+      default: ""
+      description: "Optional exact Kotlin commit SHA to checkout (overrides branch head)."
+    kotlin_pr:
+      type: string
+      default: ""
+      description: "Optional Kotlin PR number to merge on top of branch during prepare-repo sync."
 ---
 # GitLab CI — kn-action (LAN). Runner fleet: AGENTS.md → "Four-host runner matrix".
 # prepare-repo tests: Kotlin runners only, three tags each (kotlin + OS + arch).
@@ -55,6 +71,10 @@ variables:
   LLVM_MANIFEST: "$[[ inputs.llvm_manifest ]]"
   LLVM_SKIP_PIPELINE: "$[[ inputs.llvm_skip_pipeline ]]"
   KOTLIN_USE_FRESH_LLVM: "$[[ inputs.kotlin_use_fresh_llvm ]]"
+  KOTLIN_ORIGIN: "$[[ inputs.kotlin_origin ]]"
+  KOTLIN_BRANCH: "$[[ inputs.kotlin_branch ]]"
+  KOTLIN_COMMIT: "$[[ inputs.kotlin_commit ]]"
+  KOTLIN_PR_NUMBER: "$[[ inputs.kotlin_pr ]]"
 
 # Windows shell (bash): GitLab Runner often runs as LocalSystem; the internal clone step may not
 # inherit the same PATH as an interactive session, so `mkdir`/`find` from Git usr\bin are missing.
